@@ -41,7 +41,7 @@ docker-compose --version  # verify installation
 
 # 3. Clone the AI Starter Kit repository into APP_DIR
 mkdir -p "$(dirname "$APP_DIR")"
-git clone "$REPO_URL" "$APP_DIR"
+git clone -b Ubunto-init "$REPO_URL" "$APP_DIR"
 
 # 4. Hardcode AWS region to us-east-1
 export AWS_DEFAULT_REGION="us-east-1"
