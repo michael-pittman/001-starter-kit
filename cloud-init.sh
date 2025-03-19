@@ -16,6 +16,9 @@ PARAM_NAMES=(
   "/aibuildkit/POSTGRES_PASSWORD"
 )
 
+# Add N8N community packages configuration
+echo "N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true" >> "$APP_DIR/.env"
+
 # 1. Update system and install required packages using apt
 apt-get update
 apt-get install -y \
