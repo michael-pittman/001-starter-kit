@@ -19,6 +19,9 @@ PARAM_NAMES=(
   "/aibuildkit/N8N_CORS_ENABLE"
   "/aibuildkit/N8N_HOST"
   "/aibuildkit/N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE"
+  "/aibuildkit/OPENAI_API_KEY"
+  "/aibuildkit/GROQ_API_KEY"
+  "/aibuildkit/ANTHROPIC_API_KEY"
 )
 
 # Function to log messages with timestamps
@@ -117,12 +120,13 @@ fi
 
 # 8. Allocate subdirectories on EFS for each service and set permissions
 log "Setting up EFS directories and permissions..."
-mkdir -p /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
+mkdir -p /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant /mnt/efs/crawl4ai
 chown -R 1000:1000 /mnt/efs/n8n       # n8n container runs as non-root (uid 1000)
 chown -R 999:999   /mnt/efs/postgres   # Postgres container (uid 999)
 chown -R 0:0     /mnt/efs/ollama       # Ollama runs as root
 chown -R 0:0     /mnt/efs/qdrant       # Qdrant runs as root (adjust if needed)
-chmod -R 770 /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant
+chown -R 1000:1000 /mnt/efs/crawl4ai   # Crawl4AI runs as appuser (uid 1000)
+chmod -R 770 /mnt/efs/n8n /mnt/efs/postgres /mnt/efs/ollama /mnt/efs/qdrant /mnt/efs/crawl4ai
 
 # 9. Set up GPU support for Ollama
 log "Checking for GPU support..."
@@ -185,12 +189,16 @@ log "Building qdrant image..."
 docker buildx build --platform linux/amd64 --cache-from qdrant/qdrant:latest --tag qdrant-with-curl:latest -f Dockerfile.qdrant . &
 QDRANT_PID=$!
 
+log "Building crawl4ai image..."
+docker buildx build --platform linux/amd64 --cache-from unclecode/crawl4ai:latest --tag crawl4ai-with-curl:latest -f Dockerfile.crawl4ai . &
+CRAWL4AI_PID=$!
+
 log "Building ollama image..."
 docker buildx build --platform linux/amd64 --cache-from ollama/ollama:latest --tag ollama-with-curl:latest -f Dockerfile.ollama . &
 OLLAMA_PID=$!
 
 # Wait for all builds to complete
-wait $N8N_PID $POSTGRES_PID $QDRANT_PID $OLLAMA_PID
+wait $N8N_PID $POSTGRES_PID $QDRANT_PID $CRAWL4AI_PID $OLLAMA_PID
 
 # Verify all images were built successfully
 log "Verifying image builds..."
@@ -202,6 +210,9 @@ if ! docker images | grep -q "postgres-with-curl"; then
 fi
 if ! docker images | grep -q "qdrant-with-curl"; then
     error_exit "qdrant image build failed"
+fi
+if ! docker images | grep -q "crawl4ai-with-curl"; then
+    error_exit "crawl4ai image build failed"
 fi
 if ! docker images | grep -q "ollama-with-curl"; then
     error_exit "ollama image build failed"
@@ -235,6 +246,7 @@ echo "AI Starter Kit deployment complete!"
 echo "Access n8n at: https://$PUBLIC_IP:5678/"
 echo "Access Ollama at: http://$PUBLIC_IP:11434/"
 echo "Access Qdrant at: http://$PUBLIC_IP:6333/"
+echo "Access Crawl4AI at: http://$PUBLIC_IP:11235/"
 echo "==============================================="
 
 # 14. Set up Spot Instance Termination Handling
