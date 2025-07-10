@@ -4,7 +4,7 @@ This repository contains an AI Starter Kit that can be deployed on AWS EC2 insta
 
 ## Architecture
 
-- **Services**: n8n, Ollama, PostgreSQL, Qdrant
+ - **Services**: n8n, Ollama, PostgreSQL, Qdrant, Crawl4AI
 - **Persistent Storage**: AWS EFS for all data
 - **Deployment Types**: CPU for testing, GPU for production
 - **Access**: HTTPS with self-signed certificates
@@ -63,6 +63,7 @@ This repository contains an AI Starter Kit that can be deployed on AWS EC2 insta
 Once the instance is running:
 - n8n: https://[instance-public-ip]:5678
 - Ollama: Available internally on port 11434
+- Crawl4AI: Available internally on port 11235
 
 ## Troubleshooting
 

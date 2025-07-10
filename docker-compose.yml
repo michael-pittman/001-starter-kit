@@ -25,6 +25,12 @@ volumes:
       type: "nfs"
       o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
       device: ":/qdrant"
+  crawl4ai_storage:
+    driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=${EFS_DNS},nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2"
+      device: ":/crawl4ai"
 
 networks:
   demo:
@@ -192,6 +198,40 @@ services:
           cpus: '0.5'
         reservations:
           memory: 256M
+          cpus: '0.25'
+
+  crawl4ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawl4ai
+      cache_from:
+        - unclecode/crawl4ai:latest
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    hostname: crawl4ai
+    container_name: crawl4ai
+    networks:
+      - demo
+    restart: unless-stopped
+    ports:
+      - "11235:11235"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11235/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
           cpus: '0.25'
 
   ollama:
