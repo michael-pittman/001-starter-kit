@@ -1,5 +1,4 @@
 # 🚀 AI SelfHost Kit - GPU-Optimized AWS Deployment 
-#[G E U S E](HTTPS://geuse.io)
 
 <div align="center">
 
