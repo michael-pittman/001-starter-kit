@@ -1,4 +1,4 @@
-# 🚀 AI Starter Kit - Intelligent AWS GPU Deployment
+# 🚀 AI SelfHost Kit - GPU-Optimized AWS Deployment 
 
 <div align="center">
 
@@ -38,64 +38,52 @@
 - **Real-time pricing** via AWS Pricing API
 - **Intelligent resource allocation** for optimal configurations
 
+### 🚀 **Production Features**
+- **EFS persistence** - Data survives spot interruptions
+- **CloudFront CDN** - Global content delivery
+- **Auto-scaling groups** - High availability
+- **Graceful spot termination** - 2-minute warning handling
+
 ---
 
-## 🚀 Quick Start
+## 🆕 Recent Improvements (v2.1)
 
-### Prerequisites
-- ✅ AWS CLI configured with appropriate permissions
-- ✅ Docker and Docker Compose installed
-- ✅ AWS account with GPU instance quota
+### 🔧 **AMI Selection Fixes**
+- **Fixed `InvalidAMIID.Malformed` errors** that were preventing deployments
+- **Enhanced variable handling** between configuration selection and instance launch
+- **Added comprehensive validation** to prevent deployment with missing values
+- **Improved error handling** with better debugging output
 
-### 1️⃣ **Configure Secrets**
+### 🌍 **Cross-Region Analysis**
+- **Multi-region pricing comparison** across 6 popular AWS regions
+- **Automatic region switching** to optimal configuration
+- **Enhanced availability checking** for instance types and AMIs per region
+- **Real-time regional pricing** analysis and display
+
+### 🧪 **Testing & Validation**
+- **New test suite** (`scripts/test-intelligent-selection.sh`) for validation without deployment
+- **Comprehensive testing** of AMI availability, instance types, and pricing analysis
+- **Cross-region testing** to validate multi-region selection logic
+- **Budget constraint testing** for various cost scenarios
+
+### 🚀 **Usage Examples**
 ```bash
-# Set up SSM parameters
-aws ssm put-parameter --name "/aibuildkit/OPENAI_API_KEY" --value "your-key" --type SecureString
-aws ssm put-parameter --name "/aibuildkit/n8n/ENCRYPTION_KEY" --value "your-key" --type SecureString
-aws ssm put-parameter --name "/aibuildkit/POSTGRES_PASSWORD" --value "your-password" --type SecureString
-aws ssm put-parameter --name "/aibuildkit/WEBHOOK_URL" --value "https://your-domain.com" --type SecureString
-```
-
-### 2️⃣ **Deploy with Intelligent Selection**
-```bash
-# 🤖 Auto-select optimal configuration (recommended)
+# Basic deployment (now works correctly)
 ./scripts/aws-deployment.sh
 
-# 🌍 Cross-region analysis for best pricing
+# Cross-region analysis for best pricing
 ./scripts/aws-deployment.sh --cross-region
 
-# 💰 Custom budget optimization
-./scripts/aws-deployment.sh --max-spot-price 1.50
+# Cross-region with budget constraint
+./scripts/aws-deployment.sh --cross-region --max-spot-price 1.50
 
-# 🎚️ Force specific architecture
-./scripts/aws-deployment.sh --instance-type g4dn.xlarge    # Intel x86_64
-./scripts/aws-deployment.sh --instance-type g5g.2xlarge   # ARM64 Graviton2
+# Test before deploying
+./scripts/test-intelligent-selection.sh --comprehensive
 ```
 
-### 3️⃣ **Access Your Services**
-After deployment, configure DNS CNAME records:
-- **n8n Workflows**: `https://n8n.geuse.io`
-- **Qdrant Vector DB**: `https://qdrant.geuse.io`
-- **Direct Access**: `http://YOUR-IP:5678` (n8n)
-
 ---
 
-## 📊 Intelligent Cost Analysis
-
-### 🎯 **Multi-Configuration Pricing**
-
-| Configuration | Architecture | On-Demand | Spot Instance | Price/Perf | Monthly Savings |
-|---------------|--------------|-----------|---------------|------------|-----------------|
-| **g5g.xlarge** | ARM64 Graviton2 | $0.95/hr | $0.38/hr | **171.1** 🎯 | **$410.40** |
-| **g4dn.xlarge** | Intel x86_64 | $1.19/hr | $0.45/hr | 155.6 | $324.00 |
-| **g5g.2xlarge** | ARM64 Graviton2 | $1.90/hr | $0.75/hr | 106.7 | $324.00 |
-| **g4dn.2xlarge** | Intel x86_64 | $2.38/hr | $0.89/hr | 95.5 | $428.40 |
-
-**🤖 Intelligent Selection**: Automatically chooses g5g.xlarge for best price/performance ratio
-
----
-
-## 🏗️ Architecture Overview
+## 📊 Architecture Overview
 
 ```mermaid
 graph TB
@@ -140,6 +128,79 @@ graph TB
 
 ---
 
+## 🛠️ Quick Start
+
+### Prerequisites
+- ✅ AWS CLI configured with appropriate permissions
+- ✅ Docker and Docker Compose installed
+- ✅ AWS account with GPU instance quota
+- ✅ jq and bc utilities (auto-installed if missing)
+
+### 1️⃣ **Configure Secrets**
+Store your API keys in AWS Systems Manager:
+
+```bash
+# Set up SSM parameters
+aws ssm put-parameter --name "/aibuildkit/OPENAI_API_KEY" --value "your-key" --type SecureString
+aws ssm put-parameter --name "/aibuildkit/n8n/ENCRYPTION_KEY" --value "your-key" --type SecureString
+aws ssm put-parameter --name "/aibuildkit/POSTGRES_PASSWORD" --value "your-password" --type SecureString
+aws ssm put-parameter --name "/aibuildkit/WEBHOOK_URL" --value "https://your-domain.com" --type SecureString
+```
+
+### 2️⃣ **Choose Your Deployment Strategy**
+
+#### **Option A: Intelligent Spot Deployment (Recommended) 🎯**
+```bash
+# 🤖 Auto-select optimal configuration (Intel x86_64 or ARM64)
+./scripts/aws-deployment.sh
+
+# 💰 Custom budget optimization
+./scripts/aws-deployment.sh --max-spot-price 1.50
+
+# 🎚️ Force specific architecture
+./scripts/aws-deployment.sh --instance-type g4dn.xlarge    # Intel x86_64
+./scripts/aws-deployment.sh --instance-type g5g.2xlarge   # ARM64 Graviton2
+
+# 🌍 Regional optimization
+./scripts/aws-deployment.sh --region us-west-2
+
+# 🌍 Cross-region analysis for best pricing
+./scripts/aws-deployment.sh --cross-region
+
+# 🌍 Cross-region with budget constraint
+./scripts/aws-deployment.sh --cross-region --max-spot-price 1.50
+```
+
+#### **Option B: Simple On-Demand Deployment**
+```bash
+# Deploy with on-demand instances (reliable, higher cost)
+./scripts/aws-deployment-simple.sh
+
+# Customize deployment
+./scripts/aws-deployment-simple.sh \
+  --region us-west-2 \
+  --instance-type g4dn.2xlarge
+```
+
+#### **Option C: Full On-Demand Deployment**
+```bash
+# Deploy with guaranteed on-demand instances
+./scripts/aws-deployment-ondemand.sh
+
+# Customize deployment
+./scripts/aws-deployment-ondemand.sh \
+  --region us-west-2 \
+  --instance-type g4dn.2xlarge
+```
+
+### 3️⃣ **Access Your Services**
+After deployment, configure DNS CNAME records:
+- **n8n Workflows**: `https://n8n.geuse.io`
+- **Qdrant Vector DB**: `https://qdrant.geuse.io`
+- **Direct Access**: `http://YOUR-IP:5678` (n8n)
+
+---
+
 ## 💡 Local Development
 
 For local testing and development, use the CPU profile:
@@ -154,6 +215,30 @@ docker compose --profile cpu up
 # - Qdrant: http://localhost:6333
 # - Crawl4AI: http://localhost:11235
 ```
+
+---
+
+## 📈 Intelligent Cost Analysis
+
+### 🎯 **Multi-Configuration Pricing**
+
+| Configuration | Architecture | On-Demand | Spot Instance | Price/Perf | Monthly Savings |
+|---------------|--------------|-----------|---------------|------------|-----------------|
+| **g5g.xlarge** | ARM64 Graviton2 | $0.95/hr | $0.38/hr | **171.1** 🎯 | **$410.40** |
+| **g4dn.xlarge** | Intel x86_64 | $1.19/hr | $0.45/hr | 155.6 | $324.00 |
+| **g5g.2xlarge** | ARM64 Graviton2 | $1.90/hr | $0.75/hr | 106.7 | $324.00 |
+| **g4dn.2xlarge** | Intel x86_64 | $2.38/hr | $0.89/hr | 95.5 | $428.40 |
+
+**🤖 Intelligent Selection**: Automatically chooses g5g.xlarge for best price/performance ratio
+
+### 🎯 **Cost Optimization Features**
+- ✅ **🤖 Intelligent Selection** - Auto-chooses optimal configuration
+- ✅ **💰 Real-time Pricing** - Live spot price analysis across all AZs and regions
+- ✅ **🏗️ Multi-Architecture** - Intel x86_64 and ARM64 Graviton2 support
+- ✅ **🎯 Price/Performance** - Optimized ratio calculation
+- ✅ **🛡️ Budget Enforcement** - Respects max spot price constraints
+- ✅ **⚡ Multi-AZ Optimization** - Deploys in lowest-cost availability zone
+- ✅ **🌍 Cross-Region Analysis** - Finds optimal region for pricing and availability
 
 ---
 
@@ -174,7 +259,7 @@ docker compose --profile cpu up
 /aibuildkit/n8n/USER_MANAGEMENT_JWT_SECRET # JWT secret for user management
 ```
 
-### Resource Allocation
+### Resource Allocation (Intelligent Selection)
 
 #### **G4DN Instances (Intel x86_64 + NVIDIA T4)**
 ```yaml
@@ -224,39 +309,6 @@ GPU Memory (T4G 16GB):
 
 ---
 
-## 📊 Monitoring & Analytics
-
-### GPU Monitoring
-```bash
-# Real-time GPU metrics
-curl http://YOUR-IP:6333/healthz  # Qdrant health
-curl http://YOUR-IP:11434/api/tags  # Ollama models
-curl http://YOUR-IP:5678/healthz  # n8n health
-```
-
-### Intelligent Selection Demo
-```bash
-# See intelligent selection in action (no AWS required)
-./scripts/simple-demo.sh
-
-# Test enhanced selection with cross-region analysis (no AWS required)
-./scripts/test-intelligent-selection.sh --comprehensive
-
-# Generate cost report
-python3 scripts/cost-optimization.py --action report
-
-# Monitor optimization
-tail -f /var/log/cost-optimization.log
-```
-
-### CloudWatch Metrics
-- **GPU Utilization** - Auto-scaling trigger
-- **Cost per Hour** - Real-time cost tracking
-- **Instance Health** - Availability monitoring
-- **Workload Efficiency** - Performance analytics
-
----
-
 ## 🚨 Spot Instance Management
 
 ### Interruption Handling
@@ -276,59 +328,40 @@ tail -f /var/log/cost-optimization.log
 
 ---
 
-## 🆘 Troubleshooting
+## 📊 Monitoring & Analytics
 
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| **Spot instance not launching** | Check spot price limits and availability |
-| **Intelligent selection fails** | Verify AMI availability in selected region |
-| **InvalidAMIID.Malformed errors** | Use `--cross-region` for better region selection |
-| **GPU not detected** | Verify NVIDIA drivers and Docker GPU runtime |
-| **EFS mount failures** | Check security groups and VPC configuration |
-| **High costs** | Review auto-scaling policies and spot pricing |
-| **Deployment script errors** | Check AWS CLI permissions and region settings |
-| **ARM64 compatibility issues** | Ensure containers support ARM64 architecture |
-| **Region capacity constraints** | Enable cross-region analysis with `--cross-region` |
-
-### Debug Commands
+### GPU Monitoring
 ```bash
-# Test intelligent selection (no AWS required)
-./scripts/simple-demo.sh
-
-# Check service status
-docker compose -f docker-compose.gpu-optimized.yml ps
-
-# View logs
-docker compose -f docker-compose.gpu-optimized.yml logs ollama
-
-# Monitor GPU usage
-nvidia-smi
-
-# Check cost optimization
-python3 scripts/cost-optimization.py --action report
-
-# Verify AWS resources
-aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
-
-# Check intelligent selection details
-./scripts/aws-deployment.sh --help
-
-# Test AMI selection fixes and cross-region analysis
-./scripts/test-intelligent-selection.sh --comprehensive
+# Real-time GPU metrics
+curl http://YOUR-IP:6333/healthz  # Qdrant health
+curl http://YOUR-IP:11434/api/tags  # Ollama models
+curl http://YOUR-IP:5678/healthz  # n8n health
 ```
 
----
+### Intelligent Selection Demo
+```bash
+# See intelligent selection in action (no AWS required)
+./scripts/simple-demo.sh
 
-## 📚 Documentation
+# Test enhanced selection with cross-region analysis (no AWS required)
+./scripts/test-intelligent-selection.sh --comprehensive
 
-For detailed information, see the documentation in the [`docs/`](docs/) directory:
+# Test specific scenarios
+./scripts/test-intelligent-selection.sh --cross-region
+./scripts/test-intelligent-selection.sh --budget 1.50
 
-- **[Development Guide](docs/CLAUDE.md)** - Comprehensive development guide with architecture overview, commands, and troubleshooting
-- **[Deployment Improvements](docs/DEPLOYMENT_IMPROVEMENTS.md)** - Comprehensive improvements to deployment system, optimization scripts, and validation tools
-- **[Intelligent Deployment Summary](docs/INTELLIGENT_DEPLOYMENT_SUMMARY.md)** - Overview of AI-powered deployment system with intelligent configuration selection
-- **[AMI Selection Fixes](docs/AMI_SELECTION_FIXES.md)** - Detailed fixes for AMI selection issues and cross-region analysis features
+# Generate cost report
+python3 scripts/cost-optimization.py --action report
+
+# Monitor optimization
+tail -f /var/log/cost-optimization.log
+```
+
+### CloudWatch Metrics
+- **GPU Utilization** - Auto-scaling trigger
+- **Cost per Hour** - Real-time cost tracking
+- **Instance Health** - Availability monitoring
+- **Workload Efficiency** - Performance analytics
 
 ---
 
@@ -417,6 +450,51 @@ aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerN
 - **EFS Mount Targets**: Ensure all mount targets are deleted before deleting file system
 - **IAM Role Dependencies**: Remove role from instance profile before deleting role
 - **CloudFront Distributions**: Must be disabled before deletion
+
+---
+
+## 🆘 Troubleshooting
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| **Spot instance not launching** | Check spot price limits and availability |
+| **Intelligent selection fails** | Verify AMI availability in selected region |
+| **InvalidAMIID.Malformed errors** | Use `--cross-region` for better region selection |
+| **GPU not detected** | Verify NVIDIA drivers and Docker GPU runtime |
+| **EFS mount failures** | Check security groups and VPC configuration |
+| **High costs** | Review auto-scaling policies and spot pricing |
+| **Deployment script errors** | Check AWS CLI permissions and region settings |
+| **ARM64 compatibility issues** | Ensure containers support ARM64 architecture |
+| **Region capacity constraints** | Enable cross-region analysis with `--cross-region` |
+
+### Debug Commands
+```bash
+# Test intelligent selection (no AWS required)
+./scripts/simple-demo.sh
+
+# Check service status
+docker compose -f docker-compose.gpu-optimized.yml ps
+
+# View logs
+docker compose -f docker-compose.gpu-optimized.yml logs ollama
+
+# Monitor GPU usage
+nvidia-smi
+
+# Check cost optimization
+python3 scripts/cost-optimization.py --action report
+
+# Verify AWS resources
+aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
+
+# Check intelligent selection details
+./scripts/aws-deployment.sh --help
+
+# Test AMI selection fixes and cross-region analysis
+./scripts/test-intelligent-selection.sh --comprehensive
+```
 
 ---
 
