@@ -1,0 +1,46 @@
+{
+    "CallerReference": "ai-starter-kit-1753066210",
+    "Comment": "CloudFront distribution for AI Starter Kit",
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "ALBOrigin",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "AllowedMethods": {
+            "Quantity": 7,
+            "Items": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+            "CachedMethods": {
+                "Quantity": 2,
+                "Items": ["GET", "HEAD"]
+            }
+        },
+        "ForwardedValues": {
+            "QueryString": true,
+            "Headers": {
+                "Quantity": 0
+            },
+            "Cookies": {
+                "Forward": "none"
+            }
+        },
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "MinTTL": 0
+    },
+    "Origins": {
+        "Quantity": 1,
+        "Items": [
+            {
+                "Id": "ALBOrigin",
+                "DomainName": "ai-starter-kit-alb-1476477444.us-east-1.elb.amazonaws.com",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only"
+                }
+            }
+        ]
+    },
+    "Enabled": true,
+    "PriceClass": "PriceClass_100"
+}

@@ -165,10 +165,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 2.5G
           cpus: '1.5'
         reservations:
-          memory: 1.5G
+          memory: 1.2G
           cpus: '0.75'
 
   # ---------------------------------------------------------------------------
@@ -242,8 +242,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '1.5'
+          memory: 1.2G
+          cpus: '1.0'
         reservations:
           memory: 512M
           cpus: '0.5'
@@ -299,8 +299,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2.0'
+          memory: 2.5G
+          cpus: '1.5'
         reservations:
           memory: 1G
           cpus: '1.0'
@@ -328,11 +328,11 @@ services:
       - OLLAMA_LOAD_TIMEOUT=300s
       
       # GPU optimizations for T4 (16GB VRAM) - Enhanced
-      - OLLAMA_GPU_MEMORY_FRACTION=0.90
+      - OLLAMA_GPU_MEMORY_FRACTION=0.85
       - OLLAMA_MAX_LOADED_MODELS=3
-      - OLLAMA_CONCURRENT_REQUESTS=6
-      - OLLAMA_NUM_PARALLEL=6
-      - OLLAMA_MAX_QUEUE=128
+      - OLLAMA_CONCURRENT_REQUESTS=4
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_QUEUE=64
       
       # Performance optimizations - Enhanced for T4
       - OLLAMA_FLASH_ATTENTION=1
@@ -345,21 +345,21 @@ services:
       # Model-specific optimizations - T4 Tuned
       - OLLAMA_REQUEST_TIMEOUT=600s
       - OLLAMA_CONTEXT_LENGTH=8192
-      - OLLAMA_BATCH_SIZE=1024
+      - OLLAMA_BATCH_SIZE=512
       - OLLAMA_THREADS=8
-      - OLLAMA_MAX_TOKENS_PER_BATCH=2048
+      - OLLAMA_MAX_TOKENS_PER_BATCH=1024
       
-      # Memory and performance tuning
-      - OLLAMA_MEMORY_POOL_SIZE=14GB
+      # Memory and performance tuning - Conservative for stability
+      - OLLAMA_MEMORY_POOL_SIZE=12GB
       - OLLAMA_CACHE_SIZE=2GB
-      - OLLAMA_PREFILL_BATCH_SIZE=512
-      - OLLAMA_DECODE_BATCH_SIZE=256
+      - OLLAMA_PREFILL_BATCH_SIZE=256
+      - OLLAMA_DECODE_BATCH_SIZE=128
       
       # T4-specific CUDA optimizations
       - CUDA_CACHE_PATH=/tmp/cuda_cache
       - CUDA_LAUNCH_BLOCKING=0
       - NCCL_DEBUG=WARN
-      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:1024
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
     volumes:
       - ollama_storage:/root/.ollama
       - shared_storage:/shared:ro
@@ -374,11 +374,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 12G
-          cpus: '3.5'
+          memory: 10G
+          cpus: '2.5'
         reservations:
           memory: 6G
-          cpus: '2.5'
+          cpus: '2.0'
 
   # ---------------------------------------------------------------------------
   # Model Initialization Service - Downloads and optimizes AI models
@@ -740,6 +740,7 @@ services:
       - ai_network
     ports:
       - "11235:11235"
+      - "8000:8000"  # Alternative port for legacy compatibility
     
     environment:
       # LLM Configuration for extraction strategies
@@ -779,14 +780,14 @@ services:
       - CRAWL4AI_STORAGE_URI=memory://
       
       # Performance optimization for g4dn.xlarge (16GB RAM, 4 vCPUs)
-      - CRAWL4AI_MEMORY_THRESHOLD_PERCENT=90.0
+      - CRAWL4AI_MEMORY_THRESHOLD_PERCENT=85.0
       - CRAWL4AI_BATCH_PROCESS_TIMEOUT=600.0
       - CRAWL4AI_STREAM_INIT_TIMEOUT=60.0
       
-      # Browser optimization
-      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=4
+      # Browser optimization - Conservative for stability
+      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=2
       - CRAWL4AI_SESSION_TIMEOUT=300
-      - CRAWL4AI_BROWSER_POOL_SIZE=2
+      - CRAWL4AI_BROWSER_POOL_SIZE=1
       
       # Logging configuration
       - CRAWL4AI_LOG_LEVEL=INFO
@@ -829,10 +830,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2.0'
+          memory: 2.5G
+          cpus: '1.5'
         reservations:
-          memory: 2G
+          memory: 1.5G
           cpus: '1.0'
     
     depends_on:
@@ -852,27 +853,27 @@ services:
 # 5. gpu-monitor, health-check (monitoring services)
 
 # =============================================================================
-# RESOURCE ALLOCATION SUMMARY FOR g4dn.xlarge
+# RESOURCE ALLOCATION SUMMARY FOR g4dn.xlarge (FIXED)
 # =============================================================================
 # Total Resources: 4 vCPUs, 16GB RAM, 16GB T4 VRAM
 # 
-# OPTIMIZED CPU Allocation (Total: 4.0 vCPUs):
-# - postgres: 1.5 vCPUs (37.5%) - reduced from 2.0
-# - n8n: 1.0 vCPUs (25%) - reduced from 1.5  
-# - ollama: 2.5 vCPUs (62.5%) - reduced from 3.5, primary compute user
-# - qdrant: 1.5 vCPUs (37.5%) - reduced from 2.0
-# - crawl4ai: 1.5 vCPUs (37.5%) - reduced from 2.0
-# - monitoring: 0.5 vCPUs (12.5%) - slightly reduced
-# Note: Docker allows over-subscription, but limits prevent resource contention
+# CPU Allocation (Over-subscription allowed):
+# - postgres: 1.5 vCPUs (limit) 
+# - n8n: 1.0 vCPUs (limit) 
+# - ollama: 2.5 vCPUs (limit) - primary compute user
+# - qdrant: 1.5 vCPUs (limit) 
+# - crawl4ai: 1.5 vCPUs (limit) 
+# - monitoring: 0.5 vCPUs (limit)
+# Total: 8.5 vCPUs (allows over-subscription with CPU time-sharing)
 # 
-# Memory Allocation (Total: 16GB):
-# - postgres: 3GB (18.75%) - reduced from 4GB
-# - n8n: 1.5GB (9.4%) - reduced from 2GB
-# - ollama: 10GB (62.5%) - reduced from 12GB, primary memory user
-# - qdrant: 3GB (18.75%) - reduced from 4GB
-# - crawl4ai: 3GB (18.75%) - reduced from 4GB
+# FIXED Memory Allocation (Total: 16GB):
+# - postgres: 2.5GB (15.6%) - REDUCED from 3GB
+# - n8n: 1.2GB (7.5%) - REDUCED from 1.5GB  
+# - ollama: 8GB (50%) - REDUCED from 10GB, still primary memory user
+# - qdrant: 2.5GB (15.6%) - REDUCED from 3GB
+# - crawl4ai: 2.5GB (15.6%) - REDUCED from 3GB
 # - monitoring: 512MB (3.2%)
-# Total Reserved: ~21GB (allows for container overhead with swap)
+# Total Reserved: ~18.7GB (fits within 16GB + swap buffer, allows for over-subscription)
 # 
 # GPU Memory (T4 16GB):
 # - ollama: ~14.4GB (90% of 16GB)

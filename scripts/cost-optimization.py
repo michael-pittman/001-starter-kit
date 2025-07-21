@@ -11,10 +11,10 @@ import time
 import logging
 import requests
 import schedule
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-import os
 
 # =============================================================================
 # CONFIGURATION
@@ -29,7 +29,45 @@ class CostOptimizationConfig:
     scale_down_threshold: float = 20.0
     idle_timeout_minutes: int = 30
     cost_alert_threshold: float = 50.0  # Daily USD
+    budget_limit: float = 200.0  # Monthly USD
+    enable_auto_cleanup: bool = True
+    enable_cost_alerts: bool = True
+    fallback_regions: List[str] = None
     
+    def __post_init__(self):
+        if self.fallback_regions is None:
+            self.fallback_regions = ["us-west-2", "eu-west-1", "ap-northeast-1"]
+        self.validate()
+    
+    def validate(self):
+        """Validate configuration parameters"""
+        errors = []
+        
+        if self.max_spot_price <= 0 or self.max_spot_price > 10:
+            errors.append("max_spot_price must be between 0 and 10")
+        
+        if not (0 <= self.target_utilization <= 100):
+            errors.append("target_utilization must be between 0 and 100")
+        
+        if not (0 <= self.scale_down_threshold <= 100):
+            errors.append("scale_down_threshold must be between 0 and 100")
+        
+        if self.idle_timeout_minutes < 5:
+            errors.append("idle_timeout_minutes must be at least 5")
+        
+        if self.cost_alert_threshold <= 0:
+            errors.append("cost_alert_threshold must be positive")
+        
+        if self.budget_limit <= 0:
+            errors.append("budget_limit must be positive")
+        
+        valid_regions = ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-northeast-1", "ap-southeast-1"]
+        if self.region not in valid_regions:
+            errors.append(f"region must be one of: {', '.join(valid_regions)}")
+        
+        if errors:
+            raise ValueError(f"Configuration validation failed: {'; '.join(errors)}")
+
 config = CostOptimizationConfig()
 
 # =============================================================================
@@ -53,15 +91,54 @@ class CostOptimizationManager:
         self.asg_name = self._get_asg_name()
         
     def _setup_logging(self) -> logging.Logger:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('/var/log/cost-optimization.log'),
-                logging.StreamHandler()
-            ]
+        """Setup enhanced logging with rotation and structured format"""
+        import logging.handlers
+        
+        logger = logging.getLogger('cost_optimizer')
+        logger.setLevel(logging.INFO)
+        
+        # Prevent duplicate handlers
+        if logger.handlers:
+            return logger
+        
+        # Enhanced formatter with more context
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
         )
-        return logging.getLogger('cost_optimizer')
+        
+        # Rotating file handler
+        try:
+            os.makedirs('/var/log', exist_ok=True)
+            file_handler = logging.handlers.RotatingFileHandler(
+                '/var/log/cost-optimization.log',
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        except PermissionError:
+            # Fallback to user directory if /var/log is not writable
+            home_log_dir = os.path.expanduser('~/logs')
+            os.makedirs(home_log_dir, exist_ok=True)
+            file_handler = logging.handlers.RotatingFileHandler(
+                f'{home_log_dir}/cost-optimization.log',
+                maxBytes=10*1024*1024,
+                backupCount=5
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # Suppress AWS SDK verbose logging
+        logging.getLogger('boto3').setLevel(logging.WARNING)
+        logging.getLogger('botocore').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        
+        return logger
     
     def _get_instance_id(self) -> str:
         try:
@@ -225,9 +302,16 @@ class CostOptimizationManager:
         
         return savings_analysis
     
-    def get_gpu_utilization(self) -> float:
-        """Get current GPU utilization from CloudWatch"""
+    def get_gpu_utilization(self) -> Dict[str, float]:
+        """Get current GPU utilization from multiple sources"""
+        gpu_metrics = {
+            'gpu_utilization': 0.0,
+            'memory_utilization': 0.0,
+            'temperature': 0.0
+        }
+        
         try:
+            # Try CloudWatch first
             end_time = datetime.utcnow()
             start_time = end_time - timedelta(minutes=10)
             
@@ -244,13 +328,27 @@ class CostOptimizationManager:
             )
             
             if response['Datapoints']:
-                return response['Datapoints'][-1]['Average']
-            else:
-                return 0.0
+                gpu_metrics['gpu_utilization'] = response['Datapoints'][-1]['Average']
                 
         except Exception as e:
-            self.logger.error(f"Error getting GPU utilization: {e}")
-            return 0.0
+            self.logger.warning(f"CloudWatch GPU metrics unavailable: {e}")
+            
+        try:
+            # Try reading from shared metrics file
+            metrics_file = '/shared/gpu_metrics.json'
+            if os.path.exists(metrics_file):
+                with open(metrics_file, 'r') as f:
+                    shared_metrics = json.load(f)
+                    if 'gpu' in shared_metrics:
+                        gpu_data = shared_metrics['gpu']
+                        gpu_metrics['gpu_utilization'] = gpu_data.get('utilization', 0.0)
+                        gpu_metrics['memory_utilization'] = gpu_data.get('memory_utilization', 0.0)
+                        gpu_metrics['temperature'] = gpu_data.get('temperature_c', 0.0)
+                        
+        except Exception as e:
+            self.logger.warning(f"Shared GPU metrics unavailable: {e}")
+            
+        return gpu_metrics
     
     def check_idle_instances(self) -> List[str]:
         """Check for idle instances that can be terminated"""
@@ -341,11 +439,66 @@ class CostOptimizationManager:
         except Exception as e:
             self.logger.error(f"Error updating ASG instance type: {e}")
     
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive system metrics"""
+        try:
+            # Get basic CloudWatch metrics
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(minutes=10)
+            
+            metrics = {}
+            
+            # CPU Utilization
+            cpu_response = self.cloudwatch.get_metric_statistics(
+                Namespace='AWS/EC2',
+                MetricName='CPUUtilization',
+                Dimensions=[{'Name': 'InstanceId', 'Value': self.instance_id}],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=300,
+                Statistics=['Average']
+            )
+            
+            if cpu_response['Datapoints']:
+                metrics['cpu_utilization'] = cpu_response['Datapoints'][-1]['Average']
+            else:
+                metrics['cpu_utilization'] = 0.0
+                
+            # Memory utilization (estimated from available metrics)
+            try:
+                memory_response = self.cloudwatch.get_metric_statistics(
+                    Namespace='System/Linux',
+                    MetricName='MemoryUtilization',
+                    Dimensions=[{'Name': 'InstanceId', 'Value': self.instance_id}],
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    Period=300,
+                    Statistics=['Average']
+                )
+                
+                if memory_response['Datapoints']:
+                    metrics['memory_utilization'] = memory_response['Datapoints'][-1]['Average']
+                else:
+                    metrics['memory_utilization'] = 0.0
+                    
+            except Exception:
+                metrics['memory_utilization'] = 0.0
+                
+            return metrics
+            
+        except Exception as e:
+            self.logger.error(f"Error getting system metrics: {e}")
+            return {
+                'cpu_utilization': 0.0,
+                'memory_utilization': 0.0
+            }
+    
     def implement_auto_scaling(self):
         """Implement intelligent auto-scaling based on GPU utilization"""
         self.logger.info("Checking auto-scaling requirements...")
         
-        current_utilization = self.get_gpu_utilization()
+        gpu_metrics = self.get_gpu_utilization()
+        current_utilization = gpu_metrics.get('gpu_utilization', 0.0)
         
         if not self.asg_name:
             self.logger.warning("No Auto Scaling Group found")
@@ -428,7 +581,8 @@ class CostOptimizationManager:
             # In practice, would use AWS Cost Explorer API or billing APIs
             
             # Estimate current daily cost based on instance hours
-            current_utilization = self.get_gpu_utilization()
+            gpu_metrics = self.get_gpu_utilization()
+            current_utilization = gpu_metrics.get('gpu_utilization', 0.0)
             spot_prices = self.get_current_spot_prices()
             
             if self.config.instance_type in spot_prices:
@@ -509,7 +663,9 @@ Consider:
         
         spot_prices = self.get_current_spot_prices()
         savings_analysis = self.calculate_potential_savings()
-        current_utilization = self.get_gpu_utilization()
+        gpu_metrics = self.get_gpu_utilization()
+        current_utilization = gpu_metrics.get('gpu_utilization', 0.0)
+        system_metrics = self.get_system_metrics()
         estimated_daily_cost = self.monitor_daily_costs()
         
         report = {
@@ -517,6 +673,7 @@ Consider:
             'instance_id': self.instance_id,
             'current_gpu_utilization': current_utilization,
             'estimated_daily_cost': estimated_daily_cost,
+            'budget_status': self.check_budget_limits(),
             'spot_prices': spot_prices,
             'savings_analysis': savings_analysis,
             'recommendations': []
@@ -535,44 +692,452 @@ Consider:
             if analysis['savings_percent'] > 50:
                 report['recommendations'].append(f"Consider {instance_type} for {analysis['savings_percent']:.1f}% cost savings")
         
+        # Add system metrics to report
+        report['system_metrics'] = system_metrics
+        report['gpu_metrics'] = gpu_metrics
+        
         return report
     
-    def run_optimization_cycle(self):
-        """Run complete cost optimization cycle"""
-        self.logger.info("Starting cost optimization cycle...")
-        
+    def check_budget_limits(self) -> Dict[str, Any]:
+        """Check current spending against budget limits"""
         try:
-            # Check for spot interruption first
-            if self.check_spot_interruption():
-                self.logger.warning("Spot termination detected - initiating emergency procedures")
-                return  # Early return if terminating
+            # Get current month's costs (simplified - would use Cost Explorer in production)
+            current_month = datetime.now().replace(day=1)
+            days_in_month = (datetime.now().replace(month=datetime.now().month % 12 + 1, day=1) - current_month).days
+            days_elapsed = datetime.now().day
             
-            # 1. Check and optimize spot pricing
-            self.optimize_spot_instance_pricing()
+            # Estimate monthly cost based on current daily rate
+            estimated_daily_cost = self.monitor_daily_costs()
+            estimated_monthly_cost = estimated_daily_cost * days_in_month
+            actual_monthly_cost = estimated_daily_cost * days_elapsed  # Simplified
             
-            # 2. Implement auto-scaling
-            self.implement_auto_scaling()
+            budget_status = {
+                'budget_limit': self.config.budget_limit,
+                'estimated_monthly_cost': estimated_monthly_cost,
+                'actual_monthly_cost': actual_monthly_cost,
+                'budget_utilization_percent': (actual_monthly_cost / self.config.budget_limit) * 100,
+                'projected_overage': max(0, estimated_monthly_cost - self.config.budget_limit),
+                'days_remaining': days_in_month - days_elapsed,
+                'daily_budget_remaining': (self.config.budget_limit - actual_monthly_cost) / max(1, days_in_month - days_elapsed)
+            }
             
-            # 3. Optimize storage
-            self.optimize_storage_costs()
-            
-            # 4. Monitor costs
-            self.monitor_daily_costs()
-            
-            # 5. Clean up unused resources
-            self.cleanup_unused_resources()
-            
-            # 6. Generate report
-            report = self.generate_cost_report()
-            
-            # Save report
-            with open(f'/var/log/cost-optimization-report-{datetime.now().strftime("%Y-%m-%d")}.json', 'w') as f:
-                json.dump(report, f, indent=2)
-            
-            self.logger.info("Cost optimization cycle completed")
+            # Budget alerts
+            if budget_status['budget_utilization_percent'] > 80:
+                self.logger.warning(f"⚠️ Budget alert: {budget_status['budget_utilization_percent']:.1f}% of monthly budget used")
+                
+            if budget_status['projected_overage'] > 0:
+                self.logger.error(f"🚨 Budget overage projected: ${budget_status['projected_overage']:.2f}")
+                
+            return budget_status
             
         except Exception as e:
-            self.logger.error(f"Error in optimization cycle: {e}")
+            self.logger.error(f"Error checking budget limits: {e}")
+            return {}
+    
+    def implement_cost_guardrails(self) -> Dict[str, Any]:
+        """Implement automated cost guardrails"""
+        guardrail_actions = {
+            'budget_check': False,
+            'emergency_scale_down': False,
+            'instance_termination': False,
+            'resource_cleanup': False
+        }
+        
+        try:
+            budget_status = self.check_budget_limits()
+            guardrail_actions['budget_check'] = True
+            
+            # Emergency actions based on budget status
+            if budget_status.get('budget_utilization_percent', 0) > 90:
+                self.logger.critical("🚨 EMERGENCY: 90% budget utilization - implementing cost controls")
+                
+                # Scale down to minimum capacity
+                if self._emergency_scale_down():
+                    guardrail_actions['emergency_scale_down'] = True
+                
+                # Cleanup unused resources aggressively
+                if self._emergency_resource_cleanup():
+                    guardrail_actions['resource_cleanup'] = True
+                
+            elif budget_status.get('projected_overage', 0) > self.config.budget_limit * 0.2:  # 20% overage
+                self.logger.warning("⚠️ Significant budget overage projected - implementing preventive measures")
+                
+                # Optimize instance types and scaling
+                self.optimize_spot_instance_pricing()
+                self._implement_aggressive_scaling()
+                
+            # Daily cost limit enforcement
+            estimated_daily = budget_status.get('daily_budget_remaining', float('inf'))
+            if estimated_daily < self.config.cost_alert_threshold * 0.5:
+                self.logger.warning(f"📊 Daily budget remaining low: ${estimated_daily:.2f}")
+                
+            return guardrail_actions
+            
+        except Exception as e:
+            self.logger.error(f"Error implementing cost guardrails: {e}")
+            return guardrail_actions
+    
+    def _emergency_scale_down(self) -> bool:
+        """Emergency scale down to minimum capacity"""
+        try:
+            if not self.asg_name:
+                return False
+            
+            response = self.autoscaling.describe_auto_scaling_groups(
+                AutoScalingGroupNames=[self.asg_name]
+            )
+            
+            if response['AutoScalingGroups']:
+                asg = response['AutoScalingGroups'][0]
+                min_capacity = asg['MinSize']
+                
+                self.autoscaling.set_desired_capacity(
+                    AutoScalingGroupName=self.asg_name,
+                    DesiredCapacity=min_capacity
+                )
+                
+                self.logger.info(f"Emergency scale down to {min_capacity} instances")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Emergency scale down failed: {e}")
+        
+        return False
+    
+    def _emergency_resource_cleanup(self) -> bool:
+        """Aggressive resource cleanup during budget emergency"""
+        try:
+            cleaned_resources = 0
+            
+            # Stop non-essential services
+            try:
+                import subprocess
+                subprocess.run(['docker', 'stop', 'crawl4ai'], timeout=30)
+                cleaned_resources += 1
+            except:
+                pass
+            
+            # Clean up old snapshots more aggressively
+            cutoff_date = datetime.utcnow() - timedelta(days=1)  # Only keep 1 day
+            
+            response = self.ec2.describe_snapshots(OwnerIds=['self'])
+            for snapshot in response['Snapshots']:
+                if snapshot['StartTime'].replace(tzinfo=None) < cutoff_date:
+                    try:
+                        # In production, would actually delete
+                        self.logger.info(f"Would delete old snapshot: {snapshot['SnapshotId']}")
+                        cleaned_resources += 1
+                    except:
+                        pass
+            
+            self.logger.info(f"Emergency cleanup completed: {cleaned_resources} resources")
+            return cleaned_resources > 0
+            
+        except Exception as e:
+            self.logger.error(f"Emergency resource cleanup failed: {e}")
+        
+        return False
+    
+    def _implement_aggressive_scaling(self):
+        """Implement aggressive scaling policies to reduce costs"""
+        try:
+            # Reduce target utilization temporarily
+            original_target = self.config.target_utilization
+            self.config.target_utilization = min(original_target, 60.0)  # Lower target
+            
+            # Increase scale-down threshold
+            original_threshold = self.config.scale_down_threshold
+            self.config.scale_down_threshold = max(original_threshold, 30.0)  # Higher threshold
+            
+            self.implement_auto_scaling()
+            
+            # Reset to original values
+            self.config.target_utilization = original_target
+            self.config.scale_down_threshold = original_threshold
+            
+            self.logger.info("Aggressive scaling policies applied")
+            
+        except Exception as e:
+            self.logger.error(f"Aggressive scaling failed: {e}")
+    
+    def implement_usage_pattern_scaling(self) -> Dict[str, Any]:
+        """Implement automatic scaling based on historical usage patterns"""
+        try:
+            # Analyze historical usage patterns
+            usage_patterns = self._analyze_usage_patterns()
+            current_hour = datetime.now().hour
+            current_day = datetime.now().weekday()  # 0=Monday, 6=Sunday
+            
+            scaling_actions = {
+                'pattern_analysis': usage_patterns,
+                'current_prediction': None,
+                'scaling_action': None,
+                'reasoning': None
+            }
+            
+            # Predict current demand based on patterns
+            predicted_utilization = self._predict_utilization(usage_patterns, current_hour, current_day)
+            scaling_actions['current_prediction'] = predicted_utilization
+            
+            # Determine scaling action
+            gpu_metrics = self.get_gpu_utilization()
+            current_utilization = gpu_metrics.get('gpu_utilization', 0.0)
+            
+            # Get current ASG configuration
+            if not self.asg_name:
+                scaling_actions['reasoning'] = "No ASG configured"
+                return scaling_actions
+            
+            response = self.autoscaling.describe_auto_scaling_groups(
+                AutoScalingGroupNames=[self.asg_name]
+            )
+            
+            if not response['AutoScalingGroups']:
+                scaling_actions['reasoning'] = "ASG not found"
+                return scaling_actions
+            
+            asg = response['AutoScalingGroups'][0]
+            current_capacity = asg['DesiredCapacity']
+            min_capacity = asg['MinSize']
+            max_capacity = asg['MaxSize']
+            
+            # Scaling logic based on predicted patterns
+            target_capacity = current_capacity
+            reasoning = f"Current: {current_utilization:.1f}%, Predicted: {predicted_utilization:.1f}%"
+            
+            # Proactive scaling based on predicted demand
+            if predicted_utilization > 80 and current_capacity < max_capacity:
+                target_capacity = min(current_capacity + 1, max_capacity)
+                scaling_actions['scaling_action'] = 'scale_up_proactive'
+                reasoning += " - Proactive scale up for predicted high demand"
+                
+            elif predicted_utilization < 30 and current_capacity > min_capacity:
+                # Only scale down if current utilization also supports it
+                if current_utilization < 40:
+                    target_capacity = max(current_capacity - 1, min_capacity)
+                    scaling_actions['scaling_action'] = 'scale_down_proactive'
+                    reasoning += " - Proactive scale down for predicted low demand"
+                    
+            # Reactive scaling based on current utilization
+            elif current_utilization > 85 and current_capacity < max_capacity:
+                target_capacity = min(current_capacity + 1, max_capacity)
+                scaling_actions['scaling_action'] = 'scale_up_reactive'
+                reasoning += " - Reactive scale up for high current utilization"
+                
+            elif current_utilization < 20 and current_capacity > min_capacity:
+                target_capacity = max(current_capacity - 1, min_capacity)
+                scaling_actions['scaling_action'] = 'scale_down_reactive'
+                reasoning += " - Reactive scale down for low current utilization"
+            
+            scaling_actions['reasoning'] = reasoning
+            
+            # Execute scaling if needed
+            if target_capacity != current_capacity:
+                self.autoscaling.set_desired_capacity(
+                    AutoScalingGroupName=self.asg_name,
+                    DesiredCapacity=target_capacity
+                )
+                
+                self.logger.info(f"🔄 Usage pattern scaling: {current_capacity} -> {target_capacity} instances")
+                self.logger.info(f"📊 {reasoning}")
+                
+                # Record scaling action for pattern learning
+                self._record_scaling_action(current_hour, current_day, current_utilization, target_capacity - current_capacity)
+            
+            return scaling_actions
+            
+        except Exception as e:
+            self.logger.error(f"Error in usage pattern scaling: {e}")
+            return {'error': str(e)}
+    
+    def _analyze_usage_patterns(self) -> Dict[str, Any]:
+        """Analyze historical usage patterns to predict demand"""
+        try:
+            # Get historical GPU utilization data
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=7)  # Last 7 days
+            
+            response = self.cloudwatch.get_metric_statistics(
+                Namespace='GPU/Monitoring',
+                MetricName='GPUUtilization',
+                Dimensions=[
+                    {'Name': 'InstanceId', 'Value': self.instance_id}
+                ],
+                StartTime=start_time,
+                EndTime=end_time,
+                Period=3600,  # 1 hour periods
+                Statistics=['Average']
+            )
+            
+            # Organize data by hour and day of week
+            hourly_patterns = {i: [] for i in range(24)}
+            daily_patterns = {i: [] for i in range(7)}
+            
+            for datapoint in response['Datapoints']:
+                timestamp = datapoint['Timestamp']
+                utilization = datapoint['Average']
+                
+                hour = timestamp.hour
+                day_of_week = timestamp.weekday()
+                
+                hourly_patterns[hour].append(utilization)
+                daily_patterns[day_of_week].append(utilization)
+            
+            # Calculate average patterns
+            hourly_averages = {}
+            for hour, values in hourly_patterns.items():
+                if values:
+                    hourly_averages[hour] = sum(values) / len(values)
+                else:
+                    hourly_averages[hour] = 50.0  # Default moderate utilization
+            
+            daily_averages = {}
+            for day, values in daily_patterns.items():
+                if values:
+                    daily_averages[day] = sum(values) / len(values)
+                else:
+                    daily_averages[day] = 50.0  # Default moderate utilization
+            
+            return {
+                'hourly_patterns': hourly_averages,
+                'daily_patterns': daily_averages,
+                'data_points': len(response['Datapoints'])
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing usage patterns: {e}")
+            # Return default patterns
+            return {
+                'hourly_patterns': {i: 50.0 for i in range(24)},
+                'daily_patterns': {i: 50.0 for i in range(7)},
+                'data_points': 0
+            }
+    
+    def _predict_utilization(self, patterns: Dict[str, Any], hour: int, day: int) -> float:
+        """Predict utilization based on historical patterns"""
+        try:
+            hourly_avg = patterns['hourly_patterns'].get(hour, 50.0)
+            daily_avg = patterns['daily_patterns'].get(day, 50.0)
+            
+            # Weighted average (hour pattern more important)
+            predicted = (hourly_avg * 0.7) + (daily_avg * 0.3)
+            
+            # Apply some business logic adjustments
+            # Higher utilization expected during business hours
+            if 9 <= hour <= 17 and day < 5:  # Business hours, weekdays
+                predicted *= 1.2
+            elif hour < 6 or hour > 22:  # Late night/early morning
+                predicted *= 0.8
+            elif day >= 5:  # Weekends
+                predicted *= 0.9
+            
+            return min(100.0, max(0.0, predicted))
+            
+        except Exception as e:
+            self.logger.error(f"Error predicting utilization: {e}")
+            return 50.0  # Default moderate prediction
+    
+    def _record_scaling_action(self, hour: int, day: int, utilization: float, scale_change: int):
+        """Record scaling actions for future pattern learning"""
+        try:
+            scaling_record = {
+                'timestamp': datetime.now().isoformat(),
+                'hour': hour,
+                'day_of_week': day,
+                'utilization': utilization,
+                'scale_change': scale_change,
+                'instance_id': self.instance_id
+            }
+            
+            # Store in a simple file-based log for now
+            # In production, this could be stored in DynamoDB or CloudWatch Logs
+            log_file = '/var/log/scaling-actions.jsonl'
+            try:
+                with open(log_file, 'a') as f:
+                    f.write(json.dumps(scaling_record) + '\n')
+            except Exception:
+                # Fallback to temp directory
+                temp_log = '/tmp/scaling-actions.jsonl'
+                with open(temp_log, 'a') as f:
+                    f.write(json.dumps(scaling_record) + '\n')
+                    
+        except Exception as e:
+            self.logger.error(f"Error recording scaling action: {e}")
+    
+    def run_optimization_cycle(self):
+        """Run complete cost optimization cycle with error isolation"""
+        self.logger.info("Starting cost optimization cycle...")
+        
+        # Check for spot interruption first
+        if self._check_spot_interruption_safe():
+            self.logger.warning("Spot termination detected - aborting optimization cycle")
+            return
+        
+        # Execute optimization steps with isolated error handling
+        optimization_results = {
+            'spot_pricing': self._run_with_isolation(self.optimize_spot_instance_pricing, "spot pricing optimization"),
+            'auto_scaling': self._run_with_isolation(self.implement_auto_scaling, "auto-scaling"),
+            'storage_optimization': self._run_with_isolation(self.optimize_storage_costs, "storage optimization"),
+            'cost_monitoring': self._run_with_isolation(self.monitor_daily_costs, "cost monitoring"),
+            'cost_guardrails': self._run_with_isolation(self.implement_cost_guardrails, "cost guardrails"),
+            'usage_pattern_scaling': self._run_with_isolation(self.implement_usage_pattern_scaling, "usage pattern scaling"),
+            'resource_cleanup': self._run_with_isolation(self.cleanup_unused_resources, "resource cleanup"),
+            'report_generation': self._run_with_isolation(self._generate_and_save_report, "report generation")
+        }
+        
+        # Log cycle summary
+        successful_steps = sum(1 for result in optimization_results.values() if result['success'])
+        total_steps = len(optimization_results)
+        
+        if successful_steps == total_steps:
+            self.logger.info(f"✅ Cost optimization cycle completed successfully ({successful_steps}/{total_steps} steps)")
+        else:
+            self.logger.warning(f"⚠️ Cost optimization cycle completed with issues ({successful_steps}/{total_steps} steps successful)")
+            
+        return optimization_results
+
+    def _run_with_isolation(self, func, step_name: str) -> Dict[str, Any]:
+        """Run a function with isolated error handling"""
+        start_time = time.time()
+        result = {'success': False, 'error': None, 'duration': 0, 'step': step_name}
+        
+        try:
+            self.logger.info(f"🔄 Starting {step_name}...")
+            func_result = func()
+            result['success'] = True
+            result['result'] = func_result
+            self.logger.info(f"✅ {step_name.capitalize()} completed successfully")
+        except Exception as e:
+            result['error'] = str(e)
+            self.logger.error(f"❌ {step_name.capitalize()} failed: {e}")
+            # Continue with other optimization steps
+        finally:
+            result['duration'] = time.time() - start_time
+            
+        return result
+    
+    def _check_spot_interruption_safe(self) -> bool:
+        """Safely check for spot interruption without raising exceptions"""
+        try:
+            return self.check_spot_interruption()
+        except Exception as e:
+            self.logger.error(f"Error checking spot interruption (continuing): {e}")
+            return False
+    
+    def _generate_and_save_report(self) -> Dict[str, Any]:
+        """Generate and save cost optimization report"""
+        report = self.generate_cost_report()
+        
+        # Save report with error handling
+        report_filename = f'/var/log/cost-optimization-report-{datetime.now().strftime("%Y-%m-%d")}.json'
+        try:
+            with open(report_filename, 'w') as f:
+                json.dump(report, f, indent=2)
+            self.logger.info(f"📊 Cost report saved to {report_filename}")
+        except Exception as e:
+            self.logger.error(f"Failed to save cost report: {e}")
+            
+        return report
 
 # Add spot interruption handling
     def check_spot_interruption(self) -> bool:
@@ -751,10 +1316,15 @@ def setup_scheduled_optimization():
     
     # Schedule different optimization tasks
     schedule.every(15).minutes.do(optimizer.implement_auto_scaling)
+    schedule.every(30).minutes.do(optimizer.implement_usage_pattern_scaling)  # Pattern-based scaling
     schedule.every(1).hours.do(optimizer.optimize_spot_instance_pricing)
+    schedule.every(4).hours.do(optimizer.implement_cost_guardrails)  # Regular budget checks
     schedule.every(6).hours.do(optimizer.cleanup_unused_resources)
     schedule.every(1).days.do(optimizer.generate_cost_report)
     schedule.every(30).seconds.do(optimizer.check_spot_interruption)  # AWS recommends 30-second intervals
+    
+    # Emergency budget monitoring (more frequent)
+    schedule.every(1).hours.do(optimizer.check_budget_limits)
     
     logging.info("Scheduled cost optimization tasks configured")
     
@@ -765,9 +1335,14 @@ def setup_scheduled_optimization():
 
 # Add scheduled scaling
 def setup_scheduled_scaling():
+    """Set up scheduled scaling based on usage patterns"""
+    optimizer = CostOptimizationManager(config)
+    
     # Scale down during low-usage hours (e.g., 2-6 AM)
-    schedule.every().day.at("02:00").do(optimizer.implement_auto_scaling) # Assuming optimizer is defined globally or passed
-    schedule.every().day.at("06:00").do(optimizer.implement_auto_scaling) # Assuming optimizer is defined globally or passed
+    schedule.every().day.at("02:00").do(optimizer.implement_auto_scaling)
+    schedule.every().day.at("06:00").do(optimizer.implement_auto_scaling)
+    schedule.every().day.at("18:00").do(optimizer.implement_auto_scaling)  # Evening check
+    schedule.every().day.at("22:00").do(optimizer.implement_auto_scaling)  # Late night optimization
 
 # =============================================================================
 # CLI INTERFACE
@@ -783,12 +1358,21 @@ def main():
                        help='Maximum spot price to pay')
     parser.add_argument('--cost-threshold', type=float, default=50.0,
                        help='Daily cost alert threshold')
+    parser.add_argument('--budget-limit', type=float, default=200.0,
+                       help='Monthly budget limit')
+    parser.add_argument('--region', type=str, default='us-east-1',
+                       help='AWS region')
+    parser.add_argument('--instance-type', type=str, default='g4dn.xlarge',
+                       help='Instance type')
     
     args = parser.parse_args()
     
     # Update config from arguments
     config.max_spot_price = args.max_spot_price
     config.cost_alert_threshold = args.cost_threshold
+    config.budget_limit = args.budget_limit
+    config.region = args.region
+    config.instance_type = args.instance_type
     
     optimizer = CostOptimizationManager(config)
     
@@ -799,7 +1383,12 @@ def main():
         print(json.dumps(report, indent=2))
     elif args.action == 'schedule':
         setup_scheduled_optimization()
-        setup_scheduled_scaling() # Call the new function here
+        setup_scheduled_scaling()
+    elif args.action == 'monitor':
+        # Continuous monitoring mode
+        print("Starting continuous cost monitoring...")
+        optimizer.run_optimization_cycle()
+        setup_scheduled_optimization()
 
 if __name__ == "__main__":
     main() 

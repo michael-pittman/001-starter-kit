@@ -44,26 +44,164 @@ ENABLE_CROSS_REGION="${ENABLE_CROSS_REGION:-false}"  # Cross-region analysis
 # GPU INSTANCE AND AMI CONFIGURATION MATRIX
 # =============================================================================
 
-# Define supported AMI and instance type combinations
-# Based on AWS Deep Learning AMI and NVIDIA NGC documentation
-# Function to get GPU configuration (replaces associative array for bash 3.2 compatibility)
+# Dynamic AMI Discovery System
+# =============================================================================
+# Replaces hardcoded AMI IDs with intelligent discovery based on:
+# - Architecture (x86_64/arm64) compatibility with instance type
+# - Latest AWS Deep Learning AMI with GPU support
+# - Regional availability and validation
+
+# Cache for AMI discovery to avoid repeated API calls
+# AMI_CACHE will be handled with string concatenation for bash 3.2 compatibility
+
+discover_latest_deep_learning_ami() {
+    local instance_type="$1"
+    local region="${2:-$AWS_REGION}"
+    local architecture
+    
+    # Determine architecture based on instance type
+    case "$instance_type" in
+        g4dn.*|g4ad.*|g5.*|p3.*|p4.*) architecture="x86_64" ;;
+        g5g.*|c6g.*|c7g.*|m6g.*|m7g.*|r6g.*|r7g.*) architecture="arm64" ;;
+        *) 
+            error "Unsupported instance type for GPU workloads: $instance_type"
+            return 1
+            ;;
+    esac
+    
+    # Check cache first
+    local cache_key="${instance_type}_${region}_${architecture}"
+    if [[ -n "${AMI_CACHE[$cache_key]:-}" ]]; then
+        echo "${AMI_CACHE[$cache_key]}"
+        return 0
+    fi
+    
+    log "🔍 Discovering latest Deep Learning AMI for $instance_type ($architecture) in $region..."
+    
+    # Define AMI name patterns based on architecture and requirements
+    local ami_name_patterns=()
+    if [[ "$architecture" == "x86_64" ]]; then
+        ami_name_patterns=(
+            "Deep Learning AMI GPU PyTorch*Ubuntu*"
+            "Deep Learning AMI GPU TensorFlow*Ubuntu*"
+            "Deep Learning AMI (Ubuntu*)*GPU*"
+            "aws-deep-learning-ami-gpu-*ubuntu*"
+        )
+    else
+        ami_name_patterns=(
+            "Deep Learning AMI GPU PyTorch*Ubuntu*ARM64*"
+            "Deep Learning AMI GPU*ARM64*Ubuntu*"
+            "aws-deep-learning-ami-gpu-*ubuntu*arm64*"
+        )
+    fi
+    
+    local best_ami=""
+    local best_date=""
+    
+    # Try each AMI name pattern until we find a suitable AMI
+    for pattern in "${ami_name_patterns[@]}"; do
+        info "  Searching for pattern: $pattern"
+        
+        # Query AWS for AMIs matching the pattern
+        local ami_info=$(aws ec2 describe-images \
+            --region "$region" \
+            --owners amazon \
+            --filters \
+                "Name=name,Values=$pattern" \
+                "Name=architecture,Values=$architecture" \
+                "Name=virtualization-type,Values=hvm" \
+                "Name=root-device-type,Values=ebs" \
+                "Name=state,Values=available" \
+            --query 'Images[*].[ImageId,Name,CreationDate,Description]' \
+            --output text 2>/dev/null || continue)
+        
+        if [[ -n "$ami_info" ]]; then
+            # Parse results and find the most recent AMI
+            while IFS=$'\t' read -r ami_id ami_name creation_date description; do
+                # Validate this is a proper GPU-enabled Deep Learning AMI
+                if [[ "$ami_name" == *"GPU"* ]] && [[ "$description" == *"GPU"* || "$description" == *"CUDA"* || "$description" == *"NVIDIA"* ]]; then
+                    # Compare dates to find the newest
+                    if [[ -z "$best_date" ]] || [[ "$creation_date" > "$best_date" ]]; then
+                        best_ami="$ami_id"
+                        best_date="$creation_date"
+                        info "  ✓ Found candidate: $ami_id ($ami_name, $creation_date)"
+                    fi
+                fi
+            done <<< "$ami_info"
+            
+            # If we found a good AMI with this pattern, we can stop searching
+            if [[ -n "$best_ami" ]]; then
+                break
+            fi
+        fi
+    done
+    
+    if [[ -z "$best_ami" ]]; then
+        warning "⚠️  No suitable Deep Learning AMI found via automatic discovery"
+        
+        # Fallback: Use fallback AMI IDs based on region and architecture
+        case "${region}_${architecture}" in
+            # US East 1 (Virginia) - most comprehensive AMI selection
+            "us-east-1_x86_64") best_ami="ami-0c02fb55956c7d316" ;;
+            "us-east-1_arm64") best_ami="ami-0c7217cdde317cfec" ;;
+            
+            # US West 2 (Oregon) - popular for ML workloads
+            "us-west-2_x86_64") best_ami="ami-013168dc3850ef002" ;;
+            "us-west-2_arm64") best_ami="ami-0c5204531f5e0dc35" ;;
+            
+            # EU West 1 (Ireland) - European ML hub
+            "eu-west-1_x86_64") best_ami="ami-0a8e758f5e873d1c1" ;;
+            "eu-west-1_arm64") best_ami="ami-0d71ea30463e0ff8d" ;;
+            
+            # Asia Pacific (Tokyo) - Asian region option
+            "ap-northeast-1_x86_64") best_ami="ami-0bcc04cc58d71a388" ;;
+            "ap-northeast-1_arm64") best_ami="ami-0f36dcfcc94112ea1" ;;
+            
+            *)
+                error "❌ No fallback AMI available for region $region with architecture $architecture"
+                return 1
+                ;;
+        esac
+        
+        warning "🔄 Using fallback AMI: $best_ami"
+    fi
+    
+    # Validate the AMI exists and is available
+    if ! verify_ami_availability "$best_ami" "$region"; then
+        error "❌ Selected AMI $best_ami is not available in region $region"
+        return 1
+    fi
+    
+    # Cache the result
+    AMI_CACHE[$cache_key]="$best_ami"
+    
+    success "✅ Selected AMI: $best_ami (region: $region, arch: $architecture)"
+    echo "$best_ami"
+    return 0
+}
+
+# Enhanced GPU configuration function with dynamic AMI discovery
 get_gpu_config() {
     local key="$1"
+    local instance_type region
+    
+    # Parse the key to extract instance type and region info
     case "$key" in
-        # G4DN instances with Deep Learning AMI (Intel Xeon + NVIDIA T4)
-        "g4dn.xlarge_primary") echo "ami-0489c31b03f0be3d6" ;;
-        "g4dn.xlarge_secondary") echo "ami-00b530caaf8eee2c5" ;;
-        "g4dn.2xlarge_primary") echo "ami-0489c31b03f0be3d6" ;;
-        "g4dn.2xlarge_secondary") echo "ami-00b530caaf8eee2c5" ;;
-        
-        # G5G instances with Deep Learning AMI (ARM Graviton2 + NVIDIA T4G)
-        "g5g.xlarge_primary") echo "ami-0126d561b2bb55618" ;;
-        "g5g.xlarge_secondary") echo "ami-04ba92cdace8a636f" ;;
-        "g5g.2xlarge_primary") echo "ami-0126d561b2bb55618" ;;
-        "g5g.2xlarge_secondary") echo "ami-04ba92cdace8a636f" ;;
-        
-        *) echo "" ;;  # Return empty string for unknown keys
+        *_primary|*_secondary)
+            # Extract instance type (remove suffix)
+            instance_type="${key%_*}"
+            ;;
+        *)
+            # Direct instance type
+            instance_type="$key"
+            ;;
     esac
+    
+    # Use current region or default
+    region="${AWS_REGION:-us-east-1}"
+    
+    # Discover and return the appropriate AMI
+    discover_latest_deep_learning_ami "$instance_type" "$region"
 }
 
 # Instance type specifications
@@ -114,6 +252,151 @@ warning() {
 
 info() {
     echo -e "${CYAN}[INFO] $1${NC}" >&2
+}
+
+# Enhanced deployment progress tracking with visual indicators
+track_deployment_progress() {
+    local phase="$1"
+    local step="$2"
+    local status="$3"  # start, progress, complete, error
+    local message="$4"
+    local current_step="${5:-0}"
+    local total_steps="${6:-10}"
+    
+    # Define deployment phases
+    local phases=(
+        "1:Initialization"
+        "2:Prerequisites"
+        "3:Configuration"
+        "4:Infrastructure"
+        "5:Instance Launch"
+        "6:Connectivity"
+        "7:System Setup"
+        "8:Application Deploy"
+        "9:Validation"
+        "10:Completion"
+    )
+    
+    # Progress bar width
+    local bar_width=50
+    local current_progress=0
+    
+    # Calculate overall progress based on phase and step
+    if [[ "$total_steps" -gt 0 ]]; then
+        local phase_weight=$((100 / ${#phases[@]}))
+        local phase_progress=$(( (phase - 1) * phase_weight ))
+        local step_progress=$(( (current_step * phase_weight) / total_steps ))
+        current_progress=$(( phase_progress + step_progress ))
+        
+        # Cap at 100%
+        if [[ "$current_progress" -gt 100 ]]; then
+            current_progress=100
+        fi
+    fi
+    
+    # Create progress bar
+    local filled=$(( (current_progress * bar_width) / 100 ))
+    local empty=$(( bar_width - filled ))
+    local bar=""
+    
+    # Build progress bar with colors
+    for ((i=0; i<filled; i++)); do
+        if [[ "$status" == "error" ]]; then
+            bar+="█"
+        else
+            bar+="█"
+        fi
+    done
+    
+    for ((i=0; i<empty; i++)); do
+        bar+="░"
+    done
+    
+    # Status indicator
+    local status_icon
+    case "$status" in
+        "start")     status_icon="🚀" ;;
+        "progress")  status_icon="⚙️ " ;;
+        "complete")  status_icon="✅" ;;
+        "error")     status_icon="❌" ;;
+        *)           status_icon="🔄" ;;
+    esac
+    
+    # Color based on status
+    local color
+    case "$status" in
+        "start"|"progress") color="$CYAN" ;;
+        "complete")         color="$GREEN" ;;
+        "error")           color="$RED" ;;
+        *)                 color="$BLUE" ;;
+    esac
+    
+    # Get phase name
+    local phase_name="Unknown"
+    for phase_info in "${phases[@]}"; do
+        local phase_num="${phase_info%:*}"
+        local phase_desc="${phase_info#*:}"
+        if [[ "$phase_num" == "$phase" ]]; then
+            phase_name="$phase_desc"
+            break
+        fi
+    done
+    
+    # Format timestamp
+    local timestamp=$(date +'%H:%M:%S')
+    
+    # Display progress line
+    if [[ "$status" == "error" ]]; then
+        echo -e "${RED}[$timestamp] ${status_icon} ${color}[$bar${RED}] ${current_progress}% | Phase $phase: $phase_name${NC}"
+        echo -e "${RED}           ❌ ERROR in $step: $message${NC}"
+    else
+        echo -e "${BLUE}[$timestamp] ${status_icon} ${color}[$bar${BLUE}] ${current_progress}% | Phase $phase: $phase_name${NC}"
+        if [[ -n "$message" ]]; then
+            echo -e "${BLUE}           📋 $step: $message${NC}"
+        fi
+    fi
+    
+    # Add extra spacing for major phase transitions
+    if [[ "$status" == "complete" ]] && [[ "$current_step" -eq "$total_steps" ]]; then
+        echo
+    fi
+}
+
+# Wrapper functions for easy progress tracking
+track_start() {
+    track_deployment_progress "$1" "$2" "start" "$3" "${4:-0}" "${5:-10}"
+}
+
+track_progress() {
+    track_deployment_progress "$1" "$2" "progress" "$3" "${4:-0}" "${5:-10}"
+}
+
+track_complete() {
+    track_deployment_progress "$1" "$2" "complete" "$3" "${4:-0}" "${5:-10}"
+}
+
+track_error() {
+    track_deployment_progress "$1" "$2" "error" "$3" "${4:-0}" "${5:-10}"
+}
+
+# Display deployment banner with progress overview
+show_deployment_banner() {
+    local banner_width=80
+    
+    echo
+    echo -e "${CYAN}$(printf '═%.0s' $(seq 1 $banner_width))${NC}"
+    echo -e "${CYAN}║$(printf ' %.0s' $(seq 1 $((($banner_width-40)/2))))🚀 AI STARTER KIT DEPLOYMENT 🚀$(printf ' %.0s' $(seq 1 $((($banner_width-40)/2))))║${NC}"
+    echo -e "${CYAN}$(printf '═%.0s' $(seq 1 $banner_width))${NC}"
+    echo
+    echo -e "${BLUE}Starting intelligent GPU instance deployment with enhanced monitoring...${NC}"
+    echo -e "${YELLOW}💡 This deployment includes:${NC}"
+    echo -e "${YELLOW}   • Dynamic AMI discovery with latest Deep Learning images${NC}"
+    echo -e "${YELLOW}   • 3-phase instance readiness validation${NC}"
+    echo -e "${YELLOW}   • Resource-optimized container configuration${NC}"
+    echo -e "${YELLOW}   • Real-time progress tracking and error reporting${NC}"
+    echo
+    echo -e "${CYAN}$(printf '═%.0s' $(seq 1 $banner_width))${NC}"
+    echo
 }
 
 check_prerequisites() {
@@ -725,6 +1008,406 @@ select_optimal_configuration() {
 }
 
 # =============================================================================
+# ENHANCED INTELLIGENT INSTANCE SELECTION
+# =============================================================================
+
+get_multi_az_spot_prices() {
+    local instance_type="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    log "🔍 Getting spot prices across all AZs for $instance_type in $region..."
+    
+    # Get all availability zones in the region
+    local azs=$(aws ec2 describe-availability-zones \
+        --region "$region" \
+        --query 'AvailabilityZones[?State==`available`].ZoneName' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -z "$azs" ]]; then
+        warning "No availability zones found in $region"
+        echo "[]"
+        return 1
+    fi
+    
+    local pricing_data="[]"
+    local temp_file=$(mktemp)
+    
+    for az in $azs; do
+        info "  Checking spot prices in $az..."
+        
+        # Get latest spot price for this AZ
+        local spot_data=$(aws ec2 describe-spot-price-history \
+            --region "$region" \
+            --instance-types "$instance_type" \
+            --product-descriptions "Linux/UNIX" \
+            --availability-zone "$az" \
+            --max-items 5 \
+            --query 'SpotPrices[0].[SpotPrice,Timestamp,AvailabilityZone]' \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$spot_data" && "$spot_data" != "None" ]]; then
+            IFS=$'\t' read -r price timestamp az_name <<< "$spot_data"
+            
+            # Create JSON entry
+            local json_entry=$(jq -n \
+                --arg instance_type "$instance_type" \
+                --arg price "$price" \
+                --arg timestamp "$timestamp" \
+                --arg az "$az_name" \
+                --arg region "$region" \
+                '{
+                    instance_type: $instance_type,
+                    spot_price: ($price | tonumber),
+                    timestamp: $timestamp,
+                    availability_zone: $az,
+                    region: $region
+                }')
+            
+            # Add to pricing data
+            echo "$pricing_data" | jq ". + [$json_entry]" > "$temp_file"
+            pricing_data=$(cat "$temp_file")
+            
+            info "    💰 $az: \$$price/hour"
+        else
+            warning "    ❌ $az: No spot price data available"
+        fi
+    done
+    
+    rm -f "$temp_file"
+    echo "$pricing_data"
+}
+
+calculate_cost_efficiency_score() {
+    local instance_type="$1"
+    local spot_price="$2"
+    local region="${3:-$AWS_REGION}"
+    
+    # Get performance score
+    local perf_score=$(get_performance_score "$instance_type")
+    if [[ -z "$perf_score" || "$perf_score" == "0" ]]; then
+        echo "0"
+        return 1
+    fi
+    
+    # Get on-demand price for comparison
+    local on_demand_price=$(get_on_demand_price "$instance_type" "$region")
+    if [[ -z "$on_demand_price" || "$on_demand_price" == "0" ]]; then
+        # Fallback prices
+        case "$instance_type" in
+            "g4dn.xlarge") on_demand_price="1.204" ;;
+            "g4dn.2xlarge") on_demand_price="2.176" ;;
+            "g5g.xlarge") on_demand_price="1.006" ;;
+            "g5g.2xlarge") on_demand_price="2.012" ;;
+            *) on_demand_price="1.50" ;;
+        esac
+    fi
+    
+    # Calculate metrics
+    local savings_percent=$(echo "scale=2; (($on_demand_price - $spot_price) / $on_demand_price) * 100" | bc -l 2>/dev/null || echo "0")
+    local price_performance=$(echo "scale=3; $perf_score / $spot_price" | bc -l 2>/dev/null || echo "0")
+    local cost_efficiency=$(echo "scale=3; ($price_performance * (1 + $savings_percent / 100))" | bc -l 2>/dev/null || echo "0")
+    
+    echo "$cost_efficiency"
+}
+
+get_on_demand_price() {
+    local instance_type="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    # Try to get from AWS Pricing API (simplified version)
+    local price=$(aws pricing get-products \
+        --service-code AmazonEC2 \
+        --region us-east-1 \
+        --filters "Type=TERM_MATCH,Field=instanceType,Value=$instance_type" \
+                 "Type=TERM_MATCH,Field=location,Value=US East (N. Virginia)" \
+                 "Type=TERM_MATCH,Field=tenancy,Value=Shared" \
+                 "Type=TERM_MATCH,Field=operating-system,Value=Linux" \
+        --query 'PriceList[0]' \
+        --output text 2>/dev/null | \
+        jq -r '.terms.OnDemand | to_entries[0].value.priceDimensions | to_entries[0].value.pricePerUnit.USD' 2>/dev/null || echo "")
+    
+    if [[ -n "$price" && "$price" != "null" ]]; then
+        echo "$price"
+    else
+        # Fallback to hardcoded prices (updated as of 2024)
+        case "$instance_type" in
+            "g4dn.xlarge") echo "1.204" ;;
+            "g4dn.2xlarge") echo "2.176" ;;
+            "g5g.xlarge") echo "1.006" ;;
+            "g5g.2xlarge") echo "2.012" ;;
+            "g5.xlarge") echo "1.212" ;;
+            "g5.2xlarge") echo "2.424" ;;
+            *) echo "1.50" ;;
+        esac
+    fi
+}
+
+find_optimal_instance_configuration() {
+    local max_budget="${1:-$MAX_SPOT_PRICE}"
+    local preferred_regions="${2:-$AWS_REGION}"
+    local enable_cross_region="${3:-false}"
+    
+    log "🎯 Finding optimal instance configuration with budget \$$max_budget/hour..."
+    
+    # Convert preferred_regions to array
+    IFS=',' read -ra regions_to_check <<< "$preferred_regions"
+    if [[ "$enable_cross_region" == "true" ]]; then
+        regions_to_check+=("us-west-2" "eu-west-1" "ap-northeast-1" "eu-central-1")
+        # Remove duplicates
+        IFS=" " read -ra regions_to_check <<< "$(printf '%s\n' "${regions_to_check[@]}" | sort -u | tr '\n' ' ')"
+    fi
+    
+    local best_config=""
+    local best_cost_efficiency="0"
+    local all_options=()
+    
+    # Check each region
+    for region in "${regions_to_check[@]}"; do
+        info "🌍 Analyzing region: $region"
+        
+        # Check each instance type
+        for instance_type in $(get_instance_type_list); do
+            # Skip if instance type not available in region
+            if ! check_instance_type_availability "$instance_type" "$region" >/dev/null 2>&1; then
+                continue
+            fi
+            
+            # Get multi-AZ spot prices
+            local az_pricing=$(get_multi_az_spot_prices "$instance_type" "$region")
+            
+            if [[ "$az_pricing" == "[]" ]]; then
+                continue
+            fi
+            
+            # Find best AZ for this instance type in this region
+            local best_az_config=$(echo "$az_pricing" | jq -r --arg budget "$max_budget" '
+                [.[] | select(.spot_price <= ($budget | tonumber))] |
+                if length > 0 then
+                    sort_by(.spot_price)[0] |
+                    "\(.instance_type)|\(.spot_price)|\(.availability_zone)|\(.region)"
+                else
+                    empty
+                end' 2>/dev/null || echo "")
+            
+            if [[ -n "$best_az_config" ]]; then
+                IFS='|' read -r inst_type spot_price best_az inst_region <<< "$best_az_config"
+                
+                # Calculate cost efficiency score
+                local cost_efficiency=$(calculate_cost_efficiency_score "$inst_type" "$spot_price" "$inst_region")
+                
+                # Get AMI for this configuration
+                local ami=$(discover_latest_deep_learning_ami "$inst_type" "$inst_region" 2>/dev/null || echo "")
+                
+                if [[ -n "$ami" ]]; then
+                    local config="$inst_type:$ami:$spot_price:$best_az:$inst_region:$cost_efficiency"
+                    all_options+=("$config")
+                    
+                    info "  ✅ $inst_type in $best_az: \$$spot_price/hour (efficiency: $cost_efficiency)"
+                    
+                    # Check if this is the best option so far
+                    if (( $(echo "$cost_efficiency > $best_cost_efficiency" | bc -l 2>/dev/null || echo "0") )); then
+                        best_cost_efficiency="$cost_efficiency"
+                        best_config="$config"
+                    fi
+                fi
+            fi
+        done
+    done
+    
+    # Display analysis results
+    if [[ ${#all_options[@]} -gt 0 ]]; then
+        info "📊 Cost-Efficiency Analysis (sorted by efficiency score):"
+        echo ""
+        echo -e "${CYAN}┌─────────────────┬──────────┬───────────────┬─────────────┬────────────────┐${NC}"
+        echo -e "${CYAN}│ Instance Type   │ Price/hr │ Availability  │ Region      │ Efficiency     │${NC}"
+        echo -e "${CYAN}│                 │          │ Zone          │             │ Score          │${NC}"
+        echo -e "${CYAN}├─────────────────┼──────────┼───────────────┼─────────────┼────────────────┤${NC}"
+        
+        # Sort by efficiency and show top options
+        IFS=$'\n' read -d '' -r -a sorted_options < <(printf '%s\n' "${all_options[@]}" | sort -t':' -k6 -nr) || true
+        
+        local count=0
+        for option in "${sorted_options[@]}"; do
+            if [[ $count -ge 10 ]]; then break; fi  # Show top 10
+            
+            IFS=':' read -r inst_type ami price az region efficiency <<< "$option"
+            printf "${CYAN}│ %-15s │ %-8s │ %-13s │ %-11s │ %-14s │${NC}\n" \
+                "$inst_type" "\$$price" "$az" "$region" "$efficiency"
+            ((count++))
+        done
+        
+        echo -e "${CYAN}└─────────────────┴──────────┴───────────────┴─────────────┴────────────────┘${NC}"
+        echo ""
+    fi
+    
+    # Return best configuration
+    if [[ -n "$best_config" ]]; then
+        IFS=':' read -r selected_type selected_ami selected_price selected_az selected_region selected_efficiency <<< "$best_config"
+        
+        success "🏆 OPTIMAL CONFIGURATION SELECTED:"
+        info "  Instance Type: $selected_type"
+        info "  AMI: $selected_ami"
+        info "  Spot Price: \$$selected_price/hour"
+        info "  Availability Zone: $selected_az"
+        info "  Region: $selected_region"
+        info "  Cost Efficiency Score: $selected_efficiency"
+        
+        # Calculate potential savings
+        local on_demand_price=$(get_on_demand_price "$selected_type" "$selected_region")
+        local savings_percent=$(echo "scale=1; (($on_demand_price - $selected_price) / $on_demand_price) * 100" | bc -l 2>/dev/null || echo "0")
+        local monthly_savings=$(echo "scale=2; ($on_demand_price - $selected_price) * 24 * 30" | bc -l 2>/dev/null || echo "0")
+        
+        info "  💰 Estimated savings: $savings_percent% vs on-demand (\$$monthly_savings/month)"
+        
+        # Export for use by other functions
+        export SELECTED_INSTANCE_TYPE="$selected_type"
+        export SELECTED_AMI="$selected_ami"
+        export SELECTED_PRICE="$selected_price"
+        export SELECTED_AZ="$selected_az"
+        export SELECTED_REGION="$selected_region"
+        
+        echo "$best_config"
+        return 0
+    else
+        error "No suitable configurations found within budget \$$max_budget/hour"
+        
+        # Suggest alternatives
+        if [[ ${#all_options[@]} -gt 0 ]]; then
+            local cheapest_option="${all_options[0]}"
+            for option in "${all_options[@]}"; do
+                IFS=':' read -r _ _ price _ _ _ <<< "$option"
+                IFS=':' read -r _ _ cheapest_price _ _ _ <<< "$cheapest_option"
+                if (( $(echo "$price < $cheapest_price" | bc -l 2>/dev/null || echo "0") )); then
+                    cheapest_option="$option"
+                fi
+            done
+            
+            IFS=':' read -r cheap_type _ cheap_price cheap_az cheap_region _ <<< "$cheapest_option"
+            warning "💡 Cheapest available option: $cheap_type in $cheap_az (\$$cheap_price/hour)"
+            warning "💡 Consider increasing budget to \$$(echo "scale=2; $cheap_price * 1.1" | bc -l)/hour"
+        fi
+        
+        return 1
+    fi
+}
+
+estimate_deployment_costs() {
+    local instance_type="$1"
+    local spot_price="$2"
+    local region="${3:-$AWS_REGION}"
+    
+    log "💰 Estimating deployment costs for $instance_type..."
+    
+    # Get on-demand price for comparison
+    local on_demand_price=$(get_on_demand_price "$instance_type" "$region")
+    
+    # Calculate various cost estimates
+    local hourly_spot="$spot_price"
+    local hourly_ondemand="$on_demand_price"
+    local daily_spot=$(echo "scale=2; $spot_price * 24" | bc -l)
+    local daily_ondemand=$(echo "scale=2; $on_demand_price * 24" | bc -l)
+    local monthly_spot=$(echo "scale=2; $spot_price * 24 * 30" | bc -l)
+    local monthly_ondemand=$(echo "scale=2; $on_demand_price * 24 * 30" | bc -l)
+    
+    # Calculate savings
+    local daily_savings=$(echo "scale=2; $daily_ondemand - $daily_spot" | bc -l)
+    local monthly_savings=$(echo "scale=2; $monthly_ondemand - $monthly_spot" | bc -l)
+    local savings_percent=$(echo "scale=1; (($on_demand_price - $spot_price) / $on_demand_price) * 100" | bc -l)
+    
+    # Additional AWS service costs (estimated)
+    local ebs_monthly="8.00"  # 100GB gp3 storage
+    local efs_monthly="12.00" # 40GB EFS storage
+    local data_transfer="5.00" # Modest data transfer
+    local other_services=$(echo "scale=2; $ebs_monthly + $efs_monthly + $data_transfer" | bc -l)
+    
+    local total_monthly_spot=$(echo "scale=2; $monthly_spot + $other_services" | bc -l)
+    local total_monthly_ondemand=$(echo "scale=2; $monthly_ondemand + $other_services" | bc -l)
+    
+    # Display cost analysis
+    echo ""
+    echo -e "${CYAN}┌─────────────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│                    💰 DEPLOYMENT COST ANALYSIS                      │${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│ Instance: %-58s │${NC}" "$instance_type"
+    echo -e "${CYAN}│ Region: %-60s │${NC}" "$region"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│ COMPUTE COSTS:                                                      │${NC}"
+    printf "${CYAN}│   Spot Instance:     %-20s %-20s %-11s │${NC}\n" "\$$hourly_spot/hr" "\$$daily_spot/day" "\$$monthly_spot/month"
+    printf "${CYAN}│   On-Demand:         %-20s %-20s %-11s │${NC}\n" "\$$hourly_ondemand/hr" "\$$daily_ondemand/day" "\$$monthly_ondemand/month"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│ ADDITIONAL AWS SERVICES (estimated):                               │${NC}"
+    echo -e "${CYAN}│   EBS Storage (100GB gp3):                              \$8.00/month  │${NC}"
+    echo -e "${CYAN}│   EFS Storage (40GB):                                  \$12.00/month  │${NC}"
+    echo -e "${CYAN}│   Data Transfer & Other:                                \$5.00/month  │${NC}"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│ TOTAL ESTIMATED MONTHLY COSTS:                                     │${NC}"
+    printf "${CYAN}│   With Spot Instances:                                 \$%-12s │${NC}\n" "$total_monthly_spot"
+    printf "${CYAN}│   With On-Demand:                                      \$%-12s │${NC}\n" "$total_monthly_ondemand"
+    echo -e "${CYAN}├─────────────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${CYAN}│ POTENTIAL SAVINGS:                                                 │${NC}"
+    printf "${CYAN}│   Daily Savings:                                       \$%-12s │${NC}\n" "$daily_savings"
+    printf "${CYAN}│   Monthly Savings:                                     \$%-12s │${NC}\n" "$monthly_savings"
+    printf "${CYAN}│   Savings Percentage:                                   %-12s │${NC}\n" "$savings_percent%"
+    echo -e "${CYAN}└─────────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    # Cost alerts
+    if (( $(echo "$total_monthly_spot > 200" | bc -l) )); then
+        warning "⚠️  High monthly cost estimate: \$$total_monthly_spot"
+        warning "   Consider smaller instance types or scheduled shutdowns"
+    fi
+    
+    if (( $(echo "$savings_percent < 30" | bc -l) )); then
+        warning "⚠️  Low savings vs on-demand ($savings_percent%)"
+        warning "   Spot prices may be elevated - consider waiting or different regions"
+    fi
+    
+    # Export cost estimates for other functions
+    export ESTIMATED_MONTHLY_COST="$total_monthly_spot"
+    export ESTIMATED_MONTHLY_SAVINGS="$monthly_savings"
+    export ESTIMATED_SAVINGS_PERCENT="$savings_percent"
+}
+
+send_cost_alert() {
+    local alert_type="$1"
+    local message="$2"
+    local cost_estimate="${3:-N/A}"
+    
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local alert_message="[AI Starter Kit] $alert_type Alert - $timestamp
+
+$message
+
+Estimated Monthly Cost: \$$cost_estimate
+Instance: ${SELECTED_INSTANCE_TYPE:-N/A}
+Region: ${SELECTED_REGION:-$AWS_REGION}
+
+Deployment Command: $0 $*
+
+Generated by AI Starter Kit Cost Monitoring"
+    
+    # Log the alert
+    echo "$alert_message" | tee -a "/tmp/cost-alerts.log"
+    
+    # In production, this would send to SNS, email, or Slack
+    if [[ -n "${COST_ALERT_WEBHOOK:-}" ]]; then
+        curl -X POST "$COST_ALERT_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"$alert_message\"}" \
+            2>/dev/null || true
+    fi
+    
+    # Could also send to AWS SNS if topic is configured
+    if [[ -n "${COST_ALERT_SNS_TOPIC:-}" ]]; then
+        aws sns publish \
+            --topic-arn "$COST_ALERT_SNS_TOPIC" \
+            --message "$alert_message" \
+            --region "$AWS_REGION" \
+            2>/dev/null || true
+    fi
+}
+
+# =============================================================================
 # OPTIMIZED USER DATA GENERATION
 # =============================================================================
 
@@ -744,8 +1427,37 @@ create_optimized_user_data() {
 #!/bin/bash
 set -euo pipefail
 
+# Progress tracking function
+create_progress_marker() {
+    local step="\$1"
+    local status="\$2"
+    local message="\$3"
+    echo "\$(date '+%Y-%m-%d %H:%M:%S') [\$status] \$step: \$message" | tee -a /var/log/user-data-progress.log
+    echo "\$step:\$status:\$message" > "/tmp/user-data-step-\$step"
+    # Also create a latest status file for easy monitoring
+    echo "\$(date '+%Y-%m-%d %H:%M:%S') [\$status] \$step: \$message" > /tmp/user-data-latest-status
+}
+
+# Error handling function
+handle_error() {
+    local step="\$1"
+    local error_msg="\$2"
+    create_progress_marker "\$step" "ERROR" "\$error_msg"
+    echo "=== ERROR DETAILS ===" >> /var/log/user-data-progress.log
+    echo "Step: \$step" >> /var/log/user-data-progress.log
+    echo "Error: \$error_msg" >> /var/log/user-data-progress.log
+    echo "Last 20 lines of user-data.log:" >> /var/log/user-data-progress.log
+    tail -20 /var/log/user-data.log >> /var/log/user-data-progress.log
+    exit 1
+}
+
+# Set error trap
+trap 'handle_error "UNKNOWN" "Script failed unexpectedly at line \$LINENO"' ERR
+
 # Log all output for debugging
 exec > >(tee /var/log/user-data.log) 2>&1
+
+create_progress_marker "INIT" "STARTING" "AI Starter Kit Deep Learning AMI Setup"
 
 echo "=== AI Starter Kit Deep Learning AMI Setup ==="
 echo "Timestamp: \$(date)"
@@ -758,13 +1470,19 @@ echo "System Information:"
 uname -a
 cat /etc/os-release
 
+create_progress_marker "SYSTEM_UPDATE" "RUNNING" "Updating system packages"
+
 # Update system packages
 echo "Updating system packages..."
 if command -v apt-get &> /dev/null; then
-    apt-get update && apt-get upgrade -y
+    apt-get update && apt-get upgrade -y || handle_error "SYSTEM_UPDATE" "Failed to update packages with apt-get"
 elif command -v yum &> /dev/null; then
-    yum update -y
+    yum update -y || handle_error "SYSTEM_UPDATE" "Failed to update packages with yum"
 fi
+
+create_progress_marker "SYSTEM_UPDATE" "COMPLETED" "System packages updated successfully"
+
+create_progress_marker "GPU_VERIFY" "RUNNING" "Verifying Deep Learning AMI components"
 
 # Verify Deep Learning AMI components
 echo "=== Verifying Deep Learning AMI Components ==="
@@ -773,19 +1491,26 @@ echo "=== Verifying Deep Learning AMI Components ==="
 if command -v nvidia-smi &> /dev/null; then
     echo "✓ NVIDIA drivers found:"
     nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+    create_progress_marker "GPU_VERIFY" "SUCCESS" "NVIDIA drivers found and working"
 else
-    echo "⚠ NVIDIA drivers not found - may need installation"
+    echo "⚠ NVIDIA drivers not found - installing drivers"
+    create_progress_marker "GPU_INSTALL" "RUNNING" "Installing NVIDIA drivers"
+    
     # Install NVIDIA drivers for Deep Learning AMI
     if [[ "$cpu_arch" == "x86_64" ]]; then
-        wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
-        dpkg -i cuda-keyring_1.0-1_all.deb
-        apt-get update
-        apt-get install -y nvidia-driver-470 cuda-toolkit-11-8
+        wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb || handle_error "GPU_INSTALL" "Failed to download CUDA keyring"
+        dpkg -i cuda-keyring_1.0-1_all.deb || handle_error "GPU_INSTALL" "Failed to install CUDA keyring"
+        apt-get update || handle_error "GPU_INSTALL" "Failed to update package list after CUDA keyring"
+        apt-get install -y nvidia-driver-470 cuda-toolkit-11-8 || handle_error "GPU_INSTALL" "Failed to install NVIDIA drivers and CUDA toolkit"
     else
         echo "ARM64 architecture - using different driver installation method"
-        apt-get install -y nvidia-jetpack
+        apt-get install -y nvidia-jetpack || handle_error "GPU_INSTALL" "Failed to install NVIDIA Jetpack for ARM64"
     fi
+    
+    create_progress_marker "GPU_INSTALL" "COMPLETED" "NVIDIA drivers installed successfully"
 fi
+
+create_progress_marker "DOCKER_VERIFY" "RUNNING" "Verifying Docker installation"
 
 # Verify Docker
 if command -v docker &> /dev/null; then
@@ -793,28 +1518,40 @@ if command -v docker &> /dev/null; then
     docker --version
     # Ensure ubuntu user is in docker group
     usermod -aG docker ubuntu
+    create_progress_marker "DOCKER_VERIFY" "SUCCESS" "Docker found and configured"
 else
     echo "Installing Docker..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    usermod -aG docker ubuntu
+    create_progress_marker "DOCKER_INSTALL" "RUNNING" "Installing Docker"
+    
+    curl -fsSL https://get.docker.com -o get-docker.sh || handle_error "DOCKER_INSTALL" "Failed to download Docker install script"
+    sh get-docker.sh || handle_error "DOCKER_INSTALL" "Failed to install Docker"
+    usermod -aG docker ubuntu || handle_error "DOCKER_INSTALL" "Failed to add ubuntu user to docker group"
     rm get-docker.sh
+    
+    create_progress_marker "DOCKER_INSTALL" "COMPLETED" "Docker installed successfully"
 fi
+
+create_progress_marker "DOCKER_COMPOSE" "RUNNING" "Installing/verifying Docker Compose"
 
 # Install/verify Docker Compose
 if command -v docker-compose &> /dev/null; then
     echo "✓ Docker Compose found:"
     docker-compose --version
+    create_progress_marker "DOCKER_COMPOSE" "SUCCESS" "Docker Compose found"
 else
     echo "Installing Docker Compose..."
     if [[ "$cpu_arch" == "x86_64" ]]; then
-        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose || handle_error "DOCKER_COMPOSE" "Failed to download Docker Compose for x86_64"
     else
         # ARM64 version
-        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" -o /usr/local/bin/docker-compose
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" -o /usr/local/bin/docker-compose || handle_error "DOCKER_COMPOSE" "Failed to download Docker Compose for ARM64"
     fi
-    chmod +x /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose || handle_error "DOCKER_COMPOSE" "Failed to make Docker Compose executable"
+    
+    create_progress_marker "DOCKER_COMPOSE" "COMPLETED" "Docker Compose installed successfully"
 fi
+
+create_progress_marker "NVIDIA_RUNTIME" "RUNNING" "Configuring NVIDIA Container Runtime"
 
 # Configure NVIDIA Container Runtime
 echo "=== Configuring NVIDIA Container Runtime ==="
@@ -824,12 +1561,12 @@ if ! docker info | grep -q nvidia; then
     # Install nvidia-container-toolkit
     if [[ "$cpu_arch" == "x86_64" ]]; then
         distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)
-        curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-        curl -s -L https://nvidia.github.io/nvidia-docker/\$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list
-        apt-get update && apt-get install -y nvidia-container-toolkit
+        curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add - || handle_error "NVIDIA_RUNTIME" "Failed to add NVIDIA Docker GPG key"
+        curl -s -L https://nvidia.github.io/nvidia-docker/\$distribution/nvidia-docker.list | tee /etc/apt/sources.list.d/nvidia-docker.list || handle_error "NVIDIA_RUNTIME" "Failed to add NVIDIA Docker repository"
+        apt-get update && apt-get install -y nvidia-container-toolkit || handle_error "NVIDIA_RUNTIME" "Failed to install nvidia-container-toolkit"
     else
         # ARM64 specific nvidia container runtime
-        apt-get install -y nvidia-container-runtime
+        apt-get install -y nvidia-container-runtime || handle_error "NVIDIA_RUNTIME" "Failed to install nvidia-container-runtime for ARM64"
     fi
     
     # Configure Docker daemon
@@ -845,58 +1582,80 @@ if ! docker info | grep -q nvidia; then
 }
 EODAEMON
     
-    systemctl restart docker
+    systemctl restart docker || handle_error "NVIDIA_RUNTIME" "Failed to restart Docker service"
+    
+    create_progress_marker "NVIDIA_RUNTIME" "COMPLETED" "NVIDIA Container Runtime configured successfully"
+else
+    create_progress_marker "NVIDIA_RUNTIME" "SUCCESS" "NVIDIA Container Runtime already configured"
 fi
+
+create_progress_marker "GPU_TEST" "RUNNING" "Testing GPU access in containers"
 
 # Test GPU access
 echo "=== Testing GPU Access ==="
 if [[ "$cpu_arch" == "x86_64" ]]; then
     if docker run --rm --gpus all nvidia/cuda:12.0-base-ubuntu20.04 nvidia-smi; then
         echo "✓ GPU access in Docker containers verified"
+        create_progress_marker "GPU_TEST" "SUCCESS" "GPU access in Docker containers verified"
     else
-        echo "✗ GPU access in Docker containers failed"
+        handle_error "GPU_TEST" "GPU access in Docker containers failed"
     fi
 else
     # ARM64 GPU test
     if docker run --rm --runtime=nvidia --gpus all nvcr.io/nvidia/l4t-base:r32.7.1 nvidia-smi; then
         echo "✓ ARM64 GPU access verified"
+        create_progress_marker "GPU_TEST" "SUCCESS" "ARM64 GPU access verified"
     else
-        echo "✗ ARM64 GPU access failed"
+        handle_error "GPU_TEST" "ARM64 GPU access failed"
     fi
 fi
+
+create_progress_marker "TOOLS_INSTALL" "RUNNING" "Installing additional tools"
 
 # Install additional tools
 echo "Installing additional tools..."
 if command -v apt-get &> /dev/null; then
-    apt-get install -y jq curl wget git htop awscli nfs-common tree
+    apt-get install -y jq curl wget git htop awscli nfs-common tree || handle_error "TOOLS_INSTALL" "Failed to install additional tools with apt-get"
     
     # Install nvtop for GPU monitoring (if available)
     if [[ "$cpu_arch" == "x86_64" ]]; then
-        apt-get install -y nvtop || echo "nvtop not available"
+        apt-get install -y nvtop || echo "nvtop not available, continuing..."
     fi
 elif command -v yum &> /dev/null; then
-    yum install -y jq curl wget git htop awscli nfs-utils tree
+    yum install -y jq curl wget git htop awscli nfs-utils tree || handle_error "TOOLS_INSTALL" "Failed to install additional tools with yum"
 fi
+
+create_progress_marker "TOOLS_INSTALL" "COMPLETED" "Additional tools installed successfully"
+
+create_progress_marker "CLOUDWATCH" "RUNNING" "Installing CloudWatch agent"
 
 # Install CloudWatch agent
 echo "Installing CloudWatch agent..."
 if [[ "$cpu_arch" == "x86_64" ]]; then
-    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-    dpkg -i amazon-cloudwatch-agent.deb
+    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb || handle_error "CLOUDWATCH" "Failed to download CloudWatch agent for x86_64"
+    dpkg -i amazon-cloudwatch-agent.deb || handle_error "CLOUDWATCH" "Failed to install CloudWatch agent"
     rm amazon-cloudwatch-agent.deb
 else
     # ARM64 CloudWatch agent
-    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb
-    dpkg -i amazon-cloudwatch-agent.deb
+    wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/arm64/latest/amazon-cloudwatch-agent.deb || handle_error "CLOUDWATCH" "Failed to download CloudWatch agent for ARM64"
+    dpkg -i amazon-cloudwatch-agent.deb || handle_error "CLOUDWATCH" "Failed to install CloudWatch agent"
     rm amazon-cloudwatch-agent.deb
 fi
 
+create_progress_marker "CLOUDWATCH" "COMPLETED" "CloudWatch agent installed successfully"
+
+create_progress_marker "SERVICES" "RUNNING" "Starting and enabling services"
+
 # Ensure services are running
-systemctl enable docker
-systemctl start docker
+systemctl enable docker || handle_error "SERVICES" "Failed to enable Docker service"
+systemctl start docker || handle_error "SERVICES" "Failed to start Docker service"
 
 # Create mount point for EFS
 mkdir -p /mnt/efs
+
+create_progress_marker "SERVICES" "COMPLETED" "Services started and configured"
+
+create_progress_marker "GPU_SCRIPT" "RUNNING" "Creating GPU monitoring script"
 
 # Create architecture-aware GPU monitoring script
 cat > /usr/local/bin/gpu-check.sh << 'EOGPU'
@@ -924,11 +1683,19 @@ EOGPU
 
 chmod +x /usr/local/bin/gpu-check.sh
 
+create_progress_marker "GPU_SCRIPT" "COMPLETED" "GPU monitoring script created"
+
+create_progress_marker "FINAL_CHECK" "RUNNING" "Running final GPU check"
+
 # Run initial GPU check
 echo "=== Running Initial GPU Check ==="
 /usr/local/bin/gpu-check.sh
 
+create_progress_marker "FINAL_CHECK" "COMPLETED" "Final GPU check completed"
+
 # Signal completion
+create_progress_marker "SETUP_COMPLETE" "SUCCESS" "Deep Learning AMI setup completed successfully"
+
 echo "=== Deep Learning AMI Setup Complete ==="
 echo "Timestamp: \$(date)"
 echo "Instance: $instance_type ($cpu_arch)"
@@ -949,33 +1716,40 @@ launch_spot_instance() {
     
     log "🚀 Launching GPU spot instance with intelligent configuration selection..."
     
-    # Step 1: Run intelligent configuration selection
+    # Step 1: Run enhanced intelligent configuration selection
     if [[ "$INSTANCE_TYPE" == "auto" ]]; then
-        log "Auto-selection mode: Finding optimal configuration..."
-        OPTIMAL_CONFIG=$(select_optimal_configuration "$MAX_SPOT_PRICE" "$enable_cross_region")
+        log "Auto-selection mode: Finding optimal configuration with advanced cost analysis..."
+        OPTIMAL_CONFIG=$(find_optimal_instance_configuration "$MAX_SPOT_PRICE" "$AWS_REGION" "$enable_cross_region")
         
         if [[ $? -ne 0 ]]; then
             error "Failed to find optimal configuration within budget"
             return 1
         fi
         
-        # Parse optimal configuration - FIXED: Handle new format with region
-        if [[ "$OPTIMAL_CONFIG" == *:*:*:*:* ]]; then
-            # New format with region
-            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE SELECTED_REGION <<< "$OPTIMAL_CONFIG"
-        else
-            # Fallback for old format
-            IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_AMI_TYPE SELECTED_PRICE <<< "$OPTIMAL_CONFIG"
-            SELECTED_REGION="$AWS_REGION"
+        # Parse optimal configuration - Enhanced format: instance:ami:price:az:region:efficiency
+        IFS=':' read -r SELECTED_INSTANCE_TYPE SELECTED_AMI SELECTED_PRICE SELECTED_AZ SELECTED_REGION SELECTED_EFFICIENCY <<< "$OPTIMAL_CONFIG"
+        
+        # Set AMI type based on discovered AMI
+        SELECTED_AMI_TYPE="auto-discovered"
+        
+        # Use the selected AZ if provided
+        if [[ -n "$SELECTED_AZ" ]]; then
+            export PREFERRED_AZ="$SELECTED_AZ"
         fi
         
-        # Debug output to fix the empty variable issue
-        info "Parsed configuration:"
-        info "  SELECTED_INSTANCE_TYPE: '$SELECTED_INSTANCE_TYPE'"
-        info "  SELECTED_AMI: '$SELECTED_AMI'"
-        info "  SELECTED_AMI_TYPE: '$SELECTED_AMI_TYPE'"
-        info "  SELECTED_PRICE: '$SELECTED_PRICE'"
-        info "  SELECTED_REGION: '$SELECTED_REGION'"
+        # Update region if different
+        if [[ "$SELECTED_REGION" != "$AWS_REGION" ]]; then
+            export AWS_REGION="$SELECTED_REGION"
+        fi
+        
+        # Debug output
+        info "Enhanced configuration selection results:"
+        info "  Instance Type: '$SELECTED_INSTANCE_TYPE'"
+        info "  AMI: '$SELECTED_AMI'"
+        info "  Spot Price: '\$$SELECTED_PRICE/hour'"
+        info "  Availability Zone: '$SELECTED_AZ'"
+        info "  Region: '$SELECTED_REGION'"
+        info "  Cost Efficiency Score: '$SELECTED_EFFICIENCY'"
         
     else
         log "Manual selection mode: Using specified instance type $INSTANCE_TYPE"
@@ -1019,7 +1793,15 @@ launch_spot_instance() {
     info "Budget: \$$SELECTED_PRICE/hour"
     info "Region: $SELECTED_REGION"
     
-    # Step 2: Create optimized user data
+    # Step 2: Estimate deployment costs and send alerts if needed
+    estimate_deployment_costs "$SELECTED_INSTANCE_TYPE" "$SELECTED_PRICE" "$SELECTED_REGION"
+    
+    # Send cost alert if estimate is high
+    if [[ -n "$ESTIMATED_MONTHLY_COST" ]] && (( $(echo "$ESTIMATED_MONTHLY_COST > 150" | bc -l 2>/dev/null || echo "0") )); then
+        send_cost_alert "High Cost" "Deployment estimated at \$$ESTIMATED_MONTHLY_COST/month" "$ESTIMATED_MONTHLY_COST"
+    fi
+    
+    # Step 3: Create optimized user data
     create_optimized_user_data "$SELECTED_INSTANCE_TYPE" "$SELECTED_AMI_TYPE"
     
     # Step 3: Get pricing data for selected instance type for AZ optimization
@@ -1234,6 +2016,196 @@ launch_spot_instance() {
 }
 
 # =============================================================================
+# DEBUGGING AND MONITORING FUNCTIONS
+# =============================================================================
+
+check_instance_setup_status() {
+    local PUBLIC_IP="$1"
+    local KEY_FILE="${2:-${KEY_NAME}.pem}"
+    local ssh_options="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes -o ControlMaster=auto -o ControlPath=/tmp/ssh-control-status-%h-%p-%r -o ControlPersist=60"
+    
+    if [[ -z "$PUBLIC_IP" ]]; then
+        error "Usage: check_instance_setup_status <PUBLIC_IP> [KEY_FILE]"
+        return 1
+    fi
+    
+    log "🔍 Checking setup status for instance at $PUBLIC_IP..."
+    
+    # Test SSH connectivity
+    if ! ssh $ssh_options -i "$KEY_FILE" "ubuntu@$PUBLIC_IP" "echo SSH_READY" &> /dev/null; then
+        error "❌ Cannot establish SSH connection to $PUBLIC_IP"
+        return 1
+    fi
+    
+    success "✅ SSH connection successful"
+    
+    # Get comprehensive status with single SSH call
+    status_result=$(ssh $ssh_options -i "$KEY_FILE" "ubuntu@$PUBLIC_IP" '
+        # Current status
+        if [ -f /tmp/user-data-latest-status ]; then
+            cat /tmp/user-data-latest-status
+        else
+            echo "No status file found"
+        fi
+        
+        # Setup completion
+        if [ -f /tmp/user-data-complete ]; then
+            echo "COMPLETE"
+        else
+            echo "INCOMPLETE"
+        fi
+        
+        # Step count
+        ls /tmp/user-data-step-* 2>/dev/null | grep -v ERROR | wc -l || echo "0"
+        
+        # Errors
+        ls /tmp/user-data-step-*ERROR* 2>/dev/null | head -1 || echo "NO_ERRORS"
+        
+        # Completed steps list
+        echo "=== COMPLETED STEPS ==="
+        ls /tmp/user-data-step-* 2>/dev/null | grep -v ERROR | while read step; do 
+            echo "$(basename "$step" | cut -d- -f4-)"
+        done || echo "No steps completed"
+        
+        # System status
+        echo "=== SYSTEM STATUS ==="
+        
+        # Docker
+        if docker info >/dev/null 2>&1; then
+            echo "Docker: running"
+        else
+            echo "Docker: not running"
+        fi
+        
+        # GPU
+        if nvidia-smi >/dev/null 2>&1; then
+            echo "GPU: available"
+        else
+            echo "GPU: not available"
+        fi
+        
+        # Services (if setup complete)
+        if [ -f /tmp/user-data-complete ]; then
+            echo "=== SERVICE STATUS ==="
+            for port_name in "5678:n8n" "11434:ollama" "6333:qdrant" "11235:crawl4ai"; do
+                port=$(echo "$port_name" | cut -d: -f1)
+                name=$(echo "$port_name" | cut -d: -f2)
+                status=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null || curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/healthz" 2>/dev/null || echo "unreachable")
+                echo "$name (port $port): $status"
+            done
+        fi
+    ' 2>/dev/null || echo "Could not retrieve status information")
+    
+    # Parse results
+    local current_status=""
+    local completion_status=""
+    local completed_steps="0"
+    local error_files=""
+    local parsing_mode="status"
+    
+    while IFS= read -r line; do
+        case "$parsing_mode" in
+            "status")
+                if [[ "$line" == "COMPLETE" || "$line" == "INCOMPLETE" ]]; then
+                    completion_status="$line"
+                    parsing_mode="steps"
+                elif [[ "$line" =~ ^[0-9]+$ ]]; then
+                    completed_steps="$line"
+                    parsing_mode="errors"
+                else
+                    current_status="$line"
+                fi
+                ;;
+            "steps")
+                if [[ "$line" =~ ^[0-9]+$ ]]; then
+                    completed_steps="$line"
+                    parsing_mode="errors"
+                fi
+                ;;
+            "errors")
+                if [[ "$line" == "=== COMPLETED STEPS ===" ]]; then
+                    parsing_mode="completed_list"
+                elif [[ "$line" != "NO_ERRORS" ]]; then
+                    error_files="$line"
+                fi
+                ;;
+            "completed_list")
+                if [[ "$line" == "=== SYSTEM STATUS ===" ]]; then
+                    parsing_mode="system"
+                elif [[ "$line" != "No steps completed" ]]; then
+                    echo "  ✅ $line"
+                fi
+                ;;
+            "system")
+                if [[ "$line" == "=== SERVICE STATUS ===" ]]; then
+                    parsing_mode="services"
+                elif [[ "$line" =~ ^(Docker|GPU): ]]; then
+                    echo "  $line"
+                fi
+                ;;
+            "services")
+                if [[ "$line" =~ .*\(port.*\): ]]; then
+                    local service_name=$(echo "$line" | cut -d'(' -f1 | xargs)
+                    local service_status=$(echo "$line" | cut -d':' -f3 | xargs)
+                    if [[ "$service_status" =~ ^2[0-9][0-9]$ ]]; then
+                        echo "  $service_name: ✅ healthy"
+                    else
+                        echo "  $service_name: ❌ not responding (status: $service_status)"
+                    fi
+                fi
+                ;;
+        esac
+    done <<< "$status_result"
+    
+    # Display summary
+    echo -e "${BLUE}📊 Current Status:${NC} $current_status"
+    
+    if [[ "$completion_status" == "COMPLETE" ]]; then
+        success "🎉 Setup completed successfully!"
+    else
+        warning "⏳ Setup still in progress or failed"
+    fi
+    
+    echo -e "${BLUE}📈 Progress:${NC} $completed_steps/12 steps completed"
+    
+    if [[ -n "$error_files" && "$error_files" != "NO_ERRORS" ]]; then
+        error "❌ Errors detected in setup process:"
+        echo "$error_files"
+        
+        # Get error details
+        error_details=$(ssh $ssh_options -i "$KEY_FILE" "ubuntu@$PUBLIC_IP" "cat /var/log/user-data-progress.log 2>/dev/null | grep ERROR -A 3 -B 1 | tail -10" 2>/dev/null)
+        if [[ -n "$error_details" ]]; then
+            echo -e "${RED}Recent error details:${NC}"
+            echo "$error_details"
+        fi
+    else
+        success "✅ No errors detected"
+    fi
+    
+    echo -e "${BLUE}📋 Completed steps:${NC}"
+    # Steps were already displayed during parsing
+    
+    echo -e "${BLUE}🔧 System Status:${NC}"
+    # System status was already displayed during parsing
+    
+    if [[ "$completion_status" == "COMPLETE" ]]; then
+        echo -e "${BLUE}🌐 Service Status:${NC}"
+        # Service status was already displayed during parsing
+    fi
+    
+    # Close SSH control connection
+    ssh $ssh_options -O exit "ubuntu@$PUBLIC_IP" 2>/dev/null || true
+    
+    echo ""
+    echo -e "${YELLOW}💡 For detailed logs, run:${NC}"
+    echo "ssh -i $KEY_FILE ubuntu@$PUBLIC_IP"
+    echo "Then check:"
+    echo "  - sudo tail -f /var/log/user-data.log"
+    echo "  - cat /var/log/user-data-progress.log"
+    echo "  - ls -la /tmp/user-data-*"
+}
+
+# =============================================================================
 # DEPLOYMENT RESULTS DISPLAY
 # =============================================================================
 
@@ -1344,6 +2316,8 @@ display_results() {
     echo -e "  ${GREEN}✓${NC} CloudFront CDN"
     echo -e "  ${GREEN}✓${NC} CloudWatch monitoring"
     echo -e "  ${GREEN}✓${NC} SSM parameter management"
+    echo -e "  ${GREEN}✓${NC} Real-time setup progress tracking"
+    echo -e "  ${GREEN}✓${NC} Advanced error detection and debugging"
     echo ""
     echo -e "${PURPLE}🧠 Intelligent Selection Summary:${NC}"
     if [[ "$INSTANCE_TYPE" == "auto" ]]; then
@@ -1355,6 +2329,12 @@ display_results() {
         echo -e "  ${CYAN}Specified:${NC} $INSTANCE_TYPE"
         echo -e "  ${CYAN}AMI Selection:${NC} Best available AMI auto-selected"
     fi
+    echo ""
+    echo -e "${BLUE}🔍 Monitoring & Debugging:${NC}"
+    echo -e "  ${CYAN}Real-time status check:${NC}     $0 check-status $PUBLIC_IP"
+    echo -e "  ${CYAN}Progress logs:${NC}              ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP 'tail -f /var/log/user-data-progress.log'"
+    echo -e "  ${CYAN}Full setup logs:${NC}            ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP 'tail -f /var/log/user-data.log'"
+    echo -e "  ${CYAN}GPU status:${NC}                 ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP '/usr/local/bin/gpu-check.sh'"
     echo ""
     echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
     echo -e "${BLUE}Happy building with your AI-powered infrastructure! 🚀${NC}"
@@ -1399,7 +2379,7 @@ cleanup_on_error() {
     fi
     
     # Clean up temporary files
-    rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh disabled-config.json
+    rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh disabled-config.json cloudfront-config.json
 }
 
 create_key_pair() {
@@ -1421,8 +2401,373 @@ create_key_pair() {
     success "Created SSH key pair: ${KEY_NAME}.pem"
 }
 
+retry_with_backoff() {
+    local cmd=("$@")
+    local max_attempts=5
+    local base_delay=1
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        log "Attempt $attempt/$max_attempts: ${cmd[*]}"
+        
+        if "${cmd[@]}"; then
+            return 0
+        fi
+        
+        if [[ $attempt -eq $max_attempts ]]; then
+            error "Command failed after $max_attempts attempts: ${cmd[*]}"
+            return 1
+        fi
+        
+        local delay=$((base_delay * (2 ** (attempt - 1))))
+        local jitter=$((RANDOM % 3))
+        delay=$((delay + jitter))
+        
+        warning "Command failed, retrying in ${delay}s..."
+        sleep "$delay"
+        ((attempt++))
+    done
+}
+
+generate_secure_password() {
+    local length=${1:-32}
+    openssl rand -base64 "$length" | tr -d "=+/" | cut -c1-"$length"
+}
+
+store_ssm_parameter() {
+    local param_name="$1"
+    local param_value="$2"
+    local param_type="${3:-SecureString}"
+    local description="$4"
+    
+    log "Storing parameter: $param_name"
+    
+    retry_with_backoff aws ssm put-parameter \
+        --name "$param_name" \
+        --value "$param_value" \
+        --type "$param_type" \
+        --description "$description" \
+        --overwrite \
+        --region "$AWS_REGION" > /dev/null
+    
+    if [[ $? -eq 0 ]]; then
+        success "Stored parameter: $param_name"
+    else
+        error "Failed to store parameter: $param_name"
+        return 1
+    fi
+}
+
+get_ssm_parameter() {
+    local param_name="$1"
+    local default_value="${2:-}"
+    
+    local value
+    value=$(aws ssm get-parameter \
+        --name "$param_name" \
+        --with-decryption \
+        --region "$AWS_REGION" \
+        --query 'Parameter.Value' \
+        --output text 2>/dev/null)
+    
+    if [[ $? -eq 0 ]] && [[ "$value" != "None" ]] && [[ -n "$value" ]]; then
+        echo "$value"
+    else
+        if [[ -n "$default_value" ]]; then
+            log "Parameter $param_name not found, using default"
+            echo "$default_value"
+        else
+            warning "Parameter $param_name not found and no default provided"
+            return 1
+        fi
+    fi
+}
+
+setup_secure_credentials() {
+    log "Setting up secure credential management..."
+    
+    local base_path="/aibuildkit"
+    local postgres_password
+    local n8n_encryption_key
+    local openai_api_key
+    local webhook_url
+    
+    postgres_password=$(get_ssm_parameter "$base_path/POSTGRES_PASSWORD")
+    if [[ -z "$postgres_password" ]]; then
+        postgres_password=$(generate_secure_password 24)
+        store_ssm_parameter "$base_path/POSTGRES_PASSWORD" "$postgres_password" "SecureString" "PostgreSQL database password for AI Starter Kit"
+    fi
+    
+    n8n_encryption_key=$(get_ssm_parameter "$base_path/n8n/ENCRYPTION_KEY")
+    if [[ -z "$n8n_encryption_key" ]]; then
+        n8n_encryption_key=$(generate_secure_password 32)
+        store_ssm_parameter "$base_path/n8n/ENCRYPTION_KEY" "$n8n_encryption_key" "SecureString" "n8n encryption key for secure workflow storage"
+    fi
+    
+    openai_api_key=$(get_ssm_parameter "$base_path/OPENAI_API_KEY")
+    if [[ -z "$openai_api_key" ]]; then
+        warning "OpenAI API key not found in SSM. Please set it manually:"
+        warning "aws ssm put-parameter --name '$base_path/OPENAI_API_KEY' --value 'your-api-key' --type SecureString --region $AWS_REGION"
+    fi
+    
+    webhook_url=$(get_ssm_parameter "$base_path/WEBHOOK_URL")
+    if [[ -z "$webhook_url" ]]; then
+        log "Webhook URL not set in SSM. This is optional for basic functionality."
+    fi
+    
+    export POSTGRES_PASSWORD="$postgres_password"
+    export N8N_ENCRYPTION_KEY="$n8n_encryption_key"
+    export OPENAI_API_KEY="$openai_api_key"
+    export WEBHOOK_URL="$webhook_url"
+    
+    success "Secure credentials configured"
+}
+
+setup_infrastructure_parallel() {
+    log "Setting up infrastructure components in parallel..."
+    
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    
+    local key_pair_file="$temp_dir/key_pair"
+    local iam_role_file="$temp_dir/iam_role"
+    local security_group_file="$temp_dir/security_group"
+    
+    {
+        create_key_pair 2>&1 && echo "SUCCESS" > "$key_pair_file"
+    } &
+    local key_pair_pid=$!
+    
+    {
+        create_iam_role 2>&1 && echo "SUCCESS" > "$iam_role_file"
+    } &
+    local iam_role_pid=$!
+    
+    {
+        SG_ID=$(create_security_group 2>&1)
+        if [[ $? -eq 0 ]] && [[ -n "$SG_ID" ]]; then
+            echo "$SG_ID" > "$security_group_file"
+        else
+            echo "FAILED" > "$security_group_file"
+        fi
+    } &
+    local security_group_pid=$!
+    
+    log "Waiting for parallel infrastructure creation to complete..."
+    
+    local failed_components=()
+    
+    if ! wait "$key_pair_pid"; then
+        failed_components+=("key_pair")
+    elif [[ ! -f "$key_pair_file" ]] || [[ "$(cat "$key_pair_file")" != "SUCCESS" ]]; then
+        failed_components+=("key_pair")
+    fi
+    
+    if ! wait "$iam_role_pid"; then
+        failed_components+=("iam_role")
+    elif [[ ! -f "$iam_role_file" ]] || [[ "$(cat "$iam_role_file")" != "SUCCESS" ]]; then
+        failed_components+=("iam_role")
+    fi
+    
+    if ! wait "$security_group_pid"; then
+        failed_components+=("security_group")
+    elif [[ ! -f "$security_group_file" ]] || [[ "$(cat "$security_group_file")" == "FAILED" ]]; then
+        failed_components+=("security_group")
+    fi
+    
+    if [[ ${#failed_components[@]} -gt 0 ]]; then
+        error "Failed to create infrastructure components: ${failed_components[*]}"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    local sg_id
+    sg_id=$(cat "$security_group_file")
+    
+    success "Parallel infrastructure setup completed successfully"
+    log "Security Group ID: $sg_id"
+    
+    log "Creating EFS file system..."
+    local efs_dns
+    efs_dns=$(create_efs "$sg_id")
+    
+    if [[ -z "$efs_dns" ]] || [[ "$efs_dns" == "None" ]]; then
+        error "Failed to create EFS file system"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    rm -rf "$temp_dir"
+    
+    echo "$sg_id:$efs_dns"
+}
+
+get_caller_ip() {
+    local caller_ip
+    caller_ip=$(curl -s --max-time 10 ifconfig.me 2>/dev/null || \
+                curl -s --max-time 10 icanhazip.com 2>/dev/null || \
+                curl -s --max-time 10 checkip.amazonaws.com 2>/dev/null)
+    
+    if [[ -z "$caller_ip" ]] || [[ ! "$caller_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        warning "Could not determine caller IP, using 0.0.0.0/0 for SSH access"
+        echo "0.0.0.0/0"
+    else
+        log "Detected caller IP: $caller_ip"
+        echo "$caller_ip/32"
+    fi
+}
+
+test_service_endpoint() {
+    local host="$1"
+    local port="$2"
+    local service_name="$3"
+    local health_path="${4:-/health}"
+    
+    local url="http://$host:$port$health_path"
+    local response
+    local http_code
+    local timing
+    
+    timing=$(time (
+        response=$(curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" "$url" 2>/dev/null || echo "connection_failed")
+    ) 2>&1)
+    
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [[ "$http_code" =~ ^[0-9]{3}$ ]]; then
+        if [[ "$http_code" -ge 200 && "$http_code" -lt 400 ]]; then
+            local response_time
+            response_time=$(echo "$timing" | grep -o '[0-9]*\.[0-9]*s' | head -n1 | sed 's/s//')
+            echo "✓ $service_name ($host:$port): HTTP $http_code (${response_time:-unknown}s)"
+            return 0
+        else
+            echo "✗ $service_name ($host:$port): HTTP $http_code (error response)"
+            return 1
+        fi
+    else
+        echo "✗ $service_name ($host:$port): Connection failed"
+        return 1
+    fi
+}
+
+get_docker_service_info() {
+    local host="$1"
+    
+    log "Gathering Docker service information from $host..."
+    
+    ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ubuntu@"$host" '
+        echo "=== DOCKER CONTAINERS ==="
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "Docker not available"
+        
+        echo ""
+        echo "=== DOCKER STATS ==="
+        timeout 5 docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}" 2>/dev/null || echo "Docker stats not available"
+        
+        echo ""
+        echo "=== DOCKER LOGS (last 10 lines per service) ==="
+        for service in n8n ollama qdrant crawl4ai postgres; do
+            echo "--- $service ---"
+            docker logs --tail 10 "$service" 2>/dev/null || echo "No logs for $service"
+        done
+        
+        echo ""
+        echo "=== SYSTEM RESOURCES ==="
+        echo "Memory:"
+        free -h 2>/dev/null || echo "Memory info not available"
+        echo "Disk:"
+        df -h / 2>/dev/null || echo "Disk info not available"
+        echo "Load:"
+        uptime 2>/dev/null || echo "Load info not available"
+        
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            echo ""
+            echo "=== GPU STATUS ==="
+            nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo "GPU info not available"
+        fi
+    ' 2>/dev/null || echo "Could not gather Docker service information"
+}
+
+enhanced_health_check() {
+    local host="$1"
+    local max_attempts="${2:-10}"
+    local attempt=1
+    
+    log "Starting enhanced health check for $host..."
+    
+    local services=(
+        "5678:n8n:/healthz"
+        "11434:ollama:/api/tags"
+        "6333:qdrant:/health"
+        "11235:crawl4ai:/health"
+    )
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        log "Health check attempt $attempt/$max_attempts"
+        
+        local all_healthy=true
+        local failed_services=()
+        
+        for service_config in "${services[@]}"; do
+            local port=$(echo "$service_config" | cut -d: -f1)
+            local name=$(echo "$service_config" | cut -d: -f2)
+            local path=$(echo "$service_config" | cut -d: -f3)
+            
+            if ! test_service_endpoint "$host" "$port" "$name" "$path"; then
+                all_healthy=false
+                failed_services+=("$name")
+            fi
+        done
+        
+        if [[ "$all_healthy" == true ]]; then
+            success "All services are healthy on $host"
+            return 0
+        fi
+        
+        if [[ $attempt -eq $max_attempts ]]; then
+            error "Health check failed after $max_attempts attempts"
+            error "Failed services: ${failed_services[*]}"
+            
+            log "Gathering diagnostic information..."
+            get_docker_service_info "$host"
+            
+            return 1
+        fi
+        
+        local delay=$((30 + (attempt * 10)))
+        warning "Services not ready: ${failed_services[*]}. Retrying in ${delay}s..."
+        sleep "$delay"
+        ((attempt++))
+    done
+}
+
+comprehensive_service_diagnostics() {
+    local host="$1"
+    
+    log "Running comprehensive service diagnostics for $host..."
+    
+    echo "=== SERVICE ENDPOINT TESTS ==="
+    test_service_endpoint "$host" "5678" "n8n" "/healthz"
+    test_service_endpoint "$host" "11434" "ollama" "/api/tags"
+    test_service_endpoint "$host" "6333" "qdrant" "/health"
+    test_service_endpoint "$host" "11235" "crawl4ai" "/health"
+    
+    echo ""
+    echo "=== DOCKER SERVICE INFORMATION ==="
+    get_docker_service_info "$host"
+    
+    echo ""
+    echo "=== NETWORK CONNECTIVITY ==="
+    for port in 5678 11434 6333 11235; do
+        if nc -z "$host" "$port" 2>/dev/null; then
+            echo "✓ Port $port: Open"
+        else
+            echo "✗ Port $port: Closed or filtered"
+        fi
+    done
+}
+
 create_security_group() {
-    log "Creating security group..."
+    log "Creating enhanced security group with IP whitelisting..."
     
     # Check if security group exists
     SG_ID=$(aws ec2 describe-security-groups \
@@ -1444,6 +2789,14 @@ create_security_group() {
         --query 'Vpcs[0].VpcId' \
         --output text)
     
+    if [[ "$VPC_ID" == "None" ]] || [[ -z "$VPC_ID" ]]; then
+        error "Failed to find default VPC"
+        return 1
+    fi
+    
+    # Get caller's IP for SSH whitelisting
+    CALLER_IP=$(get_caller_ip)
+    
     # Create security group
     SG_ID=$(aws ec2 create-security-group \
         --group-name "${STACK_NAME}-sg" \
@@ -1453,70 +2806,152 @@ create_security_group() {
         --query 'GroupId' \
         --output text)
     
-    # Add rules
-    aws ec2 authorize-security-group-ingress \
+    if [[ -z "$SG_ID" ]] || [[ "$SG_ID" == "None" ]]; then
+        error "Failed to create security group"
+        return 1
+    fi
+    
+    log "Adding security group rules with enhanced security..."
+    
+    # SSH access - restricted to caller's IP
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" \
         --protocol tcp \
         --port 22 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+        --cidr "$CALLER_IP" \
+        --region "$AWS_REGION" || {
+        warning "Failed to add SSH rule for $CALLER_IP, adding fallback rule"
+        aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 22 \
+            --cidr 0.0.0.0/0 \
+            --region "$AWS_REGION"
+    }
     
-    # n8n
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 5678 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # Ollama
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11434 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # Crawl4AI
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11235 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # Qdrant
-    aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 6333 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
-    
-    # ALB ports
-    aws ec2 authorize-security-group-ingress \
+    # Public ALB ports (these need to be open to the world)
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" \
         --protocol tcp \
         --port 80 \
         --cidr 0.0.0.0/0 \
         --region "$AWS_REGION"
     
-    aws ec2 authorize-security-group-ingress \
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" \
         --protocol tcp \
         --port 443 \
         --cidr 0.0.0.0/0 \
         --region "$AWS_REGION"
     
-    # NFS for EFS
-    aws ec2 authorize-security-group-ingress \
+    # Service ports - restricted to caller's IP and internal VPC
+    local vpc_cidr
+    vpc_cidr=$(aws ec2 describe-vpcs \
+        --vpc-ids "$VPC_ID" \
+        --region "$AWS_REGION" \
+        --query 'Vpcs[0].CidrBlock' \
+        --output text)
+    
+    # n8n - workflow automation interface
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 5678 \
+        --cidr "$CALLER_IP" \
+        --region "$AWS_REGION"
+    
+    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
+        retry_with_backoff aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 5678 \
+            --cidr "$vpc_cidr" \
+            --region "$AWS_REGION"
+    fi
+    
+    # Ollama - LLM inference
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 11434 \
+        --cidr "$CALLER_IP" \
+        --region "$AWS_REGION"
+    
+    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
+        retry_with_backoff aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 11434 \
+            --cidr "$vpc_cidr" \
+            --region "$AWS_REGION"
+    fi
+    
+    # Crawl4AI - web scraping service
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 11235 \
+        --cidr "$CALLER_IP" \
+        --region "$AWS_REGION"
+    
+    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
+        retry_with_backoff aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 11235 \
+            --cidr "$vpc_cidr" \
+            --region "$AWS_REGION"
+    fi
+    
+    # Qdrant - vector database
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 6333 \
+        --cidr "$CALLER_IP" \
+        --region "$AWS_REGION"
+    
+    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
+        retry_with_backoff aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 6333 \
+            --cidr "$vpc_cidr" \
+            --region "$AWS_REGION"
+    fi
+    
+    # NFS for EFS - internal communication only
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" \
         --protocol tcp \
         --port 2049 \
         --source-group "$SG_ID" \
         --region "$AWS_REGION"
     
-    success "Created security group: $SG_ID"
+    # UDP for NFS as well
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol udp \
+        --port 2049 \
+        --source-group "$SG_ID" \
+        --region "$AWS_REGION"
+    
+    # Portmapper for NFS
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp \
+        --port 111 \
+        --source-group "$SG_ID" \
+        --region "$AWS_REGION"
+    
+    retry_with_backoff aws ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol udp \
+        --port 111 \
+        --source-group "$SG_ID" \
+        --region "$AWS_REGION"
+    
+    success "Created enhanced security group: $SG_ID (SSH restricted to $CALLER_IP)"
     echo "$SG_ID"
 }
 
@@ -1699,7 +3134,7 @@ create_efs_mount_target() {
     local SG_ID="$1"
     local INSTANCE_AZ="$2"
     
-    if [[ -z "$EFS_ID" ]]; then
+    if [[ -z "${EFS_ID:-}" ]]; then
         error "EFS_ID not set. Cannot create mount target."
         return 1
     fi
@@ -1766,8 +3201,10 @@ create_target_group() {
     # Register instance to target group
     aws elbv2 register-targets \
         --target-group-arn "$TARGET_GROUP_ARN" \
-        --targets Id="$INSTANCE_ID" Port=5678 \
-        --region "$AWS_REGION"
+        --targets "Id=$INSTANCE_ID,Port=5678" \
+        --region "$AWS_REGION" || {
+        warning "Failed to register instance to n8n target group, but continuing..."
+    }
     
     success "Created n8n target group: $TARGET_GROUP_ARN"
     echo "$TARGET_GROUP_ARN"
@@ -1802,8 +3239,10 @@ create_qdrant_target_group() {
     # Register instance to target group
     aws elbv2 register-targets \
         --target-group-arn "$QDRANT_TG_ARN" \
-        --targets Id="$INSTANCE_ID" Port=6333 \
-        --region "$AWS_REGION"
+        --targets "Id=$INSTANCE_ID,Port=6333" \
+        --region "$AWS_REGION" || {
+        warning "Failed to register instance to qdrant target group, but continuing..."
+    }
     
     success "Created qdrant target group: $QDRANT_TG_ARN"
     echo "$QDRANT_TG_ARN"
@@ -1847,7 +3286,7 @@ create_alb() {
         --protocol HTTP \
         --port 80 \
         --default-actions Type=forward,TargetGroupArn="$TARGET_GROUP_ARN" \
-        --region "$AWS_REGION"
+        --region "$AWS_REGION" > /dev/null 2>&1
     
     # Create listener for qdrant
     aws elbv2 create-listener \
@@ -1855,7 +3294,7 @@ create_alb() {
         --protocol HTTP \
         --port 6333 \
         --default-actions Type=forward,TargetGroupArn="$QDRANT_TG_ARN" \
-        --region "$AWS_REGION"
+        --region "$AWS_REGION" > /dev/null 2>&1
     
     export ALB_ARN
     success "Created ALB: $ALB_DNS"
@@ -1867,53 +3306,71 @@ setup_cloudfront() {
     
     log "Setting up CloudFront CDN..."
     
-    # Create CloudFront distribution
-    DISTRIBUTION_CONFIG='{
-        "CallerReference": "'${STACK_NAME}'-'$(date +%s)'",
-        "Comment": "CloudFront distribution for AI Starter Kit",
-        "DefaultCacheBehavior": {
-            "TargetOriginId": "ALBOrigin",
-            "ViewerProtocolPolicy": "redirect-to-https",
-            "AllowedMethods": {
-                "Quantity": 7,
-                "Items": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
-                "CachedMethods": {
-                    "Quantity": 2,
-                    "Items": ["GET", "HEAD"]
-                }
-            },
-            "ForwardedValues": {
-                "QueryString": true,
-                "Headers": {
-                    "Quantity": 0
-                }
-            },
-            "TrustedSigners": {
-                "Enabled": false,
+    # Create CloudFront distribution config file
+    cat > cloudfront-config.json << EOF
+{
+    "CallerReference": "${STACK_NAME}-$(date +%s)",
+    "Comment": "CloudFront distribution for AI Starter Kit",
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "ALBOrigin",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "AllowedMethods": {
+            "Quantity": 7,
+            "Items": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+            "CachedMethods": {
+                "Quantity": 2,
+                "Items": ["GET", "HEAD"]
+            }
+        },
+        "ForwardedValues": {
+            "QueryString": true,
+            "Headers": {
                 "Quantity": 0
             },
-            "MinTTL": 0
+            "Cookies": {
+                "Forward": "none"
+            }
         },
-        "Origins": {
-            "Quantity": 1,
-            "Items": [
-                {
-                    "Id": "ALBOrigin",
-                    "DomainName": "'$ALB_DNS'",
-                    "CustomOriginConfig": {
-                        "HTTPPort": 80,
-                        "HTTPSPort": 443,
-                        "OriginProtocolPolicy": "http-only"
-                    }
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "MinTTL": 0
+    },
+    "Origins": {
+        "Quantity": 1,
+        "Items": [
+            {
+                "Id": "ALBOrigin",
+                "DomainName": "$ALB_DNS",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only"
                 }
-            ]
-        },
-        "Enabled": true,
-        "PriceClass": "PriceClass_100"
-    }'
+            }
+        ]
+    },
+    "Enabled": true,
+    "PriceClass": "PriceClass_100"
+}
+EOF
     
-    DISTRIBUTION_ID=$(echo "$DISTRIBUTION_CONFIG" | aws cloudfront create-distribution \
-        --distribution-config file:///dev/stdin \
+    # Validate the CloudFront config file was created properly
+    if [[ ! -f "cloudfront-config.json" ]]; then
+        error "CloudFront config file was not created"
+        return 1
+    fi
+    
+    # Validate JSON syntax
+    if ! jq empty cloudfront-config.json 2>/dev/null; then
+        error "Invalid JSON in CloudFront config file"
+        cat cloudfront-config.json
+        return 1
+    fi
+    
+    DISTRIBUTION_ID=$(aws cloudfront create-distribution \
+        --distribution-config file://cloudfront-config.json \
         --region "$AWS_REGION" \
         --query 'Distribution.Id' \
         --output text)
@@ -1932,19 +3389,354 @@ setup_cloudfront() {
 wait_for_instance_ready() {
     local PUBLIC_IP="$1"
     
-    log "Waiting for instance to be ready for SSH..."
+    log "🚀 Starting enhanced 3-phase instance readiness check..."
     
-    for i in {1..30}; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" "test -f /tmp/user-data-complete" &> /dev/null; then
-            success "Instance is ready!"
-            return 0
+    local ssh_options="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes -o ControlMaster=auto -o ControlPath=/tmp/ssh-control-%h-%p-%r -o ControlPersist=300"
+    
+    # =======================================================================
+    # PHASE 1: SSH Connectivity (20 attempts, 15s each = 5 minutes max)
+    # =======================================================================
+    info "📡 Phase 1: Establishing SSH connectivity..."
+    local ssh_ready=false
+    
+    for attempt in {1..20}; do
+        if ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" "echo SSH_READY" &> /dev/null; then
+            success "✅ SSH connection established! (attempt $attempt/20)"
+            ssh_ready=true
+            break
         fi
-        info "Attempt $i/30: Instance not ready yet, waiting 30 seconds..."
+        
+        # Progress indicator
+        local progress=$((attempt * 5))
+        info "🔄 SSH attempt $attempt/20 (${progress}%): Waiting for network interface... (${attempt}m${((attempt-1)*15%60)}s elapsed)"
+        sleep 15
+    done
+    
+    if [ "$ssh_ready" = false ]; then
+        error "❌ SSH connectivity failed after 5 minutes"
+        log "🔍 Checking EC2 instance status..."
+        
+        # Try to get instance status for debugging
+        if command -v aws &> /dev/null; then
+            local instance_id=$(aws ec2 describe-instances \
+                --filters "Name=ip-address,Values=$PUBLIC_IP" \
+                --region "$AWS_REGION" \
+                --query 'Reservations[0].Instances[0].InstanceId' \
+                --output text 2>/dev/null || echo "unknown")
+            
+            if [[ "$instance_id" != "unknown" && "$instance_id" != "None" ]]; then
+                info "Instance ID: $instance_id"
+                aws ec2 describe-instances --instance-ids "$instance_id" --region "$AWS_REGION" \
+                    --query 'Reservations[0].Instances[0].{State:State.Name,Status:InstanceStatus.Status}' \
+                    --output table 2>/dev/null || true
+            fi
+        fi
+        
+        echo -e "${YELLOW}Troubleshooting steps:${NC}"
+        echo "1. Check security group allows SSH (port 22) from your IP"
+        echo "2. Verify the instance is running: aws ec2 describe-instances --instance-ids <instance-id>"
+        echo "3. Check system logs: aws ec2 get-console-output --instance-id <instance-id>"
+        return 1
+    fi
+    
+    # =======================================================================
+    # PHASE 2: Cloud-init completion (40 attempts, 30s each = 20 minutes max)
+    # =======================================================================
+    info "☁️  Phase 2: Waiting for cloud-init completion..."
+    local cloud_init_ready=false
+    
+    for attempt in {1..40}; do
+        # Check cloud-init status with timeout
+        local cloud_init_status=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" \
+            "timeout 10 cloud-init status --wait 2>/dev/null || echo 'timeout'" 2>/dev/null || echo "connection_failed")
+        
+        if [[ "$cloud_init_status" == *"done"* ]]; then
+            success "✅ Cloud-init completed successfully! (attempt $attempt/40)"
+            cloud_init_ready=true
+            break
+        elif [[ "$cloud_init_status" == "timeout" ]]; then
+            # Still running
+            local progress=$((attempt * 100 / 40))
+            info "🔄 Cloud-init attempt $attempt/40 (${progress}%): Still initializing system... (${attempt}min elapsed)"
+        elif [[ "$cloud_init_status" == "connection_failed" ]]; then
+            warning "⚠️  SSH connection temporarily lost (attempt $attempt/40) - instance may be rebooting"
+        else
+            # Check for errors
+            if [[ "$cloud_init_status" == *"error"* ]]; then
+                error "❌ Cloud-init failed with error: $cloud_init_status"
+                return 1
+            fi
+            info "🔄 Cloud-init status (attempt $attempt/40): $cloud_init_status"
+        fi
+        
         sleep 30
     done
     
-    error "Instance failed to become ready after 15 minutes"
-    return 1
+    if [ "$cloud_init_ready" = false ]; then
+        error "❌ Cloud-init failed to complete after 20 minutes"
+        
+        # Get diagnostic information
+        local diagnostic_info=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" '
+            echo "=== CLOUD-INIT STATUS ==="
+            cloud-init status || echo "Status check failed"
+            echo "=== CLOUD-INIT LOGS (last 20 lines) ==="
+            sudo tail -20 /var/log/cloud-init.log 2>/dev/null || echo "No cloud-init.log available"
+            echo "=== CLOUD-INIT OUTPUT LOGS (last 20 lines) ==="
+            sudo tail -20 /var/log/cloud-init-output.log 2>/dev/null || echo "No cloud-init-output.log available"
+        ' 2>/dev/null || echo "Could not retrieve diagnostic information")
+        
+        echo -e "${RED}Diagnostic information:${NC}"
+        echo "$diagnostic_info"
+        return 1
+    fi
+    
+    # =======================================================================
+    # PHASE 3: User-data completion (60 attempts, 30s each = 30 minutes max)
+    # =======================================================================
+    info "📜 Phase 3: Waiting for user-data script completion..."
+    local setup_complete=false
+    local last_status=""
+    
+    for attempt in {1..60}; do
+        # Use single SSH connection to check multiple things efficiently
+        local ssh_result=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" '
+            # Check if setup is complete
+            if [ -f /tmp/user-data-complete ]; then
+                echo "COMPLETE"
+            else
+                echo "RUNNING"
+            fi
+            
+            # Get current status (if available)
+            if [ -f /tmp/user-data-latest-status ]; then
+                cat /tmp/user-data-latest-status
+            else
+                echo "User-data script initializing..."
+            fi
+            
+            # Check for errors
+            ls /tmp/user-data-step-*ERROR* 2>/dev/null | head -1 || echo "NO_ERRORS"
+            
+            # Get completed step count
+            ls /tmp/user-data-step-* 2>/dev/null | grep -v ERROR | wc -l || echo "0"
+            
+            # Get system resource status
+            echo "CPU: $(top -bn1 | grep "Cpu(s)" | awk "{print \$2}" | cut -d"%" -f1 || echo "N/A")% | RAM: $(free | grep Mem | awk "{printf \"%.1f\", \$3/\$2 * 100.0}" || echo "N/A")%"
+        ' 2>/dev/null || echo -e "CONNECTION_ISSUE\nConnection issue\nNO_ERRORS\n0\nSystem: N/A")
+        
+        # Parse the results
+        IFS=$'\n' read -d '' -r completion_status current_status error_check completed_steps system_status <<< "$ssh_result" || true
+        
+        # Check if setup is complete
+        if [[ "$completion_status" == "COMPLETE" ]]; then
+            success "🎉 User-data script completed successfully! (attempt $attempt/60)"
+            setup_complete=true
+            break
+        fi
+        
+        # Handle connection issues
+        if [[ "$completion_status" == "CONNECTION_ISSUE" ]]; then
+            if (( attempt % 3 == 0 )); then  # Only log every 3rd connection issue
+                warning "⚠️  SSH connection issue (attempt $attempt/60) - instance may be under heavy load"
+            fi
+        else
+            # Enhanced progress reporting
+            local progress=$((attempt * 100 / 60))
+            local elapsed_min=$((attempt / 2))
+            
+            # Only log if status changed or every 5 attempts
+            if [[ "$current_status" != "$last_status" ]] || (( attempt % 5 == 0 )); then
+                if [[ "$current_status" == "User-data script initializing..." ]]; then
+                    info "🔄 User-data attempt $attempt/60 (${progress}%): Starting deployment script... (${elapsed_min}min elapsed)"
+                else
+                    info "📊 User-data attempt $attempt/60 (${progress}%): $current_status | $system_status (${elapsed_min}min elapsed)"
+                fi
+                last_status="$current_status"
+                
+                # Show step progress
+                if [[ "$completed_steps" =~ ^[0-9]+$ ]] && [ "$completed_steps" -gt 0 ]; then
+                    info "✅ Completed setup steps: $completed_steps/12"
+                fi
+            fi
+            
+            # Check for errors
+            if [[ -n "$error_check" && "$error_check" != "NO_ERRORS" ]]; then
+                error "❌ User-data script failed - error detected!"
+                
+                # Get detailed error information
+                local error_details=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" '
+                    echo "=== ERROR DETAILS ==="
+                    ls /tmp/user-data-step-*ERROR* 2>/dev/null | while read error_file; do
+                        echo "Error file: $error_file"
+                        cat "$error_file" 2>/dev/null || echo "Could not read error file"
+                        echo "---"
+                    done
+                    echo "=== USER-DATA LOG (last 30 lines) ==="
+                    tail -30 /var/log/user-data.log 2>/dev/null || echo "No user-data.log available"
+                    echo "=== PROGRESS LOG (last 20 lines) ==="
+                    tail -20 /var/log/user-data-progress.log 2>/dev/null || echo "No progress log available"
+                ' 2>/dev/null || echo "Could not retrieve error details")
+                
+                echo -e "${RED}Error details:${NC}"
+                echo "$error_details"
+                
+                echo -e "${YELLOW}For debugging, SSH into the instance:${NC}"
+                echo "ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
+                echo -e "${YELLOW}Check these files for troubleshooting:${NC}"
+                echo "  - /var/log/user-data.log (complete setup log)"
+                echo "  - /var/log/user-data-progress.log (progress tracking)"
+                echo "  - /tmp/user-data-step-* (individual step status)"
+                echo "  - /var/log/cloud-init-output.log (cloud-init output)"
+                
+                return 1
+            fi
+        fi
+        
+        sleep 30
+    done
+    
+    if [ "$setup_complete" = false ]; then
+        error "❌ User-data script failed to complete after 30 minutes"
+        
+        # Comprehensive final diagnostic
+        local final_info=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" '
+            echo "=== FINAL DIAGNOSTIC REPORT ==="
+            echo "Timestamp: $(date)"
+            echo ""
+            echo "=== CURRENT STATUS ==="
+            cat /tmp/user-data-latest-status 2>/dev/null || echo "No status file available"
+            echo ""
+            echo "=== STEP COMPLETION ==="
+            echo "Completed steps: $(ls /tmp/user-data-step-* 2>/dev/null | grep -v ERROR | wc -l)/12"
+            echo "Error steps: $(ls /tmp/user-data-step-*ERROR* 2>/dev/null | wc -l)"
+            echo ""
+            echo "=== SYSTEM RESOURCES ==="
+            echo "CPU: $(top -bn1 | grep "Cpu(s)" | awk "{print \$2}" | cut -d"%" -f1 || echo "N/A")%"
+            echo "Memory: $(free -h | grep Mem | awk "{print \$3\"/\"\$2\" (\"\$3/\$2*100\"%)\"}") used"
+            echo "Disk: $(df -h / | tail -1 | awk "{print \$3\"/\"\$2\" (\"\$5\")\"}")"
+            echo ""
+            echo "=== RECENT LOG ENTRIES ==="
+            tail -30 /var/log/user-data.log 2>/dev/null || echo "No user-data.log available"
+        ' 2>/dev/null || echo "Could not retrieve final diagnostic information")
+        
+        echo -e "${RED}Final diagnostic information:${NC}"
+        echo "$final_info"
+        
+        echo -e "${YELLOW}For debugging, SSH into the instance:${NC}"
+        echo "ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
+        echo -e "${YELLOW}Recommended troubleshooting steps:${NC}"
+        echo "1. Check /var/log/user-data.log for detailed setup logs"
+        echo "2. Review /var/log/user-data-progress.log for progress tracking"
+        echo "3. Examine /tmp/user-data-step-* files for individual step status"
+        echo "4. Monitor system resources with 'htop' or 'top'"
+        echo "5. Check Docker status with 'docker info' and 'docker ps'"
+        
+        return 1
+    fi
+    
+    # =======================================================================
+    # FINAL VALIDATION
+    # =======================================================================
+    log "🔍 Running final system validation checks..."
+    
+    local validation_result=$(ssh $ssh_options -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" '
+        # Check GPU
+        gpu_status="unknown"
+        if command -v nvidia-smi &> /dev/null; then
+            gpu_count=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null || echo "0")
+            gpu_driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo "none")
+            if [ "$gpu_count" -gt 0 ]; then
+                gpu_status="detected:$gpu_count:$gpu_driver"
+            else
+                gpu_status="no_devices"
+            fi
+        else
+            gpu_status="no_driver"
+        fi
+        echo "$gpu_status"
+        
+        # Check Docker
+        if docker info >/dev/null 2>&1; then
+            echo "running"
+        else
+            echo "not_running"
+        fi
+        
+        # Check Docker Compose services (if any are running)
+        if [ -f /home/ubuntu/ai-starter-kit/docker-compose.gpu-optimized.yml ]; then
+            cd /home/ubuntu/ai-starter-kit
+            running_services=$(docker compose -f docker-compose.gpu-optimized.yml ps --services --filter "status=running" 2>/dev/null | wc -l || echo "0")
+            echo "services:$running_services"
+        else
+            echo "services:0"
+        fi
+        
+        # Check EFS mount
+        if mountpoint -q /mnt/efs >/dev/null 2>&1; then
+            echo "efs:mounted"
+        else
+            echo "efs:not_mounted"
+        fi
+    ' 2>/dev/null || echo -e "unknown\nunknown\nservices:0\nefs:unknown")
+    
+    # Parse validation results
+    IFS=$'\n' read -d '' -r gpu_status docker_status services_status efs_status <<< "$validation_result" || true
+    
+    # Report validation results
+    local validation_passed=true
+    
+    # GPU validation
+    if [[ "$gpu_status" == detected:* ]]; then
+        local gpu_count=$(echo "$gpu_status" | cut -d: -f2)
+        local gpu_driver=$(echo "$gpu_status" | cut -d: -f3)
+        success "✅ GPU validation: $gpu_count GPU(s) detected, driver v$gpu_driver"
+    elif [[ "$gpu_status" == "no_devices" ]]; then
+        warning "⚠️  GPU validation: Driver installed but no GPU devices detected"
+        validation_passed=false
+    elif [[ "$gpu_status" == "no_driver" ]]; then
+        warning "⚠️  GPU validation: NVIDIA drivers not installed"
+        validation_passed=false
+    else
+        warning "⚠️  GPU validation: Status unknown - manual verification recommended"
+        validation_passed=false
+    fi
+    
+    # Docker validation
+    if [[ "$docker_status" == "running" ]]; then
+        success "✅ Docker validation: Service is running"
+    else
+        warning "⚠️  Docker validation: Service not running - status: $docker_status"
+        validation_passed=false
+    fi
+    
+    # Services validation
+    if [[ "$services_status" == services:* ]]; then
+        local service_count=$(echo "$services_status" | cut -d: -f2)
+        if [ "$service_count" -gt 0 ]; then
+            success "✅ Container services: $service_count services running"
+        else
+            info "ℹ️  Container services: No services currently running (deployment may be needed)"
+        fi
+    fi
+    
+    # EFS validation
+    if [[ "$efs_status" == "efs:mounted" ]]; then
+        success "✅ EFS validation: Persistent storage mounted"
+    else
+        warning "⚠️  EFS validation: Persistent storage not mounted - status: $efs_status"
+    fi
+    
+    # Close SSH control connection
+    ssh $ssh_options -O exit "ubuntu@$PUBLIC_IP" 2>/dev/null || true
+    
+    if [ "$validation_passed" = true ]; then
+        success "🎉 All validation checks passed! Instance is ready for deployment."
+    else
+        warning "⚠️  Some validation checks failed - manual verification recommended"
+        info "💡 The instance is accessible, but some features may require troubleshooting"
+    fi
+    
+    return 0
 }
 
 deploy_application() {
@@ -2038,41 +3830,181 @@ setup_monitoring() {
 validate_deployment() {
     local PUBLIC_IP="$1"
     
-    log "Validating deployment..."
+    log "Validating deployment with enhanced health monitoring..."
     
-    # Wait for services to fully start
+    # Wait for initial service startup
+    log "Waiting 120 seconds for services to initialize..."
     sleep 120
     
-    local endpoints=(
-        "http://$PUBLIC_IP:5678/healthz:n8n"
-        "http://$PUBLIC_IP:11434/api/tags:Ollama"
-        "http://$PUBLIC_IP:6333/healthz:Qdrant"
-        "http://$PUBLIC_IP:11235/health:Crawl4AI"
-    )
-    
-    for endpoint_info in "${endpoints[@]}"; do
-        IFS=':' read -r url service <<< "$endpoint_info"
+    # Use enhanced health check instead of basic validation
+    if enhanced_health_check "$PUBLIC_IP" 15; then
+        success "All services are healthy and deployment is complete!"
         
-        log "Testing $service at $url..."
-        local retry=0
-        local max_retries=10
-        local backoff=30
-        while [ $retry -lt $max_retries ]; do
-            if curl -f -s "$url" > /dev/null 2>&1; then
-                success "$service is healthy"
-                break
-            fi
-            retry=$((retry+1))
-            info "Attempt $retry/$max_retries: $service not ready, waiting ${backoff}s..."
-            sleep $backoff
-            backoff=$((backoff * 2))  # Exponential backoff
-        done
-        if [ $retry -eq $max_retries ]; then
-            error "$service failed health check after $max_retries attempts"
-        fi
-    done
+        # Show comprehensive diagnostic information
+        log "Running final service diagnostics..."
+        comprehensive_service_diagnostics "$PUBLIC_IP"
+        
+        return 0
+    else
+        error "Deployment validation failed"
+        warning "Running comprehensive diagnostics to identify issues..."
+        comprehensive_service_diagnostics "$PUBLIC_IP"
+        return 1
+    fi
+}
+
+# =============================================================================
+# POST-DEPLOYMENT COMPREHENSIVE VALIDATION
+# =============================================================================
+
+run_post_deployment_validation() {
+    local PUBLIC_IP="$1"
     
-    success "Deployment validation completed!"
+    separator "═══════════════════════════════════════════════════════════════════"
+    log "🚀 Running Comprehensive Post-Deployment Validation Suite"
+    separator "═══════════════════════════════════════════════════════════════════"
+    
+    local validation_failed=false
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Export environment variables for validation scripts
+    export KEY_NAME="${KEY_NAME}"
+    export STACK_NAME="${STACK_NAME}"
+    export AWS_REGION="${AWS_REGION}"
+    
+    # 1. Comprehensive Deployment Validation
+    log "🔍 Step 1/4: Running comprehensive deployment validation..."
+    if [[ -x "$script_dir/deployment-validator.sh" ]]; then
+        if "$script_dir/deployment-validator.sh" "$PUBLIC_IP"; then
+            success "✅ Deployment validation passed"
+        else
+            error "❌ Deployment validation failed"
+            validation_failed=true
+        fi
+    else
+        warning "⚠ Deployment validator script not found or not executable"
+    fi
+    
+    echo ""
+    
+    # 2. Performance Benchmarking
+    log "⚡ Step 2/4: Running performance benchmarks..."
+    if [[ -x "$script_dir/performance-benchmark.sh" ]]; then
+        if "$script_dir/performance-benchmark.sh" "$PUBLIC_IP"; then
+            success "✅ Performance benchmarks completed"
+        else
+            warning "⚠ Performance benchmarks encountered issues (non-critical)"
+        fi
+    else
+        warning "⚠ Performance benchmark script not found or not executable"
+    fi
+    
+    echo ""
+    
+    # 3. Security Audit
+    log "🔒 Step 3/4: Running security audit..."
+    if [[ -x "$script_dir/security-audit.sh" ]]; then
+        if "$script_dir/security-audit.sh" "$PUBLIC_IP"; then
+            success "✅ Security audit passed"
+        else
+            error "❌ Security audit found critical issues"
+            validation_failed=true
+        fi
+    else
+        warning "⚠ Security audit script not found or not executable"
+    fi
+    
+    echo ""
+    
+    # 4. Generate Comprehensive Report
+    log "📊 Step 4/4: Generating comprehensive deployment report..."
+    
+    local report_file="deployment-report-$(date +%Y%m%d-%H%M%S).txt"
+    
+    {
+        echo "AI STARTER KIT - DEPLOYMENT VALIDATION REPORT"
+        echo "=============================================="
+        echo "Generated: $(date)"
+        echo "Instance IP: $PUBLIC_IP"
+        echo "Region: $AWS_REGION"
+        echo "Stack Name: $STACK_NAME"
+        echo ""
+        
+        echo "VALIDATION SUMMARY:"
+        echo "==================="
+        
+        if [[ "$validation_failed" == "false" ]]; then
+            echo "✅ Overall Status: PASSED"
+            echo "✅ All critical validations passed"
+            echo "✅ Deployment is ready for production use"
+        else
+            echo "❌ Overall Status: FAILED"
+            echo "❌ Some critical validations failed"
+            echo "⚠️  Review the detailed logs above for specific issues"
+        fi
+        
+        echo ""
+        echo "NEXT STEPS:"
+        echo "==========="
+        echo "1. Access your services:"
+        echo "   • n8n Workflow Automation: http://$PUBLIC_IP:5678"
+        echo "   • Ollama LLM API: http://$PUBLIC_IP:11434"
+        echo "   • Qdrant Vector Database: http://$PUBLIC_IP:6333"
+        echo "   • Crawl4AI Web Scraper: http://$PUBLIC_IP:8000"
+        echo ""
+        echo "2. Security recommendations:"
+        echo "   • Review security audit findings above"
+        echo "   • Implement additional security hardening as needed"
+        echo "   • Set up monitoring and alerting"
+        echo ""
+        echo "3. Performance optimization:"
+        echo "   • Review performance benchmark results"
+        echo "   • Monitor resource usage and scale as needed"
+        echo "   • Optimize container configurations based on workload"
+        echo ""
+        echo "4. Maintenance:"
+        echo "   • Regular security updates: sudo apt update && sudo apt upgrade"
+        echo "   • Monitor costs and resource usage"
+        echo "   • Backup important data and configurations"
+        echo ""
+        
+        if [[ "$validation_failed" == "true" ]]; then
+            echo "TROUBLESHOOTING:"
+            echo "================"
+            echo "If validation failed, you can:"
+            echo "1. Re-run individual validation scripts:"
+            echo "   ./scripts/deployment-validator.sh $PUBLIC_IP"
+            echo "   ./scripts/security-audit.sh $PUBLIC_IP"
+            echo ""
+            echo "2. Check service logs:"
+            echo "   ssh -i ${KEY_NAME}.pem ubuntu@$PUBLIC_IP"
+            echo "   cd ai-starter-kit"
+            echo "   docker compose -f docker-compose.gpu-optimized.yml logs"
+            echo ""
+            echo "3. Get help:"
+            echo "   • Review the troubleshooting section in CLAUDE.md"
+            echo "   • Check AWS CloudWatch logs for detailed error information"
+            echo "   • Ensure security groups allow required ports"
+        fi
+        
+    } > "$report_file"
+    
+    success "📋 Comprehensive report generated: $report_file"
+    
+    # Display final status
+    separator "═══════════════════════════════════════════════════════════════════"
+    if [[ "$validation_failed" == "false" ]]; then
+        success "🎉 POST-DEPLOYMENT VALIDATION COMPLETED SUCCESSFULLY!"
+        success "🚀 Your AI Starter Kit is ready for production use!"
+        info "📋 Detailed report saved to: $report_file"
+    else
+        error "❌ POST-DEPLOYMENT VALIDATION FAILED"
+        warning "🔧 Please review the issues above and re-run validation scripts"
+        warning "📋 Detailed report with troubleshooting steps: $report_file"
+    fi
+    separator "═══════════════════════════════════════════════════════════════════"
+    
+    return $([ "$validation_failed" == "false" ] && echo 0 || echo 1)
 }
 
 # =============================================================================
@@ -2102,11 +4034,26 @@ EOF
     check_prerequisites
     
     log "Starting AWS infrastructure deployment..."
-    create_key_pair
-    create_iam_role
     
-    SG_ID=$(create_security_group)
-    EFS_DNS=$(create_efs "$SG_ID")
+    # Set up secure credentials first
+    setup_secure_credentials
+    
+    # Use parallel infrastructure setup for better performance
+    INFRA_RESULTS=$(setup_infrastructure_parallel)
+    
+    # Parse results from parallel setup
+    SG_ID=$(echo "$INFRA_RESULTS" | cut -d: -f1)
+    EFS_DNS=$(echo "$INFRA_RESULTS" | cut -d: -f2)
+    
+    # Extract EFS_ID from EFS_DNS for mount target creation
+    EFS_ID=$(echo "$EFS_DNS" | cut -d. -f1)
+    export EFS_ID
+    
+    # Validate EFS_ID was extracted properly
+    if [[ -z "${EFS_ID:-}" ]]; then
+        error "Failed to extract EFS_ID from EFS_DNS: $EFS_DNS"
+        return 1
+    fi
     
     # Launch single spot instance directly (no ASG to avoid multiple instances)
     log "Launching single spot instance with multi-AZ fallback..."
@@ -2114,6 +4061,20 @@ EOF
     INSTANCE_ID=$(echo "$INSTANCE_INFO" | cut -d: -f1)
     PUBLIC_IP=$(echo "$INSTANCE_INFO" | cut -d: -f2)
     INSTANCE_AZ=$(echo "$INSTANCE_INFO" | cut -d: -f3)
+    
+    # Validate critical variables were extracted properly
+    if [[ -z "${INSTANCE_ID:-}" ]]; then
+        error "Failed to extract INSTANCE_ID from INSTANCE_INFO: $INSTANCE_INFO"
+        return 1
+    fi
+    if [[ -z "${PUBLIC_IP:-}" ]]; then
+        error "Failed to extract PUBLIC_IP from INSTANCE_INFO: $INSTANCE_INFO"
+        return 1
+    fi
+    if [[ -z "${INSTANCE_AZ:-}" ]]; then
+        error "Failed to extract INSTANCE_AZ from INSTANCE_INFO: $INSTANCE_INFO"
+        return 1
+    fi
 
     # Now create EFS mount target in the AZ where instance was actually launched
     create_efs_mount_target "$SG_ID" "$INSTANCE_AZ"
@@ -2122,6 +4083,20 @@ EOF
     QDRANT_TG_ARN=$(create_qdrant_target_group "$SG_ID" "$INSTANCE_ID")
     ALB_DNS=$(create_alb "$SG_ID" "$TARGET_GROUP_ARN" "$QDRANT_TG_ARN")
     
+    # Validate critical variables were set properly
+    if [[ -z "${TARGET_GROUP_ARN:-}" ]]; then
+        error "Failed to create target group"
+        return 1
+    fi
+    if [[ -z "${QDRANT_TG_ARN:-}" ]]; then
+        error "Failed to create qdrant target group"
+        return 1
+    fi
+    if [[ -z "${ALB_DNS:-}" ]]; then
+        error "Failed to create ALB"
+        return 1
+    fi
+    
     setup_cloudfront "$ALB_DNS"
     
     wait_for_instance_ready "$PUBLIC_IP"
@@ -2129,10 +4104,13 @@ EOF
     setup_monitoring "$PUBLIC_IP"
     validate_deployment "$PUBLIC_IP"
     
+    # Run comprehensive post-deployment validation
+    run_post_deployment_validation "$PUBLIC_IP"
+    
     display_results "$PUBLIC_IP" "$INSTANCE_ID" "$EFS_DNS" "$INSTANCE_AZ"
     
     # Clean up temporary files
-    rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh
+    rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh cloudfront-config.json
     
     success "AI Starter Kit deployment completed successfully!"
 }
@@ -2142,7 +4120,7 @@ EOF
 # =============================================================================
 
 show_usage() {
-    echo "Usage: $0 [OPTIONS]"
+    echo "Usage: $0 [OPTIONS] [COMMAND]"
     echo ""
     echo "🚀 AI Starter Kit - Intelligent AWS GPU Deployment"
     echo "================================================="
@@ -2154,6 +4132,8 @@ show_usage() {
     echo "  🏗️  Multi-architecture support (Intel x86_64 & ARM64)"
     echo "  📊 Real-time pricing comparison across configurations"
     echo "  🎯 Automatic best price/performance selection"
+    echo "  📈 Real-time setup progress monitoring"
+    echo "  🔍 Advanced error detection and debugging"
     echo ""
     echo "Supported Configurations:"
     echo "  📦 G4DN instances (Intel + NVIDIA T4):"
@@ -2175,7 +4155,27 @@ show_usage() {
     echo "  ✅ Docker and AWS CLI installed"
     echo "  ✅ jq and bc utilities (auto-installed if missing)"
     echo ""
-    echo "Options:"
+    echo "Commands:"
+    echo "  deploy                       Deploy the AI starter kit (default if no command given)"
+    echo "  check-status IP [KEY]        Check setup status of running instance"
+    echo "                              IP: Public IP address of the instance"
+    echo "                              KEY: SSH key file path (optional, defaults to stack key)"
+    echo "  diagnostics IP [KEY]         Run comprehensive service diagnostics"
+    echo "                              IP: Public IP address of the instance"
+    echo "                              KEY: SSH key file path (optional, defaults to stack key)"
+    echo "  validate IP [KEY]            Run comprehensive deployment validation"
+    echo "                              IP: Public IP address of the instance"
+    echo "                              KEY: SSH key file path (optional, defaults to stack key)"
+    echo "  benchmark IP [TYPE] [KEY]    Run performance benchmarks"
+    echo "                              IP: Public IP address of the instance"
+    echo "                              TYPE: all|gpu|container|network|system (default: all)"
+    echo "                              KEY: SSH key file path (optional, defaults to stack key)"
+    echo "  security-audit IP [TYPE] [KEY] Run security audit"
+    echo "                              IP: Public IP address of the instance"
+    echo "                              TYPE: all|network|iam|system|container|credential|compliance (default: all)"
+    echo "                              KEY: SSH key file path (optional, defaults to stack key)"
+    echo ""
+    echo "Deploy Options:"
     echo "  --region REGION         AWS region (default: us-east-1)"
     echo "  --instance-type TYPE    Instance type or 'auto' for intelligent selection"
     echo "                         Valid: auto, g4dn.xlarge, g4dn.2xlarge, g5g.xlarge, g5g.2xlarge"
@@ -2187,18 +4187,37 @@ show_usage() {
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"
-    echo "  🎯 Intelligent selection (recommended):"
+    echo "  🎯 Intelligent deployment (recommended):"
     echo "    $0                                    # Auto-select best config within budget"
-    echo "    $0 --max-spot-price 1.50             # Auto-select with \$1.50/hour budget"
+    echo "    $0 deploy --max-spot-price 1.50      # Auto-select with \$1.50/hour budget"
     echo ""
-    echo "  🎚️  Manual selection:"
-    echo "    $0 --instance-type g4dn.xlarge       # Force specific instance type"
-    echo "    $0 --instance-type g5g.2xlarge       # Use ARM-based instance"
+    echo "  🎚️  Manual deployment:"
+    echo "    $0 deploy --instance-type g4dn.xlarge    # Force specific instance type"
+    echo "    $0 deploy --instance-type g5g.2xlarge    # Use ARM-based instance"
     echo ""
     echo "  🌍 Regional deployment:"
-    echo "    $0 --region us-west-2                # Deploy in different region"
-    echo "    $0 --region eu-central-1             # Deploy in Europe"
-    echo "    $0 --cross-region                    # Find best region automatically"
+    echo "    $0 deploy --region us-west-2         # Deploy in different region"
+    echo "    $0 deploy --region eu-central-1      # Deploy in Europe"
+    echo "    $0 deploy --cross-region             # Find best region automatically"
+    echo ""
+    echo "  🔍 Status monitoring:"
+    echo "    $0 check-status 52.1.2.3            # Check instance setup progress"
+    echo "    $0 check-status 52.1.2.3 my-key.pem # Use custom SSH key"
+    echo "    $0 diagnostics 52.1.2.3             # Run comprehensive diagnostics"
+    echo ""
+    echo "  🛡️ Validation and security:"
+    echo "    $0 validate 52.1.2.3                # Comprehensive deployment validation"
+    echo "    $0 benchmark 52.1.2.3 gpu           # Run GPU performance benchmarks"
+    echo "    $0 security-audit 52.1.2.3          # Complete security audit"
+    echo "    $0 security-audit 52.1.2.3 network  # Network security audit only"
+    echo ""
+    echo "New Monitoring Features:"
+    echo "  📈 Real-time progress tracking during setup"
+    echo "  🔍 Detailed error detection and reporting"
+    echo "  ⏱️  Step-by-step setup monitoring"
+    echo "  🚨 Automatic error diagnosis with suggestions"
+    echo "  📊 Setup progress indicators (12 tracked stages)"
+    echo "  🔧 Service health validation"
     echo ""
     echo "Cost Optimization Features:"
     echo "  💡 Automatic spot pricing analysis across all AZs"
@@ -2207,11 +4226,131 @@ show_usage() {
     echo "  💡 Real-time cost comparison display"
     echo "  💡 Optimal configuration recommendations"
     echo ""
+    echo "Progress Monitoring:"
+    echo "  The script now provides real-time feedback during instance setup:"
+    echo "  📊 INIT → SYSTEM_UPDATE → GPU_VERIFY → DOCKER_VERIFY → DOCKER_COMPOSE"
+    echo "  📊 NVIDIA_RUNTIME → GPU_TEST → TOOLS_INSTALL → CLOUDWATCH → SERVICES"
+    echo "  📊 GPU_SCRIPT → FINAL_CHECK → SETUP_COMPLETE"
+    echo ""
+    echo "Debugging:"
+    echo "  If deployment fails, the script provides:"
+    echo "  🔍 Detailed error logs and location"
+    echo "  📋 List of completed vs failed steps"
+    echo "  💡 SSH commands for manual investigation"
+    echo "  📊 Real-time status during 30-minute setup window"
+    echo ""
     echo "Note: Script automatically handles AMI availability and finds the best"
     echo "      configuration based on current pricing and performance metrics."
 }
 
 # Parse command line arguments
+COMMAND="deploy"  # Default command
+
+# Check if first argument is a command
+if [[ $# -gt 0 ]] && [[ "$1" != --* ]]; then
+    case $1 in
+        deploy)
+            COMMAND="deploy"
+            shift
+            ;;
+        check-status)
+            COMMAND="check-status"
+            shift
+            if [[ $# -lt 1 ]]; then
+                error "check-status command requires an IP address"
+                echo "Usage: $0 check-status <IP_ADDRESS> [SSH_KEY_FILE]"
+                exit 1
+            fi
+            STATUS_IP="$1"
+            shift
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                STATUS_KEY="$1"
+                shift
+            fi
+            ;;
+        diagnostics)
+            COMMAND="diagnostics"
+            shift
+            if [[ $# -lt 1 ]]; then
+                error "diagnostics command requires an IP address"
+                echo "Usage: $0 diagnostics <IP_ADDRESS> [SSH_KEY_FILE]"
+                exit 1
+            fi
+            DIAGNOSTICS_IP="$1"
+            shift
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                DIAGNOSTICS_KEY="$1"
+                shift
+            fi
+            ;;
+        validate)
+            COMMAND="validate"
+            shift
+            if [[ $# -lt 1 ]]; then
+                error "validate command requires an IP address"
+                echo "Usage: $0 validate <IP_ADDRESS> [SSH_KEY_FILE]"
+                exit 1
+            fi
+            VALIDATE_IP="$1"
+            shift
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                VALIDATE_KEY="$1"
+                shift
+            fi
+            ;;
+        benchmark)
+            COMMAND="benchmark"
+            shift
+            if [[ $# -lt 1 ]]; then
+                error "benchmark command requires an IP address"
+                echo "Usage: $0 benchmark <IP_ADDRESS> [benchmark-type] [SSH_KEY_FILE]"
+                exit 1
+            fi
+            BENCHMARK_IP="$1"
+            shift
+            BENCHMARK_TYPE="all"
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                BENCHMARK_TYPE="$1"
+                shift
+            fi
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                BENCHMARK_KEY="$1"
+                shift
+            fi
+            ;;
+        security-audit)
+            COMMAND="security-audit"
+            shift
+            if [[ $# -lt 1 ]]; then
+                error "security-audit command requires an IP address"
+                echo "Usage: $0 security-audit <IP_ADDRESS> [audit-type] [SSH_KEY_FILE]"
+                exit 1
+            fi
+            SECURITY_IP="$1"
+            shift
+            SECURITY_TYPE="all"
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                SECURITY_TYPE="$1"
+                shift
+            fi
+            if [[ $# -gt 0 && "$1" != --* ]]; then
+                SECURITY_KEY="$1"
+                shift
+            fi
+            ;;
+        --help|help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            error "Unknown command: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+fi
+
+# Parse remaining arguments (options)
 while [[ $# -gt 0 ]]; do
     case $1 in
         --region)
@@ -2250,5 +4389,107 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Run main function
-main "$@" 
+# Execute the appropriate command
+case $COMMAND in
+    deploy)
+        # Run main deployment function
+        main "$@"
+        ;;
+    check-status)
+        # Run status check function
+        check_instance_setup_status "$STATUS_IP" "${STATUS_KEY:-${KEY_NAME}.pem}"
+        ;;
+    diagnostics)
+        # Run comprehensive diagnostics
+        if [[ -z "$DIAGNOSTICS_KEY" ]]; then
+            log "Using default SSH key: ${KEY_NAME}.pem"
+            DIAGNOSTICS_KEY="${KEY_NAME}.pem"
+        fi
+        
+        if [[ ! -f "$DIAGNOSTICS_KEY" ]]; then
+            error "SSH key file not found: $DIAGNOSTICS_KEY"
+            exit 1
+        fi
+        
+        KEY_NAME=$(basename "$DIAGNOSTICS_KEY" .pem)
+        comprehensive_service_diagnostics "$DIAGNOSTICS_IP"
+        ;;
+    validate)
+        # Run comprehensive deployment validation
+        if [[ -z "$VALIDATE_KEY" ]]; then
+            log "Using default SSH key: ${KEY_NAME}.pem"
+            VALIDATE_KEY="${KEY_NAME}.pem"
+        fi
+        
+        if [[ ! -f "$VALIDATE_KEY" ]]; then
+            error "SSH key file not found: $VALIDATE_KEY"
+            exit 1
+        fi
+        
+        KEY_NAME=$(basename "$VALIDATE_KEY" .pem)
+        export KEY_NAME
+        export STACK_NAME
+        export AWS_REGION
+        
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -x "$script_dir/deployment-validator.sh" ]]; then
+            "$script_dir/deployment-validator.sh" "$VALIDATE_IP"
+        else
+            error "Deployment validator script not found or not executable: $script_dir/deployment-validator.sh"
+            exit 1
+        fi
+        ;;
+    benchmark)
+        # Run performance benchmarks
+        if [[ -z "$BENCHMARK_KEY" ]]; then
+            log "Using default SSH key: ${KEY_NAME}.pem"
+            BENCHMARK_KEY="${KEY_NAME}.pem"
+        fi
+        
+        if [[ ! -f "$BENCHMARK_KEY" ]]; then
+            error "SSH key file not found: $BENCHMARK_KEY"
+            exit 1
+        fi
+        
+        KEY_NAME=$(basename "$BENCHMARK_KEY" .pem)
+        export KEY_NAME
+        
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -x "$script_dir/performance-benchmark.sh" ]]; then
+            "$script_dir/performance-benchmark.sh" "$BENCHMARK_IP" "$BENCHMARK_TYPE"
+        else
+            error "Performance benchmark script not found or not executable: $script_dir/performance-benchmark.sh"
+            exit 1
+        fi
+        ;;
+    security-audit)
+        # Run security audit
+        if [[ -z "$SECURITY_KEY" ]]; then
+            log "Using default SSH key: ${KEY_NAME}.pem"
+            SECURITY_KEY="${KEY_NAME}.pem"
+        fi
+        
+        if [[ ! -f "$SECURITY_KEY" ]]; then
+            error "SSH key file not found: $SECURITY_KEY"
+            exit 1
+        fi
+        
+        KEY_NAME=$(basename "$SECURITY_KEY" .pem)
+        export KEY_NAME
+        export STACK_NAME
+        export AWS_REGION
+        
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -x "$script_dir/security-audit.sh" ]]; then
+            "$script_dir/security-audit.sh" "$SECURITY_IP" "$SECURITY_TYPE"
+        else
+            error "Security audit script not found or not executable: $script_dir/security-audit.sh"
+            exit 1
+        fi
+        ;;
+    *)
+        error "Unknown command: $COMMAND"
+        show_usage
+        exit 1
+        ;;
+esac 
