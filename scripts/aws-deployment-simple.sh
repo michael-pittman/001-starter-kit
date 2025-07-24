@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# AI-Powered Starter Kit - Simple AWS Deployment (On-Demand Instances)
+# GeuseMaker - Simple AWS Deployment (On-Demand Instances)
 # =============================================================================
 # This script automates deployment using on-demand instances to avoid spot limits
 # Features: Simplified setup, reliable deployment, quick startup
@@ -9,6 +9,50 @@
 # =============================================================================
 
 set -euo pipefail
+
+# =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+STACK_NAME=""
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "$STACK_NAME" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local project_root="$(cd "$script_dir/.." && pwd)"
+        
+        # Use cleanup script if available
+        if [ -f "$project_root/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+        else
+            log "Running manual cleanup..."
+            # Basic manual cleanup
+            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
+                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
+                    log "Terminated instance: $instance_id"
+                fi
+            done
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
 
 # Colors for output
 RED='\033[0;31m'
@@ -22,9 +66,11 @@ NC='\033[0m' # No Color
 # Configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-g4dn.xlarge}"
-KEY_NAME="${KEY_NAME:-ai-starter-kit-key-simple}"
-STACK_NAME="${STACK_NAME:-ai-starter-kit-simple}"
-PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+KEY_NAME="${KEY_NAME:-GeuseMaker-key-simple}"
+STACK_NAME="${STACK_NAME:-GeuseMaker-simple}"
+PROJECT_NAME="${PROJECT_NAME:-GeuseMaker}"
+SETUP_ALB="${SETUP_ALB:-false}"  # Setup Application Load Balancer
+SETUP_CLOUDFRONT="${SETUP_CLOUDFRONT:-false}"  # Setup CloudFront distribution
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -133,7 +179,7 @@ create_security_group() {
     # Create security group
     SG_ID=$(aws ec2 create-security-group \
         --group-name "${STACK_NAME}-sg" \
-        --description "Security group for AI Starter Kit (Simple)" \
+        --description "Security group for GeuseMaker (Simple)" \
         --vpc-id "$VPC_ID" \
         --region "$AWS_REGION" \
         --query 'GroupId' \
@@ -290,35 +336,66 @@ deploy_application() {
     local PUBLIC_IP="$1"
     local INSTANCE_ID="$2"
     
-    log "Deploying AI Starter Kit application..."
+    log "Deploying GeuseMaker application..."
     
     # Create deployment script
     cat > deploy-app-simple.sh << EOF
 #!/bin/bash
 set -euo pipefail
 
-echo "Starting AI Starter Kit deployment..."
+echo "Starting GeuseMaker deployment..."
 
 # Clone repository
-git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
-cd /home/ubuntu/ai-starter-kit
+git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/GeuseMaker || true
+cd /home/ubuntu/GeuseMaker
 
-# Create basic .env file
+# Update Docker images to latest versions (unless overridden)
+if [ "${USE_LATEST_IMAGES:-true}" = "true" ]; then
+    echo "Updating Docker images to latest versions..."
+    if [ -f "scripts/simple-update-images.sh" ]; then
+        chmod +x scripts/simple-update-images.sh
+        ./scripts/simple-update-images.sh update
+    else
+        echo "Warning: Image update script not found, using default versions"
+    fi
+fi
+
+# Create comprehensive .env file with all required variables
 cat > .env << 'EOFENV'
+# PostgreSQL Configuration
 POSTGRES_DB=n8n
 POSTGRES_USER=n8n
-POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 12)
+POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 32)
+
+# n8n Configuration
 N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
 N8N_USER_MANAGEMENT_JWT_SECRET=$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
+N8N_PROTOCOL=http
 WEBHOOK_URL=http://$PUBLIC_IP:5678
-INSTANCE_ID=$INSTANCE_ID
-INSTANCE_TYPE=$INSTANCE_TYPE
-AWS_DEFAULT_REGION=$AWS_REGION
+
+# n8n Security Settings
 N8N_CORS_ENABLE=true
 N8N_CORS_ALLOWED_ORIGINS=*
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+
+# AWS Configuration
+INSTANCE_ID=$INSTANCE_ID
+INSTANCE_TYPE=$INSTANCE_TYPE
+AWS_DEFAULT_REGION=$AWS_REGION
+
+# API Keys (empty by default - can be configured manually)
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+GROQ_API_KEY=
+TOGETHER_API_KEY=
+MISTRAL_API_KEY=
+GEMINI_API_TOKEN=
+
+# EFS Configuration (not used in simple deployment)
+EFS_DNS=
 EOFENV
 
 # Start GPU-optimized services
@@ -333,12 +410,12 @@ EOF
     # Copy the entire repository
     rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
         -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
-        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
+        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/GeuseMaker/"
     
     # Run deployment
     log "Running deployment script..."
     ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" \
-        "chmod +x /home/ubuntu/ai-starter-kit/deploy-app-simple.sh && /home/ubuntu/ai-starter-kit/deploy-app-simple.sh"
+        "chmod +x /home/ubuntu/GeuseMaker/deploy-app-simple.sh && /home/ubuntu/GeuseMaker/deploy-app-simple.sh"
     
     success "Application deployment completed!"
 }
@@ -473,6 +550,10 @@ EOF
     check_prerequisites
     
     log "Starting simplified AWS deployment..."
+    
+    # Mark that we're starting to create resources
+    RESOURCES_CREATED=true
+    
     create_key_pair
     
     SG_ID=$(create_security_group)
@@ -491,7 +572,7 @@ EOF
     # Clean up temporary files
     rm -f user-data-simple.sh deploy-app-simple.sh
     
-    success "AI Starter Kit deployment completed successfully!"
+    success "GeuseMaker deployment completed successfully!"
 }
 
 # =============================================================================
@@ -504,8 +585,8 @@ show_usage() {
     echo "Options:"
     echo "  --region REGION         AWS region (default: us-east-1)"
     echo "  --instance-type TYPE    Instance type (default: g4dn.xlarge)"
-    echo "  --key-name NAME         SSH key name (default: ai-starter-kit-key-simple)"
-    echo "  --stack-name NAME       Stack name (default: ai-starter-kit-simple)"
+    echo "  --key-name NAME         SSH key name (default: GeuseMaker-key-simple)"
+    echo "  --stack-name NAME       Stack name (default: GeuseMaker-simple)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"

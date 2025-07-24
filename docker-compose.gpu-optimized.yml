@@ -99,20 +99,25 @@ services:
   # PostgreSQL - Optimized for g4dn.xlarge (16GB RAM, 4 vCPUs)
   # ---------------------------------------------------------------------------
   postgres:
-    <<: *logging-config
-    <<: *restart-policy
-    image: postgres:16-alpine
+    <<: [*logging-config, *restart-policy]
+    image: postgres:latest
     container_name: postgres-gpu
     hostname: postgres
+    user: "70:70"  # postgres user in alpine
     networks:
       - ai_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # PostgreSQL needs write access
+    tmpfs:
+      - /tmp:noexec,nosuid,size=1g
     ports:
       - "5432:5432"
     environment:
       # Basic PostgreSQL configuration
       - POSTGRES_DB=${POSTGRES_DB:-n8n}
       - POSTGRES_USER=${POSTGRES_USER:-n8n}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
       
       # Performance optimizations for g4dn.xlarge
@@ -125,6 +130,11 @@ services:
       - POSTGRES_WAL_BUFFERS=64MB
       - POSTGRES_RANDOM_PAGE_COST=1.1
       - POSTGRES_EFFECTIVE_IO_CONCURRENCY=200
+      
+      # Connection pooling with PgBouncer
+      - POSTGRES_POOL_MODE=transaction
+      - POSTGRES_POOL_SIZE=25
+      - POSTGRES_POOL_RESERVE=5
       
       # Connection and query optimization
       - POSTGRES_MAX_WAL_SIZE=2GB
@@ -156,7 +166,7 @@ services:
       - shared_storage:/shared
     
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}"]
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n} && psql -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n} -c 'SELECT 1;' > /dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -165,23 +175,28 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
-          cpus: '1.5'
+          memory: 2G  # Optimized for 85% total allocation
+          cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
-          memory: 1.2G
-          cpus: '0.75'
+          memory: 1G
+          cpus: '0.2'  # Optimized for 85% total allocation
 
   # ---------------------------------------------------------------------------
   # n8n - Workflow Automation Platform
   # ---------------------------------------------------------------------------
   n8n:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: n8nio/n8n:latest
     container_name: n8n-gpu
     hostname: n8n
+    user: "1000:1000"  # n8n user
     networks:
       - ai_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # n8n needs write access for workflows
+    tmpfs:
+      - /tmp:noexec,nosuid,size=512m
     ports:
       - "5678:5678"
     environment:
@@ -191,7 +206,7 @@ services:
       - DB_POSTGRESDB_PORT=5432
       - DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-n8n}
       - DB_POSTGRESDB_USER=${POSTGRES_USER:-n8n}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/postgres_password
       
       # n8n specific settings
       - N8N_HOST=${N8N_HOST:-0.0.0.0}
@@ -200,13 +215,13 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}
       
       # Security and encryption
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+      - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
+      - N8N_USER_MANAGEMENT_JWT_SECRET_FILE=/run/secrets/n8n_jwt_secret
       
-      # CORS and community packages
+      # CORS - Secure configuration
       - N8N_CORS_ENABLE=${N8N_CORS_ENABLE:-true}
-      - N8N_CORS_ALLOWED_ORIGINS=${N8N_CORS_ALLOWED_ORIGINS:-*}
-      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:-true}
+      - N8N_CORS_ALLOWED_ORIGINS=${N8N_CORS_ALLOWED_ORIGINS:-https://n8n.yourdomain.com}
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:-false}
       
       # Performance optimizations
       - N8N_PAYLOAD_SIZE_MAX=16
@@ -233,7 +248,7 @@ services:
         condition: service_healthy
     
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz && curl -f http://localhost:5678/api/v1/workflows > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -242,18 +257,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1.2G
-          cpus: '1.0'
+          memory: 1.5G  # Optimized for 85% total allocation
+          cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
           memory: 512M
-          cpus: '0.5'
+          cpus: '0.2'  # Optimized for 85% total allocation
 
   # ---------------------------------------------------------------------------
   # Qdrant - Vector Database with GPU Optimizations
   # ---------------------------------------------------------------------------
   qdrant:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: qdrant/qdrant:latest
     container_name: qdrant-gpu
     hostname: qdrant
@@ -291,7 +305,7 @@ services:
       - qdrant_storage:/qdrant/storage
       - shared_storage:/qdrant/shared:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz && curl -f http://localhost:6333/collections > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -299,19 +313,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
-          cpus: '1.5'
+          memory: 2G  # Optimized for 85% total allocation
+          cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
           memory: 1G
-          cpus: '1.0'
+          cpus: '0.2'  # Optimized for 85% total allocation
 
   # ---------------------------------------------------------------------------
   # Ollama - GPU-Optimized AI Model Server
   # ---------------------------------------------------------------------------
   ollama:
-    <<: *gpu-config
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*gpu-config, *logging-config, *restart-policy]
     image: ollama/ollama:latest
     container_name: ollama-gpu
     hostname: ollama
@@ -322,17 +334,17 @@ services:
     environment:
       # Ollama configuration
       - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_ORIGINS=*
+      - OLLAMA_ORIGINS=${OLLAMA_ORIGINS:-http://localhost:*,https://n8n.yourdomain.com}
       - OLLAMA_DEBUG=0
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_LOAD_TIMEOUT=300s
       
-      # GPU optimizations for T4 (16GB VRAM) - Enhanced
-      - OLLAMA_GPU_MEMORY_FRACTION=0.85
-      - OLLAMA_MAX_LOADED_MODELS=3
-      - OLLAMA_CONCURRENT_REQUESTS=4
-      - OLLAMA_NUM_PARALLEL=4
-      - OLLAMA_MAX_QUEUE=64
+      # GPU optimizations for T4 (16GB VRAM) - Optimized
+      - OLLAMA_GPU_MEMORY_FRACTION=0.85  # Balanced allocation
+      - OLLAMA_MAX_LOADED_MODELS=2  # Conservative for stability
+      - OLLAMA_CONCURRENT_REQUESTS=4  # Optimized throughput
+      - OLLAMA_NUM_PARALLEL=4  # Balanced parallelism
+      - OLLAMA_MAX_QUEUE=64  # Reasonable queue depth
       
       # Performance optimizations - Enhanced for T4
       - OLLAMA_FLASH_ATTENTION=1
@@ -366,7 +378,7 @@ services:
     tmpfs:
       - /tmp:size=2G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags && curl -f http://localhost:11434/api/version > /dev/null || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -374,18 +386,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 10G
-          cpus: '2.5'
+          memory: 6G  # Optimized as primary service
+          cpus: '2.0'  # Primary compute allocation
         reservations:
-          memory: 6G
-          cpus: '2.0'
+          memory: 4G
+          cpus: '1.5'  # Reserved for ollama primary workload
 
   # ---------------------------------------------------------------------------
   # Model Initialization Service - Downloads and optimizes AI models
   # ---------------------------------------------------------------------------
   ollama-model-init:
-    <<: *gpu-config
-    <<: *logging-config
+    <<: [*gpu-config, *logging-config]
     image: ollama/ollama:latest
     container_name: ollama-model-init
     networks:
@@ -583,10 +594,8 @@ services:
   # GPU Monitoring Service
   # ---------------------------------------------------------------------------
   gpu-monitor:
-    <<: *gpu-config
-    <<: *logging-config
-    <<: *restart-policy
-    image: nvidia/cuda:12.4-devel-ubuntu22.04
+    <<: [*gpu-config, *logging-config, *restart-policy]
+    image: nvidia/cuda:12.4.1-devel-ubuntu22.04
     container_name: gpu-monitor
     hostname: gpu-monitor
     networks:
@@ -667,17 +676,16 @@ services:
       resources:
         limits:
           memory: 512M
-          cpus: '0.5'
+          cpus: '0.2'  # Optimized for 85% total allocation
         reservations:
           memory: 256M
-          cpus: '0.25'
+          cpus: '0.1'  # Optimized for 85% total allocation
 
   # ---------------------------------------------------------------------------
   # Health Check Service
   # ---------------------------------------------------------------------------
   health-check:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: curlimages/curl:latest
     container_name: health-check
     hostname: health-check
@@ -731,8 +739,7 @@ services:
   # Crawl4AI - Web Crawling with LLM-based Extraction
   # ---------------------------------------------------------------------------
   crawl4ai:
-    <<: *logging-config
-    <<: *restart-policy
+    <<: [*logging-config, *restart-policy]
     image: unclecode/crawl4ai:latest
     container_name: crawl4ai-gpu
     hostname: crawl4ai
@@ -753,8 +760,8 @@ services:
       - GEMINI_API_TOKEN=${GEMINI_API_TOKEN}
       
       # Ollama integration for local LLM processing
-      - OLLAMA_BASE_URL=http://ollama-gpu:11434
-      - OLLAMA_HOST=ollama-gpu
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_HOST=ollama
       - OLLAMA_PORT=11434
       
       # Database connection
@@ -772,7 +779,7 @@ services:
       - CRAWL4AI_SECURITY_ENABLED=false
       - CRAWL4AI_JWT_ENABLED=false
       - CRAWL4AI_HTTPS_REDIRECT=false
-      - CRAWL4AI_TRUSTED_HOSTS=["*"]
+      - CRAWL4AI_TRUSTED_HOSTS=["localhost","127.0.0.1","n8n","qdrant","ollama"]
       
       # Rate limiting for high-throughput scenarios
       - CRAWL4AI_RATE_LIMITING_ENABLED=true
@@ -804,24 +811,15 @@ services:
     volumes:
       - shared_storage:/data/shared
       - /dev/shm:/dev/shm:rw,nosuid,nodev,exec,size=2g
-      # Mount Crawl4AI configuration and scripts
-      - ./crawl4ai/configs/crawl4ai-example-config.yml:/app/crawl4ai-example-config.yml:ro
-      - ./crawl4ai/scripts/setup-crawl4ai.sh:/app/setup-crawl4ai.sh:ro
       # Mount for browser cache and temporary files
       - crawl4ai_cache:/app/cache
       - crawl4ai_storage:/app/storage
     
-    command: 
-      - /bin/bash
-      - -c
-      - |
-        # Run setup script first
-        /app/setup-crawl4ai.sh
-        # Start the main Crawl4AI service
-        exec crawl4ai
+    # Use the default crawl4ai command instead of custom script for now
+    # command: crawl4ai
     
     healthcheck:
-      test: ["CMD", "/app/health-check.sh"]
+      test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -830,17 +828,28 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
-          cpus: '1.5'
+          memory: 1.5G  # Optimized allocation
+          cpus: '0.4'  # Balanced allocation
         reservations:
-          memory: 1.5G
-          cpus: '1.0'
+          memory: 1G
+          cpus: '0.2'  # Reserved resources
     
     depends_on:
       postgres:
         condition: service_healthy
-      ollama-gpu:
-        condition: service_started
+      ollama:
+        condition: service_healthy
+
+# =============================================================================
+# DOCKER SECRETS CONFIGURATION
+# =============================================================================
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  n8n_encryption_key:
+    file: ./secrets/n8n_encryption_key.txt
+  n8n_jwt_secret:
+    file: ./secrets/n8n_jwt_secret.txt
 
 # =============================================================================
 # SERVICE STARTUP ORDER AND DEPENDENCIES
@@ -853,30 +862,32 @@ services:
 # 5. gpu-monitor, health-check (monitoring services)
 
 # =============================================================================
-# RESOURCE ALLOCATION SUMMARY FOR g4dn.xlarge (FIXED)
+# RESOURCE ALLOCATION SUMMARY FOR g4dn.xlarge (OPTIMIZED)
 # =============================================================================
 # Total Resources: 4 vCPUs, 16GB RAM, 16GB T4 VRAM
 # 
-# CPU Allocation (Over-subscription allowed):
-# - postgres: 1.5 vCPUs (limit) 
-# - n8n: 1.0 vCPUs (limit) 
-# - ollama: 2.5 vCPUs (limit) - primary compute user
-# - qdrant: 1.5 vCPUs (limit) 
-# - crawl4ai: 1.5 vCPUs (limit) 
-# - monitoring: 0.5 vCPUs (limit)
-# Total: 8.5 vCPUs (allows over-subscription with CPU time-sharing)
+# CPU Allocation (Total: 3.4 vCPUs target - 85% utilization):
+# - postgres: 0.4 vCPUs (10%)
+# - n8n: 0.4 vCPUs (10%)
+# - ollama: 2.0 vCPUs (50%) - primary compute user
+# - qdrant: 0.4 vCPUs (10%)
+# - crawl4ai: 0.4 vCPUs (10%)
+# - gpu-monitor: 0.2 vCPUs (5%)
+# - health-check: 0.1 vCPUs (2.5%)
+# Total Allocated: 3.4 vCPUs (85% - optimal resource utilization)
 # 
-# FIXED Memory Allocation (Total: 16GB):
-# - postgres: 2.5GB (15.6%) - REDUCED from 3GB
-# - n8n: 1.2GB (7.5%) - REDUCED from 1.5GB  
-# - ollama: 8GB (50%) - REDUCED from 10GB, still primary memory user
-# - qdrant: 2.5GB (15.6%) - REDUCED from 3GB
-# - crawl4ai: 2.5GB (15.6%) - REDUCED from 3GB
-# - monitoring: 512MB (3.2%)
-# Total Reserved: ~18.7GB (fits within 16GB + swap buffer, allows for over-subscription)
+# Memory Allocation (Total: 16GB):
+# - postgres: 2GB (12.5%)
+# - n8n: 1.5GB (9.4%)
+# - ollama: 6GB (37.5%) - primary memory user
+# - qdrant: 2GB (12.5%)
+# - crawl4ai: 1.5GB (9.4%)
+# - gpu-monitor: 512MB (3.2%)
+# - health-check: 128MB (0.8%)
+# Total Allocated: 13.64GB (85.25% - leaves headroom for OS and bursting)
 # 
 # GPU Memory (T4 16GB):
-# - ollama: ~14.4GB (90% of 16GB)
-# - system reserve: ~1.6GB (10%)
+# - ollama: ~13.6GB (85% of 16GB)
+# - system reserve: ~2.4GB (15%)
 #
 # Network: All services on ai_network (172.20.0.0/16) with jumbo frames 

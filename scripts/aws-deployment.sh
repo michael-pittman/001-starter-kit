@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# AI-Powered Starter Kit - AWS Deployment Automation
+# GeuseMaker - AWS Deployment Automation
 # =============================================================================
 # This script automates the complete deployment of the AI starter kit on AWS
 # Features: EFS setup, GPU instances, cost optimization, monitoring
@@ -18,9 +18,60 @@ if [ -z "${BASH_VERSION:-}" ]; then
     exit 1
 fi
 
+# =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+STACK_NAME=""
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "$STACK_NAME" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        
+        # Use cleanup script if available
+        if [ -f "$script_dir/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || true
+        else
+            log "Running manual cleanup..."
+            # Basic manual cleanup
+            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
+                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
+                    log "Terminated instance: $instance_id"
+                fi
+            done
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
+
 # Note: Converted to work with bash 3.2+ (compatible with macOS default bash)
 
 set -euo pipefail
+
+# Load security validation library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/security-validation.sh" ]]; then
+    source "$SCRIPT_DIR/security-validation.sh"
+else
+    echo "Warning: Security validation library not found at $SCRIPT_DIR/security-validation.sh"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,10 +86,13 @@ NC='\033[0m' # No Color
 AWS_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-auto}"  # Changed to auto-selection
 MAX_SPOT_PRICE="${MAX_SPOT_PRICE:-2.00}"  # Increased for G5 instances
-KEY_NAME="${KEY_NAME:-ai-starter-kit-key}"
-STACK_NAME="${STACK_NAME:-ai-starter-kit}"
-PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+KEY_NAME="${KEY_NAME:-GeuseMaker-key}"
+STACK_NAME="${STACK_NAME:-GeuseMaker}"
+PROJECT_NAME="${PROJECT_NAME:-GeuseMaker}"
 ENABLE_CROSS_REGION="${ENABLE_CROSS_REGION:-false}"  # Cross-region analysis
+USE_LATEST_IMAGES="${USE_LATEST_IMAGES:-true}"  # Use latest Docker images by default
+SETUP_ALB="${SETUP_ALB:-false}"  # Setup Application Load Balancer
+SETUP_CLOUDFRONT="${SETUP_CLOUDFRONT:-false}"  # Setup CloudFront distribution
 
 # =============================================================================
 # GPU INSTANCE AND AMI CONFIGURATION MATRIX
@@ -1872,21 +1926,41 @@ launch_spot_instance() {
         
         # Create spot instance request
         log "Creating spot instance request in $AZ with max price \$$MAX_SPOT_PRICE/hour..."
+        # Prepare instance profile name
+        INSTANCE_PROFILE_NAME="$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)"
+        
+        # Validate security group ID format before using
+        if [[ ! "$SG_ID" =~ ^sg-[0-9a-fA-F]+$ ]]; then
+            warning "Invalid security group ID format: $SG_ID. Skipping $AZ."
+            continue
+        fi
+        
+        # Validate required parameters before spot instance request
+        if [[ -z "$SELECTED_AMI" || -z "$SELECTED_INSTANCE_TYPE" || -z "$KEY_NAME" || -z "$SUBNET_ID" || -z "$INSTANCE_PROFILE_NAME" ]]; then
+            warning "Missing required parameters for spot instance in $AZ. Skipping..."
+            continue
+        fi
+        
+        # Validate user data file exists
+        if [[ ! -f "user-data.sh" ]]; then
+            warning "User data file not found. Skipping $AZ."
+            continue
+        fi
+        
+        # Create spot instance request with individual parameters
+        info "Requesting spot instance in $AZ: $SELECTED_INSTANCE_TYPE at \$$MAX_SPOT_PRICE/hour"
+        
         REQUEST_RESULT=$(aws ec2 request-spot-instances \
             --spot-price "$MAX_SPOT_PRICE" \
             --instance-count 1 \
             --type "one-time" \
-            --launch-specification "{
-                \"ImageId\": \"$SELECTED_AMI\",
-                \"InstanceType\": \"$SELECTED_INSTANCE_TYPE\",
-                \"KeyName\": \"$KEY_NAME\",
-                \"SecurityGroupIds\": [\"$SG_ID\"],
-                \"SubnetId\": \"$SUBNET_ID\",
-                \"IamInstanceProfile\": {
-                    \"Name\": \"${STACK_NAME}-instance-profile\"
-                },
-                \"UserData\": \"$(if [[ "$OSTYPE" == "darwin"* ]]; then base64 -i user-data.sh | tr -d '\n'; else base64 -w 0 user-data.sh; fi)\"
-            }" \
+            --image-id "$SELECTED_AMI" \
+            --instance-type "$SELECTED_INSTANCE_TYPE" \
+            --key-name "$KEY_NAME" \
+            --security-group-ids "$SG_ID" \
+            --subnet-id "$SUBNET_ID" \
+            --user-data "file://user-data.sh" \
+            --iam-instance-profile Name="$INSTANCE_PROFILE_NAME" \
             --region "$AWS_REGION" 2>&1) || {
             warning "Failed to create spot instance request in $AZ: $REQUEST_RESULT"
             continue
@@ -1895,9 +1969,11 @@ launch_spot_instance() {
         REQUEST_ID=$(echo "$REQUEST_RESULT" | jq -r '.SpotInstanceRequests[0].SpotInstanceRequestId' 2>/dev/null || echo "")
         
         if [[ -z "$REQUEST_ID" || "$REQUEST_ID" == "None" || "$REQUEST_ID" == "null" ]]; then
-            warning "Invalid spot instance request ID in $AZ, trying next AZ..."
+            warning "Failed to extract spot request ID from response in $AZ"
             continue
         fi
+        
+        success "Created spot instance request $REQUEST_ID in $AZ"
         
         info "Spot instance request ID: $REQUEST_ID in $AZ"
         
@@ -2348,6 +2424,15 @@ display_results() {
 cleanup_on_error() {
     error "Deployment failed. Cleaning up resources..."
     
+    # Use comprehensive cleanup script if available
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "$script_dir/cleanup-stack.sh" ] && [ -n "${STACK_NAME:-}" ]; then
+        log "Running comprehensive cleanup for stack: $STACK_NAME"
+        "$script_dir/cleanup-stack.sh" "$STACK_NAME" || true
+        return
+    fi
+    
+    # Fallback to manual cleanup if no stack name or cleanup script
     # Terminate instance first
     if [ ! -z "${INSTANCE_ID:-}" ]; then
         log "Terminating instance $INSTANCE_ID..."
@@ -2769,190 +2854,112 @@ comprehensive_service_diagnostics() {
 create_security_group() {
     log "Creating enhanced security group with IP whitelisting..."
     
-    # Check if security group exists
-    SG_ID=$(aws ec2 describe-security-groups \
-        --group-names "${STACK_NAME}-sg" \
-        --region "$AWS_REGION" \
-        --query 'SecurityGroups[0].GroupId' \
-        --output text 2>/dev/null || echo "None")
-    
-    if [[ "$SG_ID" != "None" ]]; then
-        warning "Security group already exists: $SG_ID"
-        echo "$SG_ID"
-        return 0
-    fi
-    
-    # Get VPC ID
+    # Get VPC ID first
     VPC_ID=$(aws ec2 describe-vpcs \
         --filters "Name=is-default,Values=true" \
         --region "$AWS_REGION" \
         --query 'Vpcs[0].VpcId' \
         --output text)
     
-    if [[ "$VPC_ID" == "None" ]] || [[ -z "$VPC_ID" ]]; then
-        error "Failed to find default VPC"
+    if [[ -z "$VPC_ID" || "$VPC_ID" == "None" ]]; then
+        error "Failed to retrieve default VPC ID"
         return 1
     fi
     
     # Get caller's IP for SSH whitelisting
     CALLER_IP=$(get_caller_ip)
     
-    # Create security group
-    SG_ID=$(aws ec2 create-security-group \
-        --group-name "${STACK_NAME}-sg" \
-        --description "Security group for AI Starter Kit Intelligent Deployment" \
-        --vpc-id "$VPC_ID" \
+    # Check if security group exists
+    SG_ID=$(aws ec2 describe-security-groups \
+        --group-names "${STACK_NAME}-sg" \
         --region "$AWS_REGION" \
-        --query 'GroupId' \
-        --output text)
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null | grep -oE 'sg-[0-9a-fA-F]+' | head -n1)
     
-    if [[ -z "$SG_ID" ]] || [[ "$SG_ID" == "None" ]]; then
-        error "Failed to create security group"
+    
+    if [[ -z "$SG_ID" ]]; then
+        # Create security group
+        SG_ID=$(aws ec2 create-security-group \
+            --group-name "${STACK_NAME}-sg" \
+            --description "Security group for AI Starter Kit Intelligent Deployment" \
+            --vpc-id "$VPC_ID" \
+            --region "$AWS_REGION" \
+            --query 'GroupId' \
+            --output text)
+        if [[ -z "$SG_ID" ]]; then
+            error "Failed to create security group"
+            return 1
+        fi
+    fi
+    
+    # Validate SG_ID format
+    if [[ ! "$SG_ID" =~ ^sg-[0-9a-fA-F]+$ ]]; then
+        error "Invalid security group ID: $SG_ID"
         return 1
     fi
     
-    log "Adding security group rules with enhanced security..."
-    
-    # SSH access - restricted to caller's IP
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 22 \
-        --cidr "$CALLER_IP" \
-        --region "$AWS_REGION" || {
-        warning "Failed to add SSH rule for $CALLER_IP, adding fallback rule"
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 22 \
-            --cidr 0.0.0.0/0 \
-            --region "$AWS_REGION"
+    # Add security group rules with duplicate protection
+    add_sg_rule_if_not_exists() {
+        local sg_id="$1"
+        local protocol="$2"
+        local port="$3"
+        local source_type="$4"
+        local source_value="$5"
+        
+        # Check if rule already exists
+        local existing_rule
+        if [[ "$source_type" == "cidr" ]]; then
+            existing_rule=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$AWS_REGION" \
+                --query "SecurityGroups[0].IpPermissions[?IpProtocol=='$protocol' && FromPort==$port && ToPort==$port && IpRanges[?CidrIp=='$source_value']]" \
+                --output text 2>/dev/null)
+        else
+            existing_rule=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --region "$AWS_REGION" \
+                --query "SecurityGroups[0].IpPermissions[?IpProtocol=='$protocol' && FromPort==$port && ToPort==$port && UserIdGroupPairs[?GroupId=='$source_value']]" \
+                --output text 2>/dev/null)
+        fi
+        
+        if [[ -z "$existing_rule" ]]; then
+            if [[ "$source_type" == "cidr" ]]; then
+                aws ec2 authorize-security-group-ingress \
+                    --group-id "$sg_id" \
+                    --protocol "$protocol" \
+                    --port "$port" \
+                    --cidr "$source_value" \
+                    --region "$AWS_REGION" >/dev/null 2>&1 && \
+                log "Added rule: $protocol/$port from $source_value" || \
+                warning "Failed to add rule: $protocol/$port from $source_value"
+            else
+                aws ec2 authorize-security-group-ingress \
+                    --group-id "$sg_id" \
+                    --protocol "$protocol" \
+                    --port "$port" \
+                    --source-group "$source_value" \
+                    --region "$AWS_REGION" >/dev/null 2>&1 && \
+                log "Added rule: $protocol/$port from group $source_value" || \
+                warning "Failed to add rule: $protocol/$port from group $source_value"
+            fi
+        fi
     }
     
-    # Public ALB ports (these need to be open to the world)
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 80 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+    log "Adding security group rules with enhanced security..."
     
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 443 \
-        --cidr 0.0.0.0/0 \
-        --region "$AWS_REGION"
+    # Essential inbound rules (with duplicate protection)
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "22" "cidr" "$CALLER_IP"      # SSH
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "80" "cidr" "0.0.0.0/0"       # HTTP
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "443" "cidr" "0.0.0.0/0"      # HTTPS
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "5678" "cidr" "$CALLER_IP"    # n8n
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "6333" "cidr" "$CALLER_IP"    # Qdrant
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "11434" "cidr" "$CALLER_IP"   # Ollama
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "11235" "cidr" "$CALLER_IP"   # Crawl4AI
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "5432" "group" "$SG_ID"       # PostgreSQL
+    add_sg_rule_if_not_exists "$SG_ID" "tcp" "2049" "group" "$SG_ID"      # NFS for EFS
     
-    # Service ports - restricted to caller's IP and internal VPC
-    local vpc_cidr
-    vpc_cidr=$(aws ec2 describe-vpcs \
-        --vpc-ids "$VPC_ID" \
-        --region "$AWS_REGION" \
-        --query 'Vpcs[0].CidrBlock' \
-        --output text)
-    
-    # n8n - workflow automation interface
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 5678 \
-        --cidr "$CALLER_IP" \
-        --region "$AWS_REGION"
-    
-    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
-        retry_with_backoff aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 5678 \
-            --cidr "$vpc_cidr" \
-            --region "$AWS_REGION"
-    fi
-    
-    # Ollama - LLM inference
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11434 \
-        --cidr "$CALLER_IP" \
-        --region "$AWS_REGION"
-    
-    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
-        retry_with_backoff aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 11434 \
-            --cidr "$vpc_cidr" \
-            --region "$AWS_REGION"
-    fi
-    
-    # Crawl4AI - web scraping service
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 11235 \
-        --cidr "$CALLER_IP" \
-        --region "$AWS_REGION"
-    
-    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
-        retry_with_backoff aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 11235 \
-            --cidr "$vpc_cidr" \
-            --region "$AWS_REGION"
-    fi
-    
-    # Qdrant - vector database
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 6333 \
-        --cidr "$CALLER_IP" \
-        --region "$AWS_REGION"
-    
-    if [[ "$vpc_cidr" != "$CALLER_IP" ]]; then
-        retry_with_backoff aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 6333 \
-            --cidr "$vpc_cidr" \
-            --region "$AWS_REGION"
-    fi
-    
-    # NFS for EFS - internal communication only
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 2049 \
-        --source-group "$SG_ID" \
-        --region "$AWS_REGION"
-    
-    # UDP for NFS as well
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol udp \
-        --port 2049 \
-        --source-group "$SG_ID" \
-        --region "$AWS_REGION"
-    
-    # Portmapper for NFS
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol tcp \
-        --port 111 \
-        --source-group "$SG_ID" \
-        --region "$AWS_REGION"
-    
-    retry_with_backoff aws ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" \
-        --protocol udp \
-        --port 111 \
-        --source-group "$SG_ID" \
-        --region "$AWS_REGION"
-    
-    success "Created enhanced security group: $SG_ID (SSH restricted to $CALLER_IP)"
-    echo "$SG_ID"
+    success "Created security group: $SG_ID"
+    echo "$SG_ID" | tr -d '\n\r\t '
 }
 
 create_iam_role() {
@@ -2962,248 +2969,7 @@ create_iam_role() {
     if aws iam get-role --role-name "${STACK_NAME}-role" &> /dev/null; then
         warning "IAM role already exists"
         return 0
-    fi
-    
-    # Create trust policy
-    cat > trust-policy.json << EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "ec2.amazonaws.com"
-            },
-            "Action": "sts:AssumeRole"
-        }
-    ]
-}
-EOF
-
-    # Create role
-    aws iam create-role \
-        --role-name "${STACK_NAME}-role" \
-        --assume-role-policy-document file://trust-policy.json || {
-        warning "Role ${STACK_NAME}-role may already exist, continuing..."
-    }
-    
-    # Attach essential policies
-    aws iam attach-role-policy \
-        --role-name "${STACK_NAME}-role" \
-        --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy || {
-        warning "CloudWatchAgentServerPolicy may already be attached, continuing..."
-    }
-    
-    aws iam attach-role-policy \
-        --role-name "${STACK_NAME}-role" \
-        --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || {
-        warning "AmazonSSMManagedInstanceCore may already be attached, continuing..."
-    }
-    
-    # Create custom policy for EFS and AWS service access
-    cat > custom-policy.json << EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "elasticfilesystem:DescribeFileSystems",
-                "elasticfilesystem:DescribeMountTargets", 
-                "ec2:Describe*",
-                "cloudwatch:PutMetricData",
-                "ssm:GetParameter",
-                "ssm:GetParameters",
-                "ssm:GetParametersByPath"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-
-    aws iam create-policy \
-        --policy-name "${STACK_NAME}-custom-policy" \
-        --policy-document file://custom-policy.json || true
-    
-    aws iam attach-role-policy \
-        --role-name "${STACK_NAME}-role" \
-        --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/${STACK_NAME}-custom-policy" || {
-        warning "Custom policy may already be attached, continuing..."
-    }
-    
-    # Create instance profile
-    aws iam create-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
-    aws iam add-role-to-instance-profile \
-        --instance-profile-name "${STACK_NAME}-instance-profile" \
-        --role-name "${STACK_NAME}-role" || true
-    
-    # Wait for IAM propagation
-    log "Waiting for IAM role propagation..."
-    sleep 30
-    
-    success "Created IAM role and instance profile"
-}
-
-create_efs() {
-    local SG_ID="$1"
-    log "Setting up EFS (Elastic File System)..."
-    
-    # Check if EFS already exists by searching through all file systems
-    EFS_LIST=$(aws efs describe-file-systems \
-        --region "$AWS_REGION" \
-        --query 'FileSystems[].FileSystemId' \
-        --output text 2>/dev/null || echo "")
-    
-    # Check each EFS to see if it has our tag
-    for EFS_ID in $EFS_LIST; do
-        if [[ -n "$EFS_ID" && "$EFS_ID" != "None" ]]; then
-            EFS_TAGS=$(aws efs list-tags-for-resource \
-                --resource-id "$EFS_ID" \
-                --region "$AWS_REGION" \
-                --query "Tags[?Key=='Name'].Value" \
-                --output text 2>/dev/null || echo "")
-            
-            if [[ "$EFS_TAGS" == "${STACK_NAME}-efs" ]]; then
-                warning "EFS already exists: $EFS_ID"
-                # Get EFS DNS name
-                EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
-                export EFS_ID
-                echo "$EFS_DNS"
-                return 0
-            fi
-        fi
-    done
-    
-    # Create EFS
-    EFS_ID=$(aws efs create-file-system \
-        --creation-token "${STACK_NAME}-efs-$(date +%s)" \
-        --performance-mode generalPurpose \
-        --throughput-mode provisioned \
-        --provisioned-throughput-in-mibps 100 \
-        --encrypted \
-        --region "$AWS_REGION" \
-        --query 'FileSystemId' \
-        --output text)
-    
-    # Tag EFS
-    aws efs create-tags \
-        --file-system-id "$EFS_ID" \
-        --tags Key=Name,Value="${STACK_NAME}-efs" Key=Project,Value="$PROJECT_NAME" \
-        --region "$AWS_REGION"
-    
-    # Wait for EFS to be available
-    log "Waiting for EFS to become available..."
-    while true; do
-        EFS_STATE=$(aws efs describe-file-systems \
-            --file-system-id "$EFS_ID" \
-            --region "$AWS_REGION" \
-            --query 'FileSystems[0].LifeCycleState' \
-            --output text 2>/dev/null || echo "")
-        
-        if [[ "$EFS_STATE" == "available" ]]; then
-            log "EFS is now available"
-            break
-        elif [[ "$EFS_STATE" == "creating" ]]; then
-            log "EFS is still creating... waiting 10 seconds"
-            sleep 10
-        else
-            warning "EFS state: $EFS_STATE"
-            sleep 10
-        fi
-    done
-    
-    # Get EFS DNS name
-    EFS_DNS="${EFS_ID}.efs.${AWS_REGION}.amazonaws.com"
-    # Export EFS_ID for cleanup function
-    export EFS_ID
-    success "Created EFS: $EFS_ID (DNS: $EFS_DNS)"
-    echo "$EFS_DNS"
-}
-
-get_subnet_for_az() {
-    local AZ="$1"
-    aws ec2 describe-subnets \
-        --filters "Name=availability-zone,Values=$AZ" "Name=default-for-az,Values=true" \
-        --region "$AWS_REGION" \
-        --query 'Subnets[0].SubnetId' \
-        --output text
-}
-
-create_efs_mount_target() {
-    local SG_ID="$1"
-    local INSTANCE_AZ="$2"
-    
-    if [[ -z "${EFS_ID:-}" ]]; then
-        error "EFS_ID not set. Cannot create mount target."
-        return 1
-    fi
-    
-    log "Creating EFS mount target in $INSTANCE_AZ (where instance is running)..."
-    
-    # Check if mount target already exists in this AZ
-    EXISTING_MT=$(aws efs describe-mount-targets \
-        --file-system-id "$EFS_ID" \
-        --region "$AWS_REGION" \
-        --query "MountTargets[?AvailabilityZoneName=='$INSTANCE_AZ'].MountTargetId" \
-        --output text 2>/dev/null || echo "")
-    
-    if [[ -n "$EXISTING_MT" && "$EXISTING_MT" != "None" ]]; then
-        warning "EFS mount target already exists in $INSTANCE_AZ: $EXISTING_MT"
-        return 0
-    fi
-    
-    # Get subnet ID for the instance AZ
-    SUBNET_ID=$(get_subnet_for_az "$INSTANCE_AZ")
-    
-    if [[ "$SUBNET_ID" != "None" && -n "$SUBNET_ID" ]]; then
-        aws efs create-mount-target \
-            --file-system-id "$EFS_ID" \
-            --subnet-id "$SUBNET_ID" \
-            --security-groups "$SG_ID" \
-            --region "$AWS_REGION" || {
-            warning "Mount target creation failed in $INSTANCE_AZ, but continuing..."
-            return 0
-        }
-        success "Created EFS mount target in $INSTANCE_AZ"
-    else
-        error "No suitable subnet found in $INSTANCE_AZ"
-        return 1
-    fi
-}
-
-create_target_group() {
-    local SG_ID="$1"
-    local INSTANCE_ID="$2"
-    
-    log "Creating target group for n8n..."
-    
-    # Get VPC ID
-    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region "$AWS_REGION")
-    
-    TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
-        --name "${STACK_NAME}-n8n-tg" \
-        --protocol HTTP \
-        --port 5678 \
-        --vpc-id "$VPC_ID" \
-        --health-check-protocol HTTP \
-        --health-check-port 5678 \
-        --health-check-path /healthz \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 10 \
-        --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 2 \
-        --target-type instance \
-        --region "$AWS_REGION" \
-        --query 'TargetGroups[0].TargetGroupArn' \
-        --output text)
-    
-    # Register instance to target group
-    aws elbv2 register-targets \
-        --target-group-arn "$TARGET_GROUP_ARN" \
-        --targets "Id=$INSTANCE_ID,Port=5678" \
-        --region "$AWS_REGION" || {
-        warning "Failed to register instance to n8n target group, but continuing..."
+    fi        warning "Failed to register instance to n8n target group, but continuing..."
     }
     
     success "Created n8n target group: $TARGET_GROUP_ARN"
@@ -3325,6 +3091,29 @@ setup_cloudfront() {
         "ForwardedValues": {
             "QueryString": true,
             "Headers": {
+    # Create CloudFront distribution
+    DISTRIBUTION_CONFIG='{
+        "CallerReference": "'${STACK_NAME}'-'$(date +%s)'",
+        "Comment": "CloudFront distribution for GeuseMaker",
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "ALBOrigin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": {
+                "Quantity": 7,
+                "Items": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+                "CachedMethods": {
+                    "Quantity": 2,
+                    "Items": ["GET", "HEAD"]
+                }
+            },
+            "ForwardedValues": {
+                "QueryString": true,
+                "Headers": {
+                    "Quantity": 0
+                }
+            },
+            "TrustedSigners": {
+                "Enabled": false,
                 "Quantity": 0
             },
             "Cookies": {
@@ -3744,14 +3533,14 @@ deploy_application() {
     local EFS_DNS="$2"
     local INSTANCE_ID="$3"
     
-    log "Deploying AI Starter Kit application..."
+    log "Deploying GeuseMaker application..."
     
     # Create deployment script
     cat > deploy-app.sh << EOF
 #!/bin/bash
 set -euo pipefail
 
-echo "Starting AI Starter Kit deployment..."
+echo "Starting GeuseMaker deployment..."
 
 # Mount EFS
 sudo mkdir -p /mnt/efs
@@ -3759,26 +3548,59 @@ sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,ret
 echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc,_netdev 0 0" | sudo tee -a /etc/fstab
 
 # Clone repository if it doesn't exist
-if [ ! -d "/home/ubuntu/ai-starter-kit" ]; then
-    git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit
+if [ ! -d "/home/ubuntu/GeuseMaker" ]; then
+    git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/GeuseMaker
 fi
-cd /home/ubuntu/ai-starter-kit
+cd /home/ubuntu/GeuseMaker
 
-# Create basic .env file
-cat > .env << 'EOFENV'
+# Update Docker images to latest versions (unless overridden)
+if [ "\${USE_LATEST_IMAGES:-true}" = "true" ]; then
+    echo "Updating Docker images to latest versions..."
+    if [ -f "scripts/simple-update-images.sh" ]; then
+        chmod +x scripts/simple-update-images.sh
+        ./scripts/simple-update-images.sh update
+    else
+        echo "Warning: Image update script not found, using default versions"
+    fi
+fi
+
+# Create comprehensive .env file with all required variables
+cat > .env << EOFENV
+# PostgreSQL Configuration
 POSTGRES_DB=n8n_db
 POSTGRES_USER=n8n_user
-POSTGRES_PASSWORD=n8n_password_$(openssl rand -hex 16)
+POSTGRES_PASSWORD=n8n_password_\$(openssl rand -hex 32)
+
+# n8n Configuration
 N8N_ENCRYPTION_KEY=\$(openssl rand -hex 32)
 N8N_USER_MANAGEMENT_JWT_SECRET=\$(openssl rand -hex 32)
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
+N8N_PROTOCOL=http
+WEBHOOK_URL=http://\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5678
+
+# n8n Security Settings
 N8N_CORS_ENABLE=true
-N8N_CORS_ALLOWED_ORIGINS=*
+N8N_CORS_ALLOWED_ORIGINS=https://n8n.geuse.io,https://localhost:5678
 N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+
+# AWS Configuration
 EFS_DNS=$EFS_DNS
 INSTANCE_ID=$INSTANCE_ID
 AWS_DEFAULT_REGION=$AWS_REGION
+INSTANCE_TYPE=g4dn.xlarge
+
+# Image version control
+USE_LATEST_IMAGES=$USE_LATEST_IMAGES
+
+# API Keys (empty by default - can be configured via SSM)
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+GROQ_API_KEY=
+TOGETHER_API_KEY=
+MISTRAL_API_KEY=
+GEMINI_API_TOKEN=
 EOFENV
 
 # Start GPU-optimized services
@@ -3796,7 +3618,7 @@ EOF
     log "Copying application files..."
     rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
         -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
-        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
+        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/GeuseMaker/"
     
     # Run deployment
     log "Running deployment script..."
@@ -4008,6 +3830,247 @@ run_post_deployment_validation() {
 }
 
 # =============================================================================
+# APPLICATION LOAD BALANCER SETUP
+# =============================================================================
+
+setup_alb() {
+    local INSTANCE_ID="$1"
+    local SG_ID="$2"
+    
+    if [ "$SETUP_ALB" != "true" ]; then
+        log "Skipping ALB setup (not requested)"
+        return 0
+    fi
+    
+    log "Setting up Application Load Balancer..."
+    
+    # Get VPC ID from the security group
+    local VPC_ID
+    VPC_ID=$(aws ec2 describe-security-groups \
+        --group-ids "$SG_ID" \
+        --query 'SecurityGroups[0].VpcId' \
+        --output text)
+    
+    if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+        error "Could not determine VPC ID from security group $SG_ID"
+        return 1
+    fi
+    
+    # Get at least 2 subnets for ALB (ALB requires multiple AZs)
+    local subnet_ids
+    mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+        --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
+        --output text | tr '\t' '\n' | head -2)
+    
+    if [ ${#subnet_ids[@]} -lt 2 ]; then
+        warn "Need at least 2 public subnets for ALB. Attempting to use default VPC subnets..."
+        
+        # Try to get subnets from default VPC
+        mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+            --query 'Subnets[].SubnetId' \
+            --output text | tr '\t' '\n' | head -2)
+        
+        if [ ${#subnet_ids[@]} -lt 2 ]; then
+            warn "Still don't have enough subnets for ALB. Skipping ALB setup."
+            return 0
+        fi
+    fi
+    
+    # Create ALB
+    local ALB_ARN
+    ALB_ARN=$(aws elbv2 create-load-balancer \
+        --name "${STACK_NAME}-alb" \
+        --subnets "${subnet_ids[@]}" \
+        --security-groups "$SG_ID" \
+        --scheme internet-facing \
+        --type application \
+        --ip-address-type ipv4 \
+        --query 'LoadBalancers[0].LoadBalancerArn' \
+        --output text 2>/dev/null)
+    
+    if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" = "None" ]; then
+        warn "Failed to create Application Load Balancer. Continuing without ALB."
+        return 0
+    fi
+    
+    # Create target groups for main services
+    local services=("n8n:5678" "ollama:11434" "qdrant:6333" "crawl4ai:11235")
+    
+    for service in "${services[@]}"; do
+        local service_name="${service%:*}"
+        local service_port="${service#*:}"
+        
+        log "Creating target group for $service_name..."
+        
+        # Create target group
+        local TG_ARN
+        TG_ARN=$(aws elbv2 create-target-group \
+            --name "${STACK_NAME}-${service_name}-tg" \
+            --protocol HTTP \
+            --port "$service_port" \
+            --vpc-id "$VPC_ID" \
+            --health-check-protocol HTTP \
+            --health-check-path "/" \
+            --health-check-interval-seconds 30 \
+            --health-check-timeout-seconds 5 \
+            --healthy-threshold-count 2 \
+            --unhealthy-threshold-count 3 \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text 2>/dev/null)
+        
+        if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            # Register instance with target group
+            aws elbv2 register-targets \
+                --target-group-arn "$TG_ARN" \
+                --targets Id="$INSTANCE_ID",Port="$service_port" \
+                2>/dev/null
+            
+            # Create listener (different ports for different services)
+            local listener_port
+            case "$service_name" in
+                "n8n") listener_port=80 ;;
+                "ollama") listener_port=8080 ;;
+                "qdrant") listener_port=8081 ;;
+                "crawl4ai") listener_port=8082 ;;
+                *) listener_port=$((8000 + service_port % 1000)) ;;
+            esac
+            
+            aws elbv2 create-listener \
+                --load-balancer-arn "$ALB_ARN" \
+                --protocol HTTP \
+                --port "$listener_port" \
+                --default-actions Type=forward,TargetGroupArn="$TG_ARN" \
+                2>/dev/null > /dev/null
+            
+            success "✓ Created target group and listener for $service_name on port $listener_port"
+        fi
+    done
+    
+    # Get ALB DNS name
+    ALB_DNS_NAME=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$ALB_ARN" \
+        --query 'LoadBalancers[0].DNSName' \
+        --output text)
+    
+    success "Application Load Balancer setup completed!"
+    log "ALB DNS: $ALB_DNS_NAME"
+    log "Service URLs:"
+    log "  • n8n:      http://$ALB_DNS_NAME (port 80)"
+    log "  • Ollama:   http://$ALB_DNS_NAME:8080"
+    log "  • Qdrant:   http://$ALB_DNS_NAME:8081"
+    log "  • Crawl4AI: http://$ALB_DNS_NAME:8082"
+    
+    return 0
+}
+
+# =============================================================================
+# CLOUDFRONT SETUP
+# =============================================================================
+
+setup_cloudfront() {
+    local ALB_DNS_NAME="$1"
+    
+    if [ "$SETUP_CLOUDFRONT" != "true" ]; then
+        log "Skipping CloudFront setup (not requested)"
+        return 0
+    fi
+    
+    if [ -z "$ALB_DNS_NAME" ]; then
+        warn "No ALB DNS name provided. CloudFront requires ALB. Skipping CloudFront setup."
+        return 0
+    fi
+    
+    log "Setting up CloudFront distribution..."
+    
+    # Create CloudFront distribution configuration
+    local distribution_config
+    distribution_config=$(cat << EOF
+{
+    "CallerReference": "${STACK_NAME}-$(date +%s)",
+    "Comment": "GeuseMaker CDN Distribution for ${STACK_NAME}",
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "${STACK_NAME}-alb-origin",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "ForwardedValues": {
+            "QueryString": true,
+            "Cookies": {
+                "Forward": "all"
+            },
+            "Headers": {
+                "Quantity": 1,
+                "Items": ["*"]
+            }
+        },
+        "MinTTL": 0,
+        "DefaultTTL": 0,
+        "MaxTTL": 31536000
+    },
+    "Origins": {
+        "Quantity": 1,
+        "Items": [
+            {
+                "Id": "${STACK_NAME}-alb-origin",
+                "DomainName": "$ALB_DNS_NAME",
+                "CustomOriginConfig": {
+                    "HTTPPort": 80,
+                    "HTTPSPort": 443,
+                    "OriginProtocolPolicy": "http-only",
+                    "OriginSslProtocols": {
+                        "Quantity": 1,
+                        "Items": ["TLSv1.2"]
+                    }
+                }
+            }
+        ]
+    },
+    "Enabled": true,
+    "PriceClass": "PriceClass_100"
+}
+EOF
+)
+    
+    # Create the distribution
+    local distribution_result
+    distribution_result=$(aws cloudfront create-distribution \
+        --distribution-config "$distribution_config" \
+        2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$distribution_result" ]; then
+        local CLOUDFRONT_ID
+        local CLOUDFRONT_DOMAIN
+        
+        CLOUDFRONT_ID=$(echo "$distribution_result" | jq -r '.Distribution.Id' 2>/dev/null || echo "")
+        CLOUDFRONT_DOMAIN=$(echo "$distribution_result" | jq -r '.Distribution.DomainName' 2>/dev/null || echo "")
+        
+        if [ -n "$CLOUDFRONT_ID" ] && [ "$CLOUDFRONT_ID" != "null" ]; then
+            success "CloudFront distribution created!"
+            log "Distribution ID: $CLOUDFRONT_ID"
+            log "Distribution Domain: $CLOUDFRONT_DOMAIN"
+            log "CloudFront URL: https://$CLOUDFRONT_DOMAIN"
+            
+            log "Note: CloudFront distribution is being deployed. It may take 15-20 minutes to become fully available."
+            
+            # Store for later use
+            echo "$CLOUDFRONT_ID" > "/tmp/${STACK_NAME}-cloudfront-id"
+            echo "$CLOUDFRONT_DOMAIN" > "/tmp/${STACK_NAME}-cloudfront-domain"
+        else
+            warn "CloudFront distribution creation returned unexpected results. Continuing without CloudFront."
+        fi
+        
+        return 0
+    else
+        warn "Failed to create CloudFront distribution. This is optional and deployment will continue."
+        return 0
+    fi
+}
+
+# =============================================================================
 # MAIN DEPLOYMENT FLOW
 # =============================================================================
 
@@ -4034,6 +4097,12 @@ EOF
     check_prerequisites
     
     log "Starting AWS infrastructure deployment..."
+    
+    # Mark that we're starting to create resources  
+    RESOURCES_CREATED=true
+    
+    create_key_pair
+    create_iam_role
     
     # Set up secure credentials first
     setup_secure_credentials
@@ -4106,13 +4175,25 @@ EOF
     
     # Run comprehensive post-deployment validation
     run_post_deployment_validation "$PUBLIC_IP"
+    # Setup ALB and CloudFront if requested
+    local ALB_DNS=""
+    if [ "$SETUP_ALB" = "true" ]; then
+        setup_alb "$INSTANCE_ID" "$SG_ID"
+        if [ -n "$ALB_DNS_NAME" ]; then
+            ALB_DNS="$ALB_DNS_NAME"
+        fi
+    fi
+    
+    if [ "$SETUP_CLOUDFRONT" = "true" ]; then
+        setup_cloudfront "$ALB_DNS"
+    fi
     
     display_results "$PUBLIC_IP" "$INSTANCE_ID" "$EFS_DNS" "$INSTANCE_AZ"
     
     # Clean up temporary files
     rm -f user-data.sh trust-policy.json custom-policy.json deploy-app.sh cloudfront-config.json
     
-    success "AI Starter Kit deployment completed successfully!"
+    success "GeuseMaker deployment completed successfully!"
 }
 
 # =============================================================================
@@ -4122,7 +4203,7 @@ EOF
 show_usage() {
     echo "Usage: $0 [OPTIONS] [COMMAND]"
     echo ""
-    echo "🚀 AI Starter Kit - Intelligent AWS GPU Deployment"
+    echo "🚀 GeuseMaker - Intelligent AWS GPU Deployment"
     echo "================================================="
     echo ""
     echo "This script intelligently deploys GPU-optimized AI infrastructure on AWS"
@@ -4182,8 +4263,12 @@ show_usage() {
     echo "                         (default: auto)"
     echo "  --max-spot-price PRICE  Maximum spot price budget (default: 2.00)"
     echo "  --cross-region          Enable cross-region analysis for best pricing"
-    echo "  --key-name NAME         SSH key name (default: ai-starter-kit-key)"
-    echo "  --stack-name NAME       Stack name (default: ai-starter-kit)"
+    echo "  --key-name NAME         SSH key name (default: GeuseMaker-key)"
+    echo "  --stack-name NAME       Stack name (default: GeuseMaker)"
+    echo "  --use-pinned-images     Use specific pinned image versions instead of latest"
+    echo "  --setup-alb             Setup Application Load Balancer (ALB)"
+    echo "  --setup-cloudfront      Setup CloudFront CDN distribution"
+    echo "  --setup-cdn             Setup both ALB and CloudFront (convenience flag)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"
@@ -4218,6 +4303,15 @@ show_usage() {
     echo "  🚨 Automatic error diagnosis with suggestions"
     echo "  📊 Setup progress indicators (12 tracked stages)"
     echo "  🔧 Service health validation"
+    echo "    $0 --region us-west-2                # Deploy in different region"
+    echo "    $0 --region eu-central-1             # Deploy in Europe" 
+    echo "    $0 --cross-region                    # Find best region automatically"
+    echo ""
+    echo "  🌐 Load balancer and CDN:"
+    echo "    $0 --setup-alb                       # Deploy with Application Load Balancer"
+    echo "    $0 --setup-cloudfront                # Deploy with CloudFront CDN"
+    echo "    $0 --setup-cdn                       # Deploy with both ALB and CloudFront"
+    echo "    $0 --setup-cdn --cross-region        # Full setup with best region"
     echo ""
     echo "Cost Optimization Features:"
     echo "  💡 Automatic spot pricing analysis across all AZs"
@@ -4376,6 +4470,24 @@ while [[ $# -gt 0 ]]; do
         --stack-name)
             STACK_NAME="$2"
             shift 2
+            ;;
+        --use-pinned-images)
+            USE_LATEST_IMAGES=false
+            shift
+            ;;
+        --setup-alb)
+            SETUP_ALB=true
+            shift
+            ;;
+        --setup-cloudfront)
+            SETUP_CLOUDFRONT=true
+            shift
+            ;;
+        --setup-cdn)
+            # Convenience flag to enable both ALB and CloudFront
+            SETUP_ALB=true
+            SETUP_CLOUDFRONT=true
+            shift
             ;;
         --help)
             show_usage

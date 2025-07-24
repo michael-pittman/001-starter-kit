@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# AI-Powered Starter Kit - On-Demand AWS Deployment
+# GeuseMaker - On-Demand AWS Deployment
 # =============================================================================
 # This script uses ONLY on-demand instances to completely avoid spot limits
 # Features: 100% reliable deployment, no spot instance complications
@@ -12,6 +12,50 @@
 # =============================================================================
 
 set -euo pipefail
+
+# =============================================================================
+# CLEANUP ON FAILURE HANDLER
+# =============================================================================
+
+# Global flag to track if cleanup should run
+CLEANUP_ON_FAILURE="${CLEANUP_ON_FAILURE:-true}"
+RESOURCES_CREATED=false
+STACK_NAME=""
+
+cleanup_on_failure() {
+    local exit_code=$?
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "$STACK_NAME" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local project_root="$(cd "$script_dir/.." && pwd)"
+        
+        # Use cleanup script if available
+        if [ -f "$project_root/cleanup-stack.sh" ]; then
+            log "Using cleanup script to remove resources..."
+            "$project_root/cleanup-stack.sh" "$STACK_NAME" || true
+        else
+            log "Running manual cleanup..."
+            # Basic manual cleanup
+            aws ec2 describe-instances --filters "Name=tag:Stack,Values=$STACK_NAME" --query 'Reservations[].Instances[].[InstanceId]' --output text | while read -r instance_id; do
+                if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                    aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" || true
+                    log "Terminated instance: $instance_id"
+                fi
+            done
+        fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+}
+
+# Register cleanup handler
+trap cleanup_on_failure EXIT
 
 # Colors for output
 RED='\033[0;31m'
@@ -25,9 +69,9 @@ NC='\033[0m' # No Color
 # Configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-g4dn.xlarge}"
-KEY_NAME="${KEY_NAME:-ai-starter-kit-ondemand-key}"
-STACK_NAME="${STACK_NAME:-ai-starter-kit-ondemand}"
-PROJECT_NAME="${PROJECT_NAME:-ai-starter-kit}"
+KEY_NAME="${KEY_NAME:-GeuseMaker-ondemand-key}"
+STACK_NAME="${STACK_NAME:-GeuseMaker-ondemand}"
+PROJECT_NAME="${PROJECT_NAME:-GeuseMaker}"
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -209,7 +253,7 @@ create_security_group() {
     # Create security group
     SG_ID=$(aws ec2 create-security-group \
         --group-name "${STACK_NAME}-sg" \
-        --description "Security group for AI Starter Kit (On-Demand)" \
+        --description "Security group for GeuseMaker (On-Demand)" \
         --vpc-id "$VPC_ID" \
         --region "$AWS_REGION" \
         --query 'GroupId' \
@@ -644,10 +688,18 @@ EOF
         warning "Custom policy may already be attached, continuing..."
     }
     
-    # Create instance profile
-    aws iam create-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" || true
+    # Create instance profile (ensure name starts with letter for AWS compliance)
+    local profile_name
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    aws iam create-instance-profile --instance-profile-name "$profile_name" || true
     aws iam add-role-to-instance-profile \
-        --instance-profile-name "${STACK_NAME}-instance-profile" \
+        --instance-profile-name "$profile_name" \
         --role-name "${STACK_NAME}-role" || true
     
     # Wait for IAM propagation
@@ -818,7 +870,7 @@ EOF
         --key-name "$KEY_NAME" \
         --security-group-ids "$SG_ID" \
         --user-data "$USER_DATA" \
-        --iam-instance-profile Name="${STACK_NAME}-instance-profile" \
+        --iam-instance-profile Name="$(if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then echo "app-$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')-profile"; else echo "${STACK_NAME}-instance-profile"; fi)" \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${STACK_NAME}-gpu-instance},{Key=Project,Value=$PROJECT_NAME},{Key=Type,Value=OnDemand},{Key=CostOptimized,Value=false}]" \
         --region "$AWS_REGION" \
         --query 'Instances[0].InstanceId' \
@@ -926,12 +978,12 @@ setup_cloudfront() {
     log "Setting up CloudFront distribution with subdomains..."
     
     # Create origin access identity
-    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="AI Starter Kit OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
+    OAI_ID=$(aws cloudfront create-cloud-front-origin-access-identity --cloud-front-origin-access-identity-config CallerReference="$(date +%s)" Comment="GeuseMaker OAI" --query 'CloudFrontOriginAccessIdentity.Id' --output text)
     
     # Create distribution with multiple aliases and behaviors
     DISTRIBUTION_ID=$(aws cloudfront create-distribution --distribution-config '{
         "CallerReference": "'"$(date +%s)"'",
-        "Comment": "AI Starter Kit Distribution with subdomains (On-Demand)",
+        "Comment": "GeuseMaker Distribution with subdomains (On-Demand)",
         "Enabled": true,
         "Origins": {
             "Quantity": 1,
@@ -1028,7 +1080,7 @@ deploy_application() {
     local EFS_DNS="$2"
     local INSTANCE_ID="$3"
     
-    log "Deploying AI Starter Kit application with SSM parameters..."
+    log "Deploying GeuseMaker application with SSM parameters..."
     
     # Fetch SSM params with error handling
     fetch_ssm_params || { error "Failed to fetch SSM parameters"; return 1; }
@@ -1038,7 +1090,7 @@ deploy_application() {
 #!/bin/bash
 set -euo pipefail
 
-echo "Starting AI Starter Kit deployment on on-demand instance..."
+echo "Starting GeuseMaker deployment on on-demand instance..."
 
 # Mount EFS
 sudo mkdir -p /mnt/efs
@@ -1046,8 +1098,8 @@ sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,ret
 echo "$EFS_DNS:/ /mnt/efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,fsc,_netdev 0 0" | sudo tee -a /etc/fstab
 
 # Clone repository
-git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/ai-starter-kit || true
-cd /home/ubuntu/ai-starter-kit
+git clone https://github.com/michael-pittman/001-starter-kit.git /home/ubuntu/GeuseMaker || true
+cd /home/ubuntu/GeuseMaker
 
 # Create .env from SSM parameters
 cat > .env << 'EOFENV'
@@ -1083,12 +1135,12 @@ EOF
     # Copy the entire repository
     rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '*.log' \
         -e "ssh -o StrictHostKeyChecking=no -i ${KEY_NAME}.pem" \
-        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/ai-starter-kit/"
+        ./ "ubuntu@$PUBLIC_IP:/home/ubuntu/GeuseMaker/"
     
     # Run deployment
     log "Running deployment script..."
     ssh -o StrictHostKeyChecking=no -i "${KEY_NAME}.pem" "ubuntu@$PUBLIC_IP" \
-        "chmod +x /home/ubuntu/ai-starter-kit/deploy-app-ondemand.sh && /home/ubuntu/ai-starter-kit/deploy-app-ondemand.sh"
+        "chmod +x /home/ubuntu/GeuseMaker/deploy-app-ondemand.sh && /home/ubuntu/GeuseMaker/deploy-app-ondemand.sh"
     
     success "Application deployment completed!"
 }
@@ -1115,7 +1167,7 @@ pip3 install boto3 schedule requests nvidia-ml-py3 psutil
 # Create systemd service for cost optimization
 sudo cat > /etc/systemd/system/cost-optimization.service << 'EOFSERVICE'
 [Unit]
-Description=AI Starter Kit Cost Optimization (On-Demand)
+Description=GeuseMaker Cost Optimization (On-Demand)
 After=network.target
 
 [Service]
@@ -1349,8 +1401,17 @@ cleanup_on_error() {
     # Delete IAM resources
     log "Cleaning up IAM resources..."
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || ""
-    aws iam remove-role-from-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" --role-name "${STACK_NAME}-role" 2>/dev/null || true
-    aws iam delete-instance-profile --instance-profile-name "${STACK_NAME}-instance-profile" 2>/dev/null || true
+    # Clean up instance profile (handle numeric stack names)
+    local profile_name
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    aws iam remove-role-from-instance-profile --instance-profile-name "$profile_name" --role-name "${STACK_NAME}-role" 2>/dev/null || true
+    aws iam delete-instance-profile --instance-profile-name "$profile_name" 2>/dev/null || true
     aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy" 2>/dev/null || true
     aws iam detach-role-policy --role-name "${STACK_NAME}-role" --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
     if [ ! -z "$ACCOUNT_ID" ]; then
@@ -1392,6 +1453,10 @@ EOF
     check_prerequisites
     
     log "Starting on-demand AWS deployment (no spot instances)..."
+    
+    # Mark that we're starting to create resources
+    RESOURCES_CREATED=true
+    
     create_key_pair
     create_iam_role
     
@@ -1423,7 +1488,7 @@ EOF
     # Clean up temporary files
     rm -f user-data-ondemand.sh trust-policy.json custom-policy.json deploy-app-ondemand.sh
     
-    success "AI Starter Kit deployment completed successfully!"
+    success "GeuseMaker deployment completed successfully!"
 }
 
 # =============================================================================
@@ -1447,8 +1512,8 @@ show_usage() {
     echo "Options:"
     echo "  --region REGION         AWS region (default: us-east-1)"
     echo "  --instance-type TYPE    Instance type (default: g4dn.xlarge)"
-    echo "  --key-name NAME         SSH key name (default: ai-starter-kit-ondemand-key)"
-    echo "  --stack-name NAME       Stack name (default: ai-starter-kit-ondemand)"
+    echo "  --key-name NAME         SSH key name (default: GeuseMaker-ondemand-key)"
+    echo "  --stack-name NAME       Stack name (default: GeuseMaker-ondemand)"
     echo "  --help                  Show this help message"
     echo ""
     echo "Examples:"
