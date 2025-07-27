@@ -73,7 +73,7 @@ validate_stack_name() {
 
 validate_instance_type() {
     local type="$1"
-    [[ "$type" =~ ^[a-z][0-9][a-z]?\.[a-z0-9]+$ ]]
+    [[ "$type" =~ ^[a-z][0-9]+[a-z]*\.[0-9]*[a-z]+[0-9]*$ ]]
 }
 
 validate_aws_region() {

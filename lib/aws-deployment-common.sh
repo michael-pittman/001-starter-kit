@@ -8,17 +8,35 @@
 # UNIFIED LOGGING AND OUTPUT FUNCTIONS
 # =============================================================================
 
-# Color definitions - always define with defaults to prevent unbound variable errors
-# Use parameter expansion to avoid conflicts with existing definitions
-RED="${RED:-\033[0;31m}"
-GREEN="${GREEN:-\033[0;32m}"
-YELLOW="${YELLOW:-\033[0;33m}"
-BLUE="${BLUE:-\033[0;34m}"
-PURPLE="${PURPLE:-\033[0;35m}"
-MAGENTA="${MAGENTA:-\033[0;35m}"
-CYAN="${CYAN:-\033[0;36m}"
-BOLD="${BOLD:-\033[1m}"
-NC="${NC:-\033[0m}"
+# Color definitions - handle readonly conflicts by checking if already set
+# Use conditional assignment to avoid readonly variable errors
+if [[ -z "${RED:-}" ]]; then
+    RED='\033[0;31m'
+fi
+if [[ -z "${GREEN:-}" ]]; then
+    GREEN='\033[0;32m'
+fi
+if [[ -z "${YELLOW:-}" ]]; then
+    YELLOW='\033[0;33m'
+fi
+if [[ -z "${BLUE:-}" ]]; then
+    BLUE='\033[0;34m'
+fi
+if [[ -z "${PURPLE:-}" ]]; then
+    PURPLE='\033[0;35m'
+fi
+if [[ -z "${MAGENTA:-}" ]]; then
+    MAGENTA='\033[0;35m'
+fi
+if [[ -z "${CYAN:-}" ]]; then
+    CYAN='\033[0;36m'
+fi
+if [[ -z "${BOLD:-}" ]]; then
+    BOLD='\033[1m'
+fi
+if [[ -z "${NC:-}" ]]; then
+    NC='\033[0m'
+fi
 
 # Mark colors as defined to prevent redefinition
 AWS_DEPLOY_COLORS_DEFINED="${AWS_DEPLOY_COLORS_DEFINED:-true}"

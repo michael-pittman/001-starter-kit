@@ -36,13 +36,25 @@ push_error_context() {
 pop_error_context() {
     if [ ${#ERROR_CONTEXT_STACK[@]} -gt 0 ]; then
         # Bash 3.x compatible array manipulation
-        local new_stack=()
         local last_index=$((${#ERROR_CONTEXT_STACK[@]} - 1))
-        local i
-        for ((i=0; i<last_index; i++)); do
-            new_stack+=("${ERROR_CONTEXT_STACK[$i]}")
-        done
-        ERROR_CONTEXT_STACK=("${new_stack[@]}")
+        
+        # If this is the last element, just clear the array
+        if [ $last_index -eq 0 ]; then
+            ERROR_CONTEXT_STACK=()
+        else
+            # Build new array without the last element
+            local new_stack=()
+            local i
+            for ((i=0; i<last_index; i++)); do
+                new_stack+=("${ERROR_CONTEXT_STACK[$i]}")
+            done
+            # Only assign if we have elements
+            if [ ${#new_stack[@]} -gt 0 ]; then
+                ERROR_CONTEXT_STACK=("${new_stack[@]}")
+            else
+                ERROR_CONTEXT_STACK=()
+            fi
+        fi
     fi
 }
 

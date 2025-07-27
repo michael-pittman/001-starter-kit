@@ -140,21 +140,21 @@ deploy-spot: validate ## Deploy with cost-optimized spot instances (requires STA
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)💰 Deploying cost-optimized spot instance: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --spot $(STACK_NAME)
+	@scripts/aws-deployment-modular.sh --type spot $(STACK_NAME)
 	@echo "$(GREEN)✓ Spot deployment complete$(NC)"
 
 deploy-enterprise: validate ## Deploy enterprise multi-AZ with ALB (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)🏢 Deploying enterprise multi-AZ stack: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --multi-az --alb --spot $(STACK_NAME)
+	@scripts/aws-deployment-modular.sh --type spot --multi-az --alb $(STACK_NAME)
 	@echo "$(GREEN)✓ Enterprise deployment complete$(NC)"
 
 deploy-full: validate ## Deploy with all enterprise features (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
-	@echo "$(BLUE)🚀 Deploying full enterprise stack with CDN: $(STACK_NAME)$(NC)"
+	@echo "$(BLUE)🚀 Deploying full enterprise stack: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --multi-az --private-subnets --nat-gateway --alb --spot $(STACK_NAME)
+	@scripts/aws-deployment-modular.sh --type spot --multi-az --private-subnets --nat-gateway --alb $(STACK_NAME)
 	@echo "$(GREEN)✓ Full enterprise deployment complete$(NC)"
 
 # Legacy deployment aliases for backward compatibility
@@ -164,15 +164,15 @@ deploy-ondemand: validate ## Deploy with on-demand instances (requires STACK_NAM
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)Deploying on-demand instance: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --on-demand $(STACK_NAME)
+	@scripts/aws-deployment-modular.sh --type ondemand $(STACK_NAME)
 	@echo "$(GREEN)✓ On-demand deployment complete$(NC)"
 
-deploy-spot-cdn: validate ## Deploy spot with CloudFront CDN (requires STACK_NAME)
+deploy-spot-cdn: validate ## Deploy spot with ALB (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
-	@echo "$(BLUE)🌐 Deploying spot instance with CDN: $(STACK_NAME)$(NC)"
+	@echo "$(BLUE)🌐 Deploying spot instance with ALB: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --spot --alb --cloudfront $(STACK_NAME)
-	@echo "$(GREEN)✓ Spot CDN deployment complete$(NC)"
+	@scripts/aws-deployment-modular.sh --type spot --alb $(STACK_NAME)
+	@echo "$(GREEN)✓ Spot ALB deployment complete$(NC)"
 
 destroy: ## Destroy infrastructure (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi

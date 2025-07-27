@@ -38,12 +38,15 @@ register_variable() {
 # Get variable value with fallback to default
 get_variable() {
     local var_name="$1"
-    local current_value="${!var_name:-}"
+    
+    # Bash 3.x compatible variable reference
+    local current_value
+    eval "current_value=\${${var_name}:-}"
     
     if [ -z "$current_value" ]; then
         # Get default value
         local default_var="_VARIABLE_DEFAULT_${var_name}"
-        current_value="${!default_var:-}"
+        eval "current_value=\${${default_var}:-}"
     fi
     
     echo "$current_value"
@@ -56,17 +59,49 @@ sanitize_var_name() {
     echo "$name" | sed 's/-/_/g; s/[^a-zA-Z0-9_]/_/g'
 }
 
+# Sanitize AWS CLI output to remove control characters and newlines
+sanitize_aws_value() {
+    local value="$1"
+    
+    # Remove common problematic patterns from AWS CLI output
+    value=$(echo "$value" | tr -d '\n\r\t' | tr -d '\000-\037')
+    
+    # Remove 'null' prefix if present (common AWS CLI issue)
+    value=$(echo "$value" | sed 's/^null//g')
+    
+    # Remove 'None' if that's the only content
+    if [ "$value" = "None" ]; then
+        value=""
+    fi
+    
+    # Trim whitespace
+    value=$(echo "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    
+    echo "$value"
+}
+
 # Set variable with validation
 set_variable() {
     local var_name="$1"
     local value="$2"
     
-    # Sanitize variable name for bash export
+    # Sanitize variable name for bash export (but NOT the value initially)
     local safe_var_name=$(sanitize_var_name "$var_name")
     
-    # Check if validator exists
+    # Sanitize AWS-related values to prevent corruption
+    if [[ "$var_name" == *"VPC"* ]] || [[ "$var_name" == *"SUBNET"* ]] || [[ "$var_name" == *"_ID"* ]] || [[ "$var_name" == *"_ARN"* ]]; then
+        value=$(sanitize_aws_value "$value")
+    fi
+    
+    # Debug output for problematic variables
+    if [[ "$var_name" == *"SUBNET"* ]] || [[ "$var_name" == *"VPC"* ]] || [[ "$var_name" == *"_ID"* ]]; then
+        echo "DEBUG: Setting $var_name (safe: $safe_var_name) = '$value'" >&2
+    fi
+    
+    # Check if validator exists (use the safe variable name for lookup)
     local validator_var="_VARIABLE_VALIDATOR_${safe_var_name}"
-    local validator="${!validator_var:-}"
+    local validator
+    eval "validator=\${${validator_var}:-}"
     
     if [ -n "$validator" ]; then
         if ! $validator "$value"; then
@@ -75,8 +110,11 @@ set_variable() {
         fi
     fi
     
-    # Set the variable using sanitized name
-    eval "export ${safe_var_name}='${value}'"
+    # Set the variable using sanitized name and sanitized value
+    # Use printf to handle special characters safely
+    printf -v "${safe_var_name}" '%s' "$value"
+    export "${safe_var_name}"
+    
     return 0
 }
 
@@ -299,7 +337,8 @@ initialize_variables() {
     # Apply any environment overrides
     for var in $(echo "$_VARIABLE_REGISTRY" | tr ':' ' '); do
         [ -n "$var" ] || continue
-        local env_value="${!var:-}"
+        local env_value
+        eval "env_value=\${${var}:-}"
         if [ -n "$env_value" ]; then
             set_variable "$var" "$env_value" || true
         fi

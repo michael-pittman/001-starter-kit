@@ -41,7 +41,7 @@ Options:
     --private-subnets         Create private subnets (requires --nat-gateway for outbound)
     --nat-gateway             Create NAT Gateway for private subnet internet access
     --no-efs                  Disable EFS persistent storage (enabled by default)
-    --alb                     Create Application Load Balancer (future enhancement)
+    --alb                     Create Application Load Balancer for high availability
     
     Deployment Options:
     --validate-only           Validate configuration without deploying
@@ -203,16 +203,26 @@ setup_infrastructure() {
     source "$PROJECT_ROOT/lib/modules/infrastructure/security.sh"
     source "$PROJECT_ROOT/lib/modules/infrastructure/iam.sh"
     source "$PROJECT_ROOT/lib/modules/infrastructure/efs.sh"
+    source "$PROJECT_ROOT/lib/modules/infrastructure/alb.sh"
     
     # Get configuration variables
     local stack_name="$(get_variable STACK_NAME)"
     local deployment_type="$(get_variable DEPLOYMENT_TYPE)"
-    local enable_multi_az="${ENABLE_MULTI_AZ:-false}"
-    local enable_efs="${ENABLE_EFS:-true}"
-    local enable_private_subnets="${ENABLE_PRIVATE_SUBNETS:-false}"
-    local enable_nat_gateway="${ENABLE_NAT_GATEWAY:-false}"
+    # Initialize variables to prevent set -u errors (bash 3.x compatibility)
+    local enable_multi_az="false"
+    local enable_efs="true"
+    local enable_private_subnets="false"
+    local enable_nat_gateway="false"
+    local enable_alb="false"
     
-    echo "Configuration: Multi-AZ=$enable_multi_az, EFS=$enable_efs, Private Subnets=$enable_private_subnets" >&2
+    # Set from environment if available
+    [ "${ENABLE_MULTI_AZ:-}" = "true" ] && enable_multi_az="true"
+    [ "${ENABLE_EFS:-}" = "false" ] && enable_efs="false"
+    [ "${ENABLE_PRIVATE_SUBNETS:-}" = "true" ] && enable_private_subnets="true"
+    [ "${ENABLE_NAT_GATEWAY:-}" = "true" ] && enable_nat_gateway="true"
+    [ "${ENABLE_ALB:-}" = "true" ] && enable_alb="true"
+    
+    echo "Configuration: Multi-AZ=$enable_multi_az, EFS=$enable_efs, Private Subnets=$enable_private_subnets, ALB=$enable_alb" >&2
     
     # Setup network infrastructure based on deployment type
     local network_info
@@ -272,6 +282,8 @@ setup_infrastructure() {
     echo "IAM Role: $IAM_ROLE_NAME, Instance Profile: $IAM_INSTANCE_PROFILE" >&2
     
     # Setup EFS if enabled
+    EFS_ID=""
+    EFS_DNS=""
     if [ "$enable_efs" = "true" ]; then
         echo "Setting up EFS infrastructure..." >&2
         local efs_info
@@ -285,6 +297,28 @@ setup_infrastructure() {
             EFS_ID=$(echo "$efs_info" | jq -r '.efs_id')
             EFS_DNS=$(echo "$efs_info" | jq -r '.efs_dns')
             echo "EFS: $EFS_ID ($EFS_DNS)" >&2
+        fi
+    fi
+    
+    # Setup ALB if enabled
+    ALB_DNS_NAME=""
+    ALB_TARGET_GROUP_ARN=""
+    if [ "$enable_alb" = "true" ]; then
+        echo "Setting up Application Load Balancer..." >&2
+        local alb_info
+        alb_info=$(setup_alb_infrastructure "$stack_name" "$PUBLIC_SUBNETS_JSON" "$ALB_SECURITY_GROUP_ID" "$VPC_ID") || {
+            echo "WARNING: Failed to setup ALB, continuing without load balancer" >&2
+            ALB_DNS_NAME=""
+            ALB_TARGET_GROUP_ARN=""
+        }
+        
+        if [ -n "$alb_info" ]; then
+            ALB_DNS_NAME=$(echo "$alb_info" | jq -r '.alb_dns')
+            # Get the first target group ARN (for n8n by default)
+            ALB_TARGET_GROUP_ARN=$(echo "$alb_info" | jq -r '.target_groups[0].target_group_arn')
+            # Store all target groups for instance registration
+            ALB_TARGET_GROUPS_JSON=$(echo "$alb_info" | jq -c '.target_groups')
+            echo "ALB: $ALB_DNS_NAME (Primary Target Group: $ALB_TARGET_GROUP_ARN)" >&2
         fi
     fi
     
@@ -306,7 +340,7 @@ setup_infrastructure() {
     export VPC_ID SUBNET_ID PUBLIC_SUBNETS_JSON PRIVATE_SUBNETS_JSON
     export SECURITY_GROUP_ID ALB_SECURITY_GROUP_ID EFS_SECURITY_GROUP_ID
     export IAM_ROLE_NAME IAM_INSTANCE_PROFILE KEY_NAME
-    export EFS_ID EFS_DNS
+    export EFS_ID EFS_DNS ALB_DNS_NAME ALB_TARGET_GROUP_ARN ALB_TARGET_GROUPS_JSON
     
     echo "Comprehensive infrastructure setup complete" >&2
     return 0
@@ -341,9 +375,10 @@ launch_deployment_instance() {
     "volume_size": $(get_variable VOLUME_SIZE),
     "user_data": "$user_data",
     "stack_name": "$(get_variable STACK_NAME)",
-    "efs_id": "${EFS_ID:-}",
-    "efs_dns": "${EFS_DNS:-}",
-    "vpc_id": "$VPC_ID"
+    "efs_id": "$EFS_ID",
+    "efs_dns": "$EFS_DNS",
+    "vpc_id": "$VPC_ID",
+    "alb_target_group_arn": "$ALB_TARGET_GROUP_ARN"
 }
 EOF
 )
@@ -356,6 +391,28 @@ EOF
     }
     
     echo "Instance launched: $INSTANCE_ID"
+    
+    # Register instance with ALB target groups if enabled
+    if [ -n "$ALB_TARGET_GROUP_ARN" ]; then
+        echo "Registering instance with ALB target groups..." >&2
+        # Register with all target groups created for this deployment
+        if [ -n "${ALB_TARGET_GROUPS_JSON:-}" ]; then
+            echo "$ALB_TARGET_GROUPS_JSON" | jq -c '.[]' | while read -r service_obj; do
+                local tg_arn port
+                tg_arn=$(echo "$service_obj" | jq -r '.target_group_arn')
+                port=$(echo "$service_obj" | jq -r '.port')
+                
+                register_target "$tg_arn" "$INSTANCE_ID" "$port" || {
+                    echo "WARNING: Failed to register instance with target group $tg_arn" >&2
+                }
+            done
+        else
+            # Fallback: register with primary target group only
+            register_target "$ALB_TARGET_GROUP_ARN" "$INSTANCE_ID" "80" || {
+                echo "WARNING: Failed to register instance with primary ALB target group" >&2
+            }
+        fi
+    fi
     
     # Wait for SSH
     wait_for_ssh "$INSTANCE_ID" || {
@@ -439,20 +496,24 @@ Storage:
 - EFS ID:       ${EFS_ID:-Not configured}
 - EFS DNS:      ${EFS_DNS:-Not configured}
 
+Load Balancing:
+- ALB DNS:      ${ALB_DNS_NAME:-Not configured}
+- Target Group: ${ALB_TARGET_GROUP_ARN:-Not configured}
+
 Service URLs:
-- n8n Workflow UI:    http://${public_ip}:5678
-- Qdrant Vector DB:   http://${public_ip}:6333
-- Ollama LLM API:     http://${public_ip}:11434
-- Crawl4AI Scraper:   http://${public_ip}:11235
-- Health Check:       http://${public_ip}:8080/health
+- n8n Workflow UI:    http://${ALB_DNS_NAME:-$public_ip}:5678
+- Qdrant Vector DB:   http://${ALB_DNS_NAME:-$public_ip}:6333
+- Ollama LLM API:     http://${ALB_DNS_NAME:-$public_ip}:11434
+- Crawl4AI Scraper:   http://${ALB_DNS_NAME:-$public_ip}:11235
+- Health Check:       http://${ALB_DNS_NAME:-$public_ip}:8080/health
 
 SSH Access:
 ssh -i ~/.ssh/${KEY_NAME}.pem ubuntu@${public_ip}
 
 Next Steps:
-1. Check service health: curl http://${public_ip}:8080/health
+1. Check service health: curl http://${ALB_DNS_NAME:-$public_ip}:8080/health
 2. View logs: ./scripts/aws-deployment-modular.sh --logs $INSTANCE_ID
-3. Monitor: Check CloudWatch dashboard "${STACK_NAME}-dashboard"
+3. Monitor: Check CloudWatch dashboard "$(get_variable STACK_NAME)-dashboard"
 ================================================================================
 
 EOF
@@ -496,7 +557,11 @@ main() {
     fi
     
     # Cleanup existing resources if requested
-    if [ "${CLEANUP_EXISTING:-false}" = "true" ]; then
+    # Initialize cleanup variable to prevent set -u errors
+    local cleanup_existing="false"
+    [ "${CLEANUP_EXISTING:-}" = "true" ] && cleanup_existing="true"
+    
+    if [ "$cleanup_existing" = "true" ]; then
         echo "Cleaning up existing resources..."
         cleanup_on_failure
     fi

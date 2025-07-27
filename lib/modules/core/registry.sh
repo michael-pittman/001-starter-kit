@@ -26,7 +26,9 @@ get_resource_data() {
     local key="$1"
     local type="$2"
     local varname="RESOURCE_${type}_${key}"
-    echo "${!varname:-}"
+    local value
+    eval "value=\${${varname}:-}"
+    echo "$value"
 }
 
 set_resource_data() {
@@ -40,7 +42,8 @@ set_resource_data() {
     export "${varname}=${value}"
     
     # Add to keys list if not already present
-    local current_keys="${!keys_var}"
+    local current_keys
+    eval "current_keys=\${${keys_var}}"
     if [[ " $current_keys " != *" $key "* ]]; then
         export "${keys_var}=${current_keys} ${key}"
     fi
@@ -49,7 +52,9 @@ set_resource_data() {
 get_resource_keys() {
     local type="$1"
     local keys_var="RESOURCE_${type}_KEYS"
-    echo "${!keys_var}"
+    local keys
+    eval "keys=\${${keys_var}}"
+    echo "$keys"
 }
 
 # Status constants (avoid readonly redeclaration)
@@ -96,6 +101,36 @@ EOF
     fi
 }
 
+# Sanitize JSON string to remove control characters and fix formatting
+sanitize_json_string() {
+    local input="$1"
+    
+    # Return empty object if input is empty or null
+    if [ -z "$input" ] || [ "$input" = "null" ] || [ "$input" = "{}" ]; then
+        echo "{}"
+        return 0
+    fi
+    
+    # Remove control characters, newlines, and fix common JSON issues
+    # First, clean up the string
+    local cleaned
+    cleaned=$(echo "$input" | tr -d '\n\r\t' | tr -d '\000-\037' | sed 's/\\n//g; s/\\r//g; s/\\t//g')
+    
+    # Ensure we have valid JSON structure
+    if [[ ! "$cleaned" =~ ^[[:space:]]*\{ ]]; then
+        # If it doesn't start with {, wrap it as a simple object
+        cleaned="{\"value\": \"$(echo "$cleaned" | sed 's/"/\\"/g')\"}"
+    fi
+    
+    # Test if it's valid JSON
+    if echo "$cleaned" | jq . >/dev/null 2>&1; then
+        echo "$cleaned"
+    else
+        # If still invalid, return empty object
+        echo "{}"
+    fi
+}
+
 # Register a resource
 register_resource() {
     local resource_type="$1"
@@ -111,11 +146,21 @@ register_resource() {
         set_resource_data "${resource_id}" "CLEANUP_COMMANDS" "$cleanup_command"
     fi
     
+    # Sanitize and validate metadata JSON
+    local validated_metadata
+    validated_metadata=$(sanitize_json_string "$metadata")
+    
+    # Double-check that we have valid JSON
+    if ! echo "$validated_metadata" | jq . >/dev/null 2>&1; then
+        echo "WARNING: Failed to sanitize metadata for resource '$resource_id', using empty object" >&2
+        validated_metadata="{}"
+    fi
+    
     # Add resource to registry
     local temp_file=$(mktemp)
     jq --arg type "$resource_type" \
        --arg id "$resource_id" \
-       --argjson metadata "$metadata" \
+       --argjson metadata "$validated_metadata" \
        '.resources[$type] += [{
            "id": $id,
            "created_at": (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
@@ -198,7 +243,17 @@ EOF
 )
     
     if [ -n "$additional_tags" ]; then
-        echo "$base_tags" | jq -s '.[0] * .[1]' - <(echo "$additional_tags")
+        # Ensure additional_tags is valid JSON before merging
+        if echo "$additional_tags" | jq . >/dev/null 2>&1; then
+            # Use safe merging to handle potential conflicts
+            echo "$base_tags" | jq -s --argjson additional "$additional_tags" '.[0] * $additional' 2>/dev/null || {
+                echo "Warning: JSON merge failed for additional_tags, using base tags only" >&2
+                echo "$base_tags"
+            }
+        else
+            echo "Warning: Invalid JSON in additional_tags '$additional_tags', using base tags only" >&2
+            echo "$base_tags"
+        fi
     else
         echo "$base_tags"
     fi

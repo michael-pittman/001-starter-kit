@@ -12,7 +12,14 @@ _LAUNCH_SH_LOADED=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../core/registry.sh"
 source "${SCRIPT_DIR}/../core/errors.sh"
+source "${SCRIPT_DIR}/../config/variables.sh"
 source "${SCRIPT_DIR}/ami.sh"
+
+# Initialize AWS_REGION if not set
+if [ -z "${AWS_REGION:-}" ]; then
+    AWS_REGION="$(get_variable AWS_REGION)"
+    export AWS_REGION
+fi
 
 # =============================================================================
 # LAUNCH CONFIGURATION

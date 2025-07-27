@@ -2,18 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+**GeuseMaker** is an enterprise-ready AI infrastructure platform featuring:
+- **70% cost savings** through intelligent spot instance management
+- **Multi-architecture support** (Intel x86_64 and ARM64 Graviton2) 
+- **AI Stack**: n8n workflows + Ollama (DeepSeek-R1:8B, Qwen2.5-VL:7B) + Qdrant + Crawl4AI
+- **Enterprise features**: Auto-scaling, CloudFront CDN, EFS persistence, comprehensive monitoring
+
 ## Git Context & Workflow
 
 **Current Branch**: `main` (default)
-**Recent Major Changes**: Complete modular deployment architecture with 23 modules, bash 3.x compatibility, comprehensive error handling
+**Repository State**: Clean modular architecture with root directory cleanup completed
+**Recent Major Changes**: Complete modular deployment system, bash 3.x compatibility, comprehensive error handling
 
 ### Commit Workflow
 - Run tests before committing: `make test`
-- Run linting: `make lint`
+- Run linting: `make lint` 
 - Security validation: `make security-check`
 - Check git status to see modified files
 
-### Claude Code Agent Integration
+### Claude Code Agent Integration  
 Specialized agents available for complex tasks:
 - **ec2-provisioning-specialist**: EC2 launch failures, spot capacity, AMI availability, service quotas
 - **aws-deployment-debugger**: Deployment failures, infrastructure problems
@@ -33,19 +42,25 @@ make security-check                # Security validation
 ./tools/test-runner.sh --report    # Generate HTML test report
 ```
 
-### Deployment Commands
+### Core Deployment Commands
+
+| Command | Description | Use Case |
+|---------|-------------|----------|
+| `make deploy-simple STACK_NAME=dev` | Bash 3.x compatible development | Quick testing, local development |
+| `make deploy-spot STACK_NAME=prod` | Cost-optimized production | 70% cost savings with spot instances |
+| `make deploy-enterprise STACK_NAME=prod` | Enterprise multi-AZ with ALB | High-availability production |
+| `make destroy STACK_NAME=stack` | Clean resource removal | Cleanup after testing |
+
+### Advanced Modular Deployment
 ```bash
-# Quick development deployment
-make deploy-simple STACK_NAME=dev
+# Enterprise deployment with all features  
+./scripts/aws-deployment-modular.sh --multi-az --private-subnets --nat-gateway --alb --spot production-stack
 
-# Production deployment with spot instances
-make deploy-spot STACK_NAME=prod
+# Cost-optimized deployment with intelligent fallback
+./scripts/aws-deployment-modular.sh --spot --multi-az stack-name
 
-# Advanced modular deployment
-./scripts/aws-deployment-modular.sh --multi-az --alb STACK_NAME
-
-# Cleanup resources
-make destroy STACK_NAME=dev
+# Simple development deployment (bash 3.x compatible)
+./scripts/aws-deployment-v2-simple.sh dev-stack
 ```
 
 ### Development Without AWS Costs
@@ -57,32 +72,37 @@ make destroy STACK_NAME=dev
 
 ## High-Level Architecture
 
-### Modular System Structure
-The codebase uses a modular architecture with 23 specialized modules:
+### Core Design Principles
+- **Modular Architecture**: 23 specialized modules with single responsibility
+- **Cross-Platform Compatibility**: bash 3.x (macOS) + bash 4.x+ (Linux)
+- **Intelligent Cost Optimization**: 70% savings via spot instances and cross-region analysis
+- **Enterprise Ready**: Multi-AZ, ALB, CloudFront, comprehensive monitoring
 
+### Modular System Structure
 ```
 /lib/modules/
 ├── core/              # Variable management, resource registry, base errors
 ├── infrastructure/    # VPC, security groups, IAM, EFS, ALB modules
-├── compute/           # EC2 provisioning, spot optimization
+├── compute/           # EC2 provisioning, spot optimization, AMI selection
 ├── application/       # Docker, AI services, health monitoring
 ├── compatibility/     # Legacy function wrappers
+├── cleanup/           # Resource cleanup and failure recovery
 └── errors/           # Structured error handling with recovery strategies
 ```
 
-**Key Design Pattern**: Each module is self-contained with single responsibility. All modules follow bash 3.x compatibility for macOS support.
-
-### Deployment Script Hierarchy
-
-1. **aws-deployment-v2-simple.sh**: Bash 3.x compatible orchestrator with core features
-2. **aws-deployment-modular.sh**: Enterprise features (multi-AZ, ALB, CloudFront)
-3. **aws-deployment-unified.sh**: Original monolithic script (legacy)
-
-All scripts must source these in order:
+### Deployment Script Architecture
+**Key Pattern**: All deployment scripts must source libraries in this exact order:
 ```bash
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"  # Logging functions
-source "$PROJECT_ROOT/lib/error-handling.sh"        # Error trapping
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+source "$PROJECT_ROOT/lib/aws-deployment-common.sh"  # Logging, prerequisites
+source "$PROJECT_ROOT/lib/error-handling.sh"        # Error handling, cleanup
 ```
+
+**Primary Orchestrators**:
+1. **aws-deployment-v2-simple.sh**: Bash 3.x compatible, core features for development
+2. **aws-deployment-modular.sh**: Enterprise features (multi-AZ, ALB, CloudFront, spot optimization)
 
 ### AI Services Stack
 ```
@@ -145,17 +165,33 @@ fi
 /aibuildkit/WEBHOOK_URL
 ```
 
-## Testing Framework
+## Comprehensive Testing Framework
 
-Categories: unit, integration, security, performance, deployment, smoke, config
+### Test Categories and Commands
+```bash
+# Run all tests (MANDATORY before deployment)
+make test
 
-Key test files:
-- `test-modular-v2.sh`: Core module functionality
-- `test-infrastructure-modules.sh`: Infrastructure components
-- `test-deployment-flow.sh`: End-to-end validation
-- `final-validation.sh`: Comprehensive system check
+# Test specific categories  
+./tools/test-runner.sh unit           # Module-level testing
+./tools/test-runner.sh integration    # Component interactions
+./tools/test-runner.sh security       # Security validation
+./tools/test-runner.sh performance    # Load tests and benchmarks
+./tools/test-runner.sh deployment     # Script validation
+./tools/test-runner.sh smoke          # Quick CI/CD validation
+./tools/test-runner.sh config         # Configuration management tests
 
-Reports generated in `./test-reports/` as HTML and JSON.
+# Generate reports
+./tools/test-runner.sh --report       # HTML test report
+```
+
+### Key Test Files by Category
+- **Core System**: `test-modular-v2.sh`, `test-infrastructure-modules.sh`
+- **Deployment**: `test-deployment-flow.sh`, `final-validation.sh`
+- **Local Testing**: `simple-demo.sh`, `test-intelligent-selection.sh`
+- **Module Testing**: `test-modular-system.sh`
+
+**Reports**: Generated in `./test-reports/` as `test-summary.html` (human-readable) and `test-results.json` (CI/CD integration)
 
 ## Common Issues and Solutions
 
@@ -174,14 +210,46 @@ When working with n8n workflows:
 
 Remember: ANY node can be an AI tool, not just those with usableAsTool=true.
 
-## AWS Well-Architected Principles
+## Development Rules Integration
 
-Follow the 6 pillars:
-1. Operational Excellence
-2. Security (least privilege, encryption by default)
-3. Reliability (multi-AZ when using --multi-az)
-4. Performance (GPU optimization, spot instances)
-5. Cost Optimization (70% savings via spot instances)
-6. Sustainability
+### AWS Architecture (.cursor/rules/aws.mdc)
+The project follows AWS Well-Architected Framework with 6 pillars:
+1. **Operational Excellence**: Automated deployment, comprehensive monitoring
+2. **Security**: Least privilege IAM, encryption by default, Parameter Store for secrets
+3. **Reliability**: Multi-AZ deployments, spot instance failover strategies
+4. **Performance**: GPU optimization (T4 16GB), intelligent instance selection
+5. **Cost Optimization**: 70% savings via spot instances, cross-region analysis
+6. **Sustainability**: ARM64 Graviton2 support, efficient resource allocation
 
-Service selection order: Serverless → Containers → Kubernetes → VMs
+**Service Selection Order**: Serverless → Containers → Kubernetes → VMs
+
+### n8n Workflow Development (.cursor/rules/n8n-mcp.mdc)
+Critical validation pattern for n8n workflows:
+1. **Pre-Validation**: `validate_node_minimal()` → `validate_node_operation()`
+2. **Build**: Create workflow with validated configurations  
+3. **Post-Validation**: `validate_workflow()` → `validate_workflow_connections()`
+4. **Deploy**: Use `n8n_update_partial_workflow()` for 80-90% token savings
+
+**Key Insight**: ANY node can be an AI tool (not just usableAsTool=true)
+
+## Project Structure Reference
+
+### Root Directory (Clean)
+```
+GeuseMaker/
+├── CLAUDE.md                          # This file - AI assistant guidance
+├── LICENSE                            # MIT license
+├── Makefile                           # Development automation (45+ commands)
+├── README.md                          # Project documentation
+├── docker-compose.gpu-optimized.yml   # Main service composition
+└── docker-compose.test.yml           # Test environment
+```
+
+### Organized Directories
+- `assets/` - Project assets and demo files
+- `config/` - Configuration management with environment-specific configs
+- `docs/guides/` - Comprehensive documentation (deployment, architecture, testing, troubleshooting)
+- `lib/modules/` - 23 specialized modules for modular deployment
+- `scripts/` - Primary deployment and management scripts
+- `tests/` - Comprehensive test suite with categories
+- `tools/` - Development and monitoring utilities

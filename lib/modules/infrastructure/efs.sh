@@ -140,8 +140,61 @@ _create_efs_mount_targets_impl() {
         return 0
     fi
     
-    # Create mount targets for each subnet
-    local mount_target_ids=()\n    echo "$subnets_json" | jq -c '.[]' | while read -r subnet_obj; do\n        local subnet_id\n        subnet_id=$(echo "$subnet_obj" | jq -r '.id')\n        local az\n        az=$(echo "$subnet_obj" | jq -r '.az')\n        \n        echo "Creating mount target in subnet: $subnet_id ($az)" >&2\n        \n        local mount_target_id\n        mount_target_id=$(aws efs create-mount-target \\\n            --file-system-id "$efs_id" \\\n            --subnet-id "$subnet_id" \\\n            --security-groups "$security_group_id" \\\n            --query 'MountTargetId' \\\n            --output text) || {\n            echo "WARNING: Failed to create mount target in $subnet_id" >&2\n            continue\n        }\n        \n        # Register mount target\n        register_resource "efs_mount_targets" "$mount_target_id" \\\n            "{\"efs_id\": \"$efs_id\", \"subnet_id\": \"$subnet_id\", \"az\": \"$az\"}"\n        \n        mount_target_ids+=("$mount_target_id")\n        echo "Created mount target: $mount_target_id in $az" >&2\n    done\n    \n    # Wait for mount targets to be available\n    echo "Waiting for mount targets to be available..." >&2\n    for mount_target_id in "${mount_target_ids[@]}"; do\n        aws efs wait mount-target-available --mount-target-id "$mount_target_id" || {\n            echo "WARNING: Mount target $mount_target_id did not become available" >&2\n        }\n    done\n    \n    # Return first mount target ID\n    echo "${mount_target_ids[0]:-}"\n}
+    # Create mount targets for each subnet - bash 3.x compatible approach
+    local mount_target_ids_list=""
+    local first_mount_target_id=""
+    
+    # Process each subnet and collect mount target IDs
+    while IFS= read -r subnet_obj; do
+        [ -z "$subnet_obj" ] && continue
+        
+        local subnet_id
+        subnet_id=$(echo "$subnet_obj" | jq -r '.id')
+        local az
+        az=$(echo "$subnet_obj" | jq -r '.az')
+        
+        echo "Creating mount target in subnet: $subnet_id ($az)" >&2
+        
+        local mount_target_id
+        mount_target_id=$(aws efs create-mount-target \
+            --file-system-id "$efs_id" \
+            --subnet-id "$subnet_id" \
+            --security-groups "$security_group_id" \
+            --query 'MountTargetId' \
+            --output text) || {
+            echo "WARNING: Failed to create mount target in $subnet_id" >&2
+            continue
+        }
+        
+        # Register mount target
+        register_resource "efs_mount_targets" "$mount_target_id" \
+            "{\"efs_id\": \"$efs_id\", \"subnet_id\": \"$subnet_id\", \"az\": \"$az\"}"
+        
+        # Add to list (space-separated for bash 3.x compatibility)
+        if [ -z "$mount_target_ids_list" ]; then
+            mount_target_ids_list="$mount_target_id"
+            first_mount_target_id="$mount_target_id"
+        else
+            mount_target_ids_list="$mount_target_ids_list $mount_target_id"
+        fi
+        
+        echo "Created mount target: $mount_target_id in $az" >&2
+        
+    done <<< "$(echo "$subnets_json" | jq -c '.[]')"
+    
+    # Wait for mount targets to be available - bash 3.x compatible
+    if [ -n "$mount_target_ids_list" ]; then
+        echo "Waiting for mount targets to be available..." >&2
+        for mount_target_id in $mount_target_ids_list; do
+            aws efs wait mount-target-available --mount-target-id "$mount_target_id" || {
+                echo "WARNING: Mount target $mount_target_id did not become available" >&2
+            }
+        done
+    fi
+    
+    # Return first mount target ID
+    echo "$first_mount_target_id"
+}
 
 # Create mount target in specific subnet
 create_efs_mount_target() {
