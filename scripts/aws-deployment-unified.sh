@@ -17,26 +17,180 @@ RESOURCES_CREATED=false
 
 cleanup_on_failure() {
     local exit_code=$?
-    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ]; then
+    if [ "$CLEANUP_ON_FAILURE" = "true" ] && [ "$RESOURCES_CREATED" = "true" ] && [ $exit_code -ne 0 ] && [ -n "${STACK_NAME:-}" ]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        error "🚨 Deployment failed! Running automatic cleanup for stack: ${STACK_NAME:-unknown}"
+        error "🚨 Deployment failed! Running automatic cleanup for stack: $STACK_NAME"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
-        # Use cleanup script if available, otherwise use library functions
-        if [ -f "$PROJECT_ROOT/cleanup-stack.sh" ]; then
-            log "Using cleanup script to remove resources..."
-            "$PROJECT_ROOT/cleanup-stack.sh" "${STACK_NAME:-unknown}" || true
+        # Get script directory
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        
+        # Use unified cleanup script if available (preferred)
+        if [ -f "$script_dir/cleanup-consolidated.sh" ]; then
+            log "Using unified cleanup script to remove all resources..."
+            "$script_dir/cleanup-consolidated.sh" --force "$STACK_NAME" || {
+                warning "Unified cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
+        # Fallback to legacy cleanup script if it exists
+        elif [ -f "$script_dir/cleanup-stack.sh" ]; then
+            log "Using legacy cleanup script to remove resources..."
+            "$script_dir/cleanup-stack.sh" "$STACK_NAME" || {
+                warning "Legacy cleanup script failed, falling back to manual cleanup..."
+                run_manual_cleanup
+            }
         else
-            log "Running manual cleanup using library functions..."
-            cleanup_instances "${STACK_NAME:-unknown}" || true
-            cleanup_security_groups "${STACK_NAME:-unknown}" || true
-            cleanup_key_pairs "${STACK_NAME:-unknown}" || true
+            log "No cleanup script found, running manual cleanup..."
+            run_manual_cleanup
         fi
         
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         warning "💡 To disable automatic cleanup, set CLEANUP_ON_FAILURE=false"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     fi
+}
+
+# Manual cleanup function for fallback
+run_manual_cleanup() {
+    log "Running comprehensive manual cleanup..."
+    
+    # Cleanup EC2 instances
+    log "Cleaning up EC2 instances..."
+    local instance_ids
+    instance_ids=$(aws ec2 describe-instances \
+        --filters "Name=tag:Stack,Values=$STACK_NAME" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
+        for instance_id in $instance_ids; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                aws ec2 terminate-instances --instance-ids "$instance_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Terminated instance: $instance_id"
+            fi
+        done
+    fi
+    
+    # Cleanup spot instance requests
+    log "Cleaning up spot instance requests..."
+    local spot_requests
+    spot_requests=$(aws ec2 describe-spot-instance-requests \
+        --filters "Name=tag:Stack,Values=${STACK_NAME}" "Name=state,Values=open,active" \
+        --query 'SpotInstanceRequests[].SpotInstanceRequestId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$spot_requests" ] && [ "$spot_requests" != "None" ]; then
+        for spot_id in $spot_requests; do
+            if [ -n "$spot_id" ] && [ "$spot_id" != "None" ]; then
+                aws ec2 cancel-spot-instance-requests --spot-instance-request-ids "$spot_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Cancelled spot instance request: $spot_id"
+            fi
+        done
+    fi
+    
+    # Cleanup security groups
+    log "Cleaning up security groups..."
+    local sg_ids
+    sg_ids=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${STACK_NAME}-*" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        for sg_id in $sg_ids; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                # Wait a bit for instances to be terminated
+                sleep 5
+                aws ec2 delete-security-group --group-id "$sg_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Deleted security group: $sg_id"
+            fi
+        done
+    fi
+    
+    # Cleanup EFS file systems
+    log "Cleaning up EFS file systems..."
+    local efs_ids
+    efs_ids=$(aws efs describe-file-systems \
+        --query "FileSystems[?contains(Name, '$STACK_NAME')].FileSystemId" \
+        --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+    
+    if [ -n "$efs_ids" ] && [ "$efs_ids" != "None" ]; then
+        for efs_id in $efs_ids; do
+            if [ -n "$efs_id" ] && [ "$efs_id" != "None" ]; then
+                # Delete mount targets first
+                local mount_targets
+                mount_targets=$(aws efs describe-mount-targets \
+                    --file-system-id "$efs_id" \
+                    --query 'MountTargets[].MountTargetId' \
+                    --output text --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+                
+                for mt_id in $mount_targets; do
+                    if [ -n "$mt_id" ] && [ "$mt_id" != "None" ]; then
+                        aws efs delete-mount-target --mount-target-id "$mt_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                        log "Deleted mount target: $mt_id"
+                    fi
+                done
+                
+                # Wait for mount targets to be deleted
+                sleep 15
+                
+                # Delete the file system
+                aws efs delete-file-system --file-system-id "$efs_id" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+                log "Deleted EFS file system: $efs_id"
+            fi
+        done
+    fi
+    
+    # Cleanup IAM resources
+    log "Cleaning up IAM resources..."
+    local profile_name=""
+    if [[ "${STACK_NAME}" =~ ^[0-9] ]]; then
+        local clean_name
+        clean_name=$(echo "${STACK_NAME}" | sed 's/[^a-zA-Z0-9]//g')
+        profile_name="app-${clean_name}-profile"
+    else
+        profile_name="${STACK_NAME}-instance-profile"
+    fi
+    
+    # Remove role from instance profile
+    if aws iam get-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1; then
+        local role_names
+        role_names=$(aws iam get-instance-profile --instance-profile-name "$profile_name" \
+            --query 'InstanceProfile.Roles[].RoleName' --output text 2>/dev/null || echo "")
+        
+        for role_name in $role_names; do
+            if [ -n "$role_name" ]; then
+                aws iam remove-role-from-instance-profile \
+                    --instance-profile-name "$profile_name" \
+                    --role-name "$role_name" >/dev/null 2>&1 || true
+                log "Removed role $role_name from instance profile"
+            fi
+        done
+        
+        aws iam delete-instance-profile --instance-profile-name "$profile_name" >/dev/null 2>&1 || true
+        log "Deleted instance profile: $profile_name"
+    fi
+    
+    # Delete IAM role
+    local role_name="${STACK_NAME}-role"
+    if aws iam get-role --role-name "$role_name" >/dev/null 2>&1; then
+        # Detach policies first
+        local policy_arns
+        policy_arns=$(aws iam list-attached-role-policies --role-name "$role_name" \
+            --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo "")
+        
+        for policy_arn in $policy_arns; do
+            if [ -n "$policy_arn" ]; then
+                aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn" >/dev/null 2>&1 || true
+                log "Detached policy: $policy_arn"
+            fi
+        done
+        
+        aws iam delete-role --role-name "$role_name" >/dev/null 2>&1 || true
+        log "Deleted IAM role: $role_name"
+    fi
+    
+    success "Manual cleanup completed for stack: $STACK_NAME"
 }
 
 # Register cleanup handler
@@ -68,6 +222,15 @@ fi
 # Load core libraries
 source "$LIB_DIR/aws-deployment-common.sh"
 source "$LIB_DIR/aws-config.sh"
+
+# Load the new centralized configuration management system
+if [ -f "$LIB_DIR/config-management.sh" ]; then
+    source "$LIB_DIR/config-management.sh"
+    CONFIG_MANAGEMENT_AVAILABLE=true
+else
+    CONFIG_MANAGEMENT_AVAILABLE=false
+    warning "Centralized configuration management not available, using legacy mode"
+fi
 
 # Load security validation
 if [ -f "$SCRIPT_DIR/security-validation.sh" ]; then
@@ -118,10 +281,19 @@ perform_pre_deployment_validation() {
     local compose_file="${COMPOSE_FILE:-docker-compose.gpu-optimized.yml}"
     if [ -f "$PROJECT_ROOT/$compose_file" ]; then
         log "Validating Docker Compose configuration..."
-        docker-compose -f "$PROJECT_ROOT/$compose_file" config >/dev/null || {
-            error "Invalid Docker Compose configuration"
-            return 1
-        }
+        if command -v docker compose >/dev/null 2>&1; then
+            docker compose -f "$PROJECT_ROOT/$compose_file" config >/dev/null || {
+                error "Invalid Docker Compose configuration"
+                return 1
+            }
+        elif command -v docker-compose >/dev/null 2>&1; then
+            docker-compose -f "$PROJECT_ROOT/$compose_file" config >/dev/null || {
+                error "Invalid Docker Compose configuration"
+                return 1
+            }
+        else
+            warning "Neither 'docker compose' nor 'docker-compose' command found, skipping compose file validation"
+        fi
     fi
     
     success "Pre-deployment validation completed"
@@ -323,17 +495,34 @@ parse_arguments() {
 setup_configuration() {
     log "Setting up deployment configuration..."
 
-    # Set default configuration based on deployment type
-    set_default_configuration "$DEPLOYMENT_TYPE"
-    
-    # Apply environment-specific overrides
-    apply_environment_overrides "$ENVIRONMENT"
-    
-    # Apply region-specific configuration
-    apply_region_specific_configuration "${AWS_REGION:-us-east-1}"
-    
-    # Apply cost optimization based on budget tier
-    get_cost_optimized_configuration "$DEPLOYMENT_TYPE" "$BUDGET_TIER"
+    # Use enhanced configuration management if available
+    if [ "$CONFIG_MANAGEMENT_AVAILABLE" = "true" ]; then
+        log "Using enhanced configuration management system"
+        
+        # Load configuration from centralized system
+        local config_file="$CONFIG_DIR/environments/${ENVIRONMENT}.yml"
+        if [ -f "$config_file" ]; then
+            if load_configuration "$config_file" "$ENVIRONMENT"; then
+                log "Enhanced configuration loaded successfully"
+                
+                # Apply deployment type overrides
+                if apply_deployment_type_overrides "$DEPLOYMENT_TYPE"; then
+                    log "Deployment type overrides applied"
+                else
+                    warning "Failed to apply deployment type overrides, using defaults"
+                fi
+            else
+                warning "Enhanced configuration loading failed, falling back to legacy mode"
+                setup_legacy_configuration
+            fi
+        else
+            warning "Configuration file not found: $config_file, falling back to legacy mode"
+            setup_legacy_configuration
+        fi
+    else
+        log "Using legacy configuration management system"
+        setup_legacy_configuration
+    fi
     
     # Set derived configuration
     export STACK_NAME
@@ -353,6 +542,22 @@ setup_configuration() {
     esac
     
     success "Configuration setup completed"
+}
+
+setup_legacy_configuration() {
+    log "Setting up legacy configuration..."
+    
+    # Set default configuration based on deployment type
+    set_default_configuration "$DEPLOYMENT_TYPE"
+    
+    # Apply environment-specific overrides
+    apply_environment_overrides "$ENVIRONMENT"
+    
+    # Apply region-specific configuration
+    apply_region_specific_configuration "${AWS_REGION:-us-east-1}"
+    
+    # Apply cost optimization based on budget tier
+    get_cost_optimized_configuration "$DEPLOYMENT_TYPE" "$BUDGET_TIER"
 }
 
 # =============================================================================
@@ -553,8 +758,8 @@ deploy_instance() {
 deploy_application() {
     log "Deploying application..."
     
-    # Wait for SSH to be ready
-    if ! wait_for_ssh_ready "$INSTANCE_IP" "$KEY_FILE"; then
+    # Wait for SSH to be ready (with GPU-aware timeout)
+    if ! wait_for_ssh_ready "$INSTANCE_IP" "$KEY_FILE" "" "" "$INSTANCE_TYPE"; then
         error "SSH connectivity failed"
         return 1
     fi
@@ -571,80 +776,140 @@ deploy_application() {
 }
 
 # =============================================================================
-# LOAD BALANCER SETUP (ON-DEMAND ONLY)
+# LOAD BALANCER SETUP (ON-DEMAND AND SPOT)
 # =============================================================================
 
 setup_load_balancer() {
-    if [ "$DEPLOYMENT_TYPE" != "ondemand" ] || [ "${SKIP_LOAD_BALANCER:-false}" = "true" ]; then
+    # Check if ALB setup is requested via environment variable
+    if [ "${SETUP_ALB:-false}" != "true" ] && [ "${SKIP_LOAD_BALANCER:-false}" = "true" ]; then
         info "Skipping load balancer setup"
+        return 0
+    fi
+    
+    # For spot instances, check if ALB setup is explicitly requested
+    if [ "$DEPLOYMENT_TYPE" = "spot" ] && [ "${SETUP_ALB:-false}" != "true" ]; then
+        info "ALB setup not requested for spot instance (use SETUP_ALB=true to enable)"
         return 0
     fi
     
     log "Setting up load balancer..."
     
-    # Get additional subnets for ALB
-    local subnet_ids
-    mapfile -t subnet_ids < <(aws ec2 describe-subnets \
+    # Get additional subnets for ALB (bash 3.x compatible)
+    local subnet_ids_raw
+    subnet_ids_raw=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
         --query 'Subnets[].SubnetId' \
         --output text | tr '\t' '\n' | head -2)
+    # Convert to array bash 3.x compatible way
+    local subnet_ids
+    subnet_ids=($subnet_ids_raw)
     
     if [ ${#subnet_ids[@]} -lt 2 ]; then
         warning "Need at least 2 subnets for ALB. Skipping load balancer setup."
         return 0
     fi
     
-    # Create ALB
-    ALB_ARN=$(create_application_load_balancer "$STACK_NAME" "$SECURITY_GROUP_ID" "${subnet_ids[@]}")
-    if [ -z "$ALB_ARN" ]; then
-        error "Failed to create load balancer"
-        return 1
-    fi
-    
-    # Create target groups and register instance
-    local services
-    IFS=' ' read -ra services <<< "$(get_standard_service_list "$DEPLOYMENT_TYPE")"
-    
-    for service_info in "${services[@]}"; do
-        local service_name="${service_info%:*}"
-        local service_port="${service_info#*:}"
-        
-        local tg_arn
-        tg_arn=$(create_target_group "$STACK_NAME" "$service_name" "$service_port" "$VPC_ID")
-        
-        if [ -n "$tg_arn" ]; then
-            register_instance_with_target_group "$tg_arn" "$INSTANCE_ID" "$service_port"
-            create_alb_listener "$ALB_ARN" "$tg_arn" "$service_port"
-        fi
-    done
-    
-    # Get ALB DNS name
-    ALB_DNS_NAME=$(get_alb_dns_name "$ALB_ARN")
+    # Create ALB based on deployment type
+    case "$DEPLOYMENT_TYPE" in
+        "spot")
+            # Use spot instance specific ALB setup
+            local alb_result
+            alb_result=$(setup_spot_instance_load_balancing "$STACK_NAME" "$INSTANCE_ID" "$VPC_ID" "${subnet_ids[@]}")
+            if [ $? -eq 0 ]; then
+                ALB_ARN="${alb_result%:*}"
+                ALB_DNS_NAME="${alb_result#*:}"
+                success "Spot instance load balancer setup completed: $ALB_DNS_NAME"
+            else
+                error "Failed to setup load balancer for spot instance"
+                return 1
+            fi
+            ;;
+        *)
+            # Use standard ALB setup for ondemand and simple
+            ALB_ARN=$(create_application_load_balancer "$STACK_NAME" "$SECURITY_GROUP_ID" "${subnet_ids[@]}")
+            if [ -z "$ALB_ARN" ]; then
+                error "Failed to create load balancer"
+                return 1
+            fi
+            
+            # Create target groups and register instance
+            local services
+            IFS=' ' read -ra services <<< "$(get_standard_service_list "$DEPLOYMENT_TYPE")"
+            
+            for service_info in "${services[@]}"; do
+                local service_name="${service_info%:*}"
+                local service_port="${service_info#*:}"
+                
+                local tg_arn
+                tg_arn=$(create_target_group "$STACK_NAME" "$service_name" "$service_port" "$VPC_ID")
+                
+                if [ -n "$tg_arn" ]; then
+                    register_instance_with_target_group "$tg_arn" "$INSTANCE_ID" "$service_port"
+                    create_alb_listener "$ALB_ARN" "$tg_arn" "$service_port"
+                fi
+            done
+            
+            # Get ALB DNS name
+            ALB_DNS_NAME=$(get_alb_dns_name "$ALB_ARN")
+            ;;
+    esac
     
     success "Load balancer setup completed: $ALB_DNS_NAME"
     return 0
 }
 
 # =============================================================================
-# CLOUDFRONT SETUP (ON-DEMAND ONLY)
+# CLOUDFRONT SETUP (ON-DEMAND AND SPOT)
 # =============================================================================
 
 setup_cloudfront() {
-    if [ "$DEPLOYMENT_TYPE" != "ondemand" ] || [ "${SKIP_CLOUDFRONT:-false}" = "true" ] || [ -z "${ALB_DNS_NAME:-}" ]; then
+    # Check if CloudFront setup is requested via environment variable
+    if [ "${SETUP_CLOUDFRONT:-false}" != "true" ] && [ "${SKIP_CLOUDFRONT:-false}" = "true" ]; then
         info "Skipping CloudFront setup"
+        return 0
+    fi
+    
+    # For spot instances, check if CloudFront setup is explicitly requested
+    if [ "$DEPLOYMENT_TYPE" = "spot" ] && [ "${SETUP_CLOUDFRONT:-false}" != "true" ]; then
+        info "CloudFront setup not requested for spot instance (use SETUP_CLOUDFRONT=true to enable)"
+        return 0
+    fi
+    
+    # Check if ALB is available (required for CloudFront)
+    if [ -z "${ALB_DNS_NAME:-}" ]; then
+        warning "No ALB DNS name available. Skipping CloudFront setup."
         return 0
     fi
     
     log "Setting up CloudFront distribution..."
     
-    local cloudfront_result
-    cloudfront_result=$(setup_cloudfront_distribution "$STACK_NAME" "$ALB_DNS_NAME")
-    
-    if [ -n "$cloudfront_result" ]; then
-        CLOUDFRONT_ID="${cloudfront_result%:*}"
-        CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
-        success "CloudFront setup completed: $CLOUDFRONT_DOMAIN"
-    fi
+    # Setup CloudFront based on deployment type
+    case "$DEPLOYMENT_TYPE" in
+        "spot")
+            # Use spot instance specific CloudFront setup
+            local cloudfront_result
+            cloudfront_result=$(setup_spot_instance_cdn "$STACK_NAME" "$ALB_DNS_NAME")
+            if [ $? -eq 0 ]; then
+                CLOUDFRONT_ID="${cloudfront_result%:*}"
+                CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
+                success "Spot instance CloudFront setup completed: $CLOUDFRONT_DOMAIN"
+            else
+                error "Failed to setup CloudFront for spot instance"
+                return 1
+            fi
+            ;;
+        *)
+            # Use standard CloudFront setup for ondemand and simple
+            local cloudfront_result
+            cloudfront_result=$(setup_cloudfront_distribution "$STACK_NAME" "$ALB_DNS_NAME")
+            
+            if [ -n "$cloudfront_result" ]; then
+                CLOUDFRONT_ID="${cloudfront_result%:*}"
+                CLOUDFRONT_DOMAIN="${cloudfront_result#*:}"
+                success "CloudFront setup completed: $CLOUDFRONT_DOMAIN"
+            fi
+            ;;
+    esac
     
     return 0
 }

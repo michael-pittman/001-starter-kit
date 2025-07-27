@@ -16,7 +16,7 @@ NC='\033[0m'
 
 log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
 error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
+success() { echo -e "${GREEN}✅ [SUCCESS] $1${NC}" >&2; }
 warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
 
 # =============================================================================
@@ -240,14 +240,17 @@ cleanup_parameters() {
     
     log "Cleaning up parameters..."
     
-    # Get all parameter names
-    local param_names
-    mapfile -t param_names < <(aws ssm get-parameters-by-path \
+    # Get all parameter names (bash 3.x compatible)
+    local param_names_raw
+    param_names_raw=$(aws ssm get-parameters-by-path \
         --path "/aibuildkit" \
         --recursive \
         --query 'Parameters[].Name' \
         --output text \
         --region "$aws_region" | tr '\t' '\n')
+    # Convert to array bash 3.x compatible way
+    local param_names
+    param_names=($param_names_raw)
     
     # Delete each parameter
     for param_name in "${param_names[@]}"; do

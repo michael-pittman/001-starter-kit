@@ -5,6 +5,21 @@
 # =============================================================================
 
 # =============================================================================
+# VARIABLE INITIALIZATION AND DEFAULTS
+# =============================================================================
+
+# Initialize variables with defaults to prevent unbound variable errors
+ALB_SCHEME="${ALB_SCHEME:-internet-facing}"
+ALB_TYPE="${ALB_TYPE:-application}"
+SPOT_TYPE="${SPOT_TYPE:-one-time}"
+CLOUDWATCH_LOG_GROUP="${CLOUDWATCH_LOG_GROUP:-/aws/ec2/GeuseMaker}"
+CLOUDWATCH_LOG_RETENTION="${CLOUDWATCH_LOG_RETENTION:-7}"
+CLOUDFRONT_PRICE_CLASS="${CLOUDFRONT_PRICE_CLASS:-PriceClass_100}"
+CLOUDFRONT_MIN_TTL="${CLOUDFRONT_MIN_TTL:-0}"
+CLOUDFRONT_DEFAULT_TTL="${CLOUDFRONT_DEFAULT_TTL:-86400}"
+CLOUDFRONT_MAX_TTL="${CLOUDFRONT_MAX_TTL:-31536000}"
+
+# =============================================================================
 # ON-DEMAND INSTANCE LAUNCH
 # =============================================================================
 
@@ -238,7 +253,8 @@ create_target_group() {
         return 0
     fi
 
-    # Create target group
+    # Create target group with improved health check settings
+    log "Creating target group with improved health check settings for containerized applications..."
     tg_arn=$(aws elbv2 create-target-group \
         --name "$tg_name" \
         --protocol HTTP \
@@ -247,10 +263,10 @@ create_target_group() {
         --health-check-protocol HTTP \
         --health-check-path "$health_check_path" \
         --health-check-port "$health_check_port" \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 5 \
+        --health-check-interval-seconds 60 \
+        --health-check-timeout-seconds 15 \
         --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 3 \
+        --unhealthy-threshold-count 5 \
         --target-type instance \
         --tags Key=Name,Value="$tg_name" Key=Stack,Value="$stack_name" Key=Service,Value="$service_name" \
         --query 'TargetGroups[0].TargetGroupArn' \
@@ -376,71 +392,123 @@ setup_cloudfront_distribution() {
 
     log "Setting up CloudFront distribution for ALB: $alb_dns_name"
 
-    # Create distribution configuration
-    local distribution_config='{
-        "CallerReference": "'${stack_name}'-'$(date +%s)'",
-        "Comment": "CloudFront distribution for '${stack_name}' GeuseMaker",
-        "DefaultCacheBehavior": {
-            "TargetOriginId": "'${stack_name}'-alb-origin",
-            "ViewerProtocolPolicy": "redirect-to-https",
-            "AllowedMethods": {
-                "Quantity": 7,
-                "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-            },
+    # Validate required parameters
+    if [[ -z "$stack_name" ]]; then
+        error "Stack name is required for CloudFront setup"
+        return 1
+    fi
+    
+    if [[ -z "$alb_dns_name" ]]; then
+        error "ALB DNS name is required for CloudFront setup"
+        return 1
+    fi
+
+    # Set default CloudFront TTL values with proper validation
+    local min_ttl="${CLOUDFRONT_MIN_TTL:-0}"
+    local default_ttl="${CLOUDFRONT_DEFAULT_TTL:-86400}"
+    local max_ttl="${CLOUDFRONT_MAX_TTL:-31536000}"
+    local price_class="${CLOUDFRONT_PRICE_CLASS:-PriceClass_100}"
+    
+    # Validate TTL values are numeric
+    if ! [[ "$min_ttl" =~ ^[0-9]+$ ]] || ! [[ "$default_ttl" =~ ^[0-9]+$ ]] || ! [[ "$max_ttl" =~ ^[0-9]+$ ]]; then
+        error "CloudFront TTL values must be numeric"
+        return 1
+    fi
+    
+    # Sanitize input values to prevent JSON injection
+    local sanitized_stack_name
+    sanitized_stack_name=$(echo "$stack_name" | tr -cd '[:alnum:]-' | head -c 64)
+    local sanitized_alb_dns
+    sanitized_alb_dns=$(echo "$alb_dns_name" | tr -cd '[:alnum:].-' | head -c 253)
+    
+    local caller_ref="${sanitized_stack_name}-$(date +%s)"
+    local origin_id="${sanitized_stack_name}-alb-origin"
+    
+    # Create distribution configuration with validated JSON structure
+    local temp_config_file="/tmp/cloudfront-config-${sanitized_stack_name}-$(date +%s).json"
+    
+    # Generate CloudFront configuration with proper escaping and validation
+    cat > "$temp_config_file" << EOF
+{
+    "CallerReference": "${caller_ref}",
+    "Comment": "CloudFront distribution for ${sanitized_stack_name} GeuseMaker",
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "${origin_id}",
+        "ViewerProtocolPolicy": "redirect-to-https",
+        "AllowedMethods": {
+            "Quantity": 7,
+            "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
             "CachedMethods": {
                 "Quantity": 2,
                 "Items": ["GET", "HEAD"]
-            },
-            "ForwardedValues": {
-                "QueryString": true,
-                "Cookies": {"Forward": "all"},
-                "Headers": {
-                    "Quantity": 1,
-                    "Items": ["*"]
-                }
-            },
-            "MinTTL": '${CLOUDFRONT_MIN_TTL}',
-            "DefaultTTL": '${CLOUDFRONT_DEFAULT_TTL}',
-            "MaxTTL": '${CLOUDFRONT_MAX_TTL}',
-            "Compress": true
+            }
         },
-        "Origins": {
-            "Quantity": 1,
-            "Items": [{
-                "Id": "'${stack_name}'-alb-origin",
-                "DomainName": "'${alb_dns_name}'",
-                "OriginPath": "'${origin_path}'",
-                "CustomOriginConfig": {
-                    "HTTPPort": 80,
-                    "HTTPSPort": 443,
-                    "OriginProtocolPolicy": "http-only",
-                    "OriginSslProtocols": {
-                        "Quantity": 1,
-                        "Items": ["TLSv1.2"]
-                    }
-                }
-            }]
+        "ForwardedValues": {
+            "QueryString": true,
+            "Cookies": {"Forward": "all"},
+            "Headers": {
+                "Quantity": 1,
+                "Items": ["*"]
+            }
         },
-        "Enabled": true,
-        "PriceClass": "'${CLOUDFRONT_PRICE_CLASS}'",
-        "Tags": {
-            "Items": [
-                {"Key": "Name", "Value": "'${stack_name}'-cloudfront"},
-                {"Key": "Stack", "Value": "'${stack_name}'"},
-                {"Key": "Environment", "Value": "'${ENVIRONMENT}'"}
-            ]
+        "MinTTL": ${min_ttl},
+        "DefaultTTL": ${default_ttl},
+        "MaxTTL": ${max_ttl},
+        "Compress": true,
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
         }
-    }'
+    },
+    "Origins": {
+        "Quantity": 1,
+        "Items": [{
+            "Id": "${origin_id}",
+            "DomainName": "${sanitized_alb_dns}",
+            "OriginPath": "${origin_path}",
+            "CustomOriginConfig": {
+                "HTTPPort": 80,
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "http-only",
+                "OriginSslProtocols": {
+                    "Quantity": 1,
+                    "Items": ["TLSv1.2"]
+                },
+                "OriginReadTimeout": 30,
+                "OriginKeepaliveTimeout": 5
+            }
+        }]
+    },
+    "Enabled": true,
+    "PriceClass": "${price_class}"
+}
+EOF
+
+    # Validate JSON syntax before using
+    if ! python3 -c "import json; json.load(open('$temp_config_file'))" 2>/dev/null; then
+        if command -v jq >/dev/null 2>&1; then
+            if ! jq . "$temp_config_file" >/dev/null 2>&1; then
+                error "Generated CloudFront configuration has invalid JSON syntax"
+                rm -f "$temp_config_file"
+                return 1
+            fi
+        else
+            warning "Cannot validate JSON syntax (jq not available)"
+        fi
+    fi
 
     # Create the distribution
     local distribution_id
     distribution_id=$(aws cloudfront create-distribution \
-        --distribution-config "$distribution_config" \
+        --distribution-config "file://$temp_config_file" \
         --query 'Distribution.Id' \
         --output text \
         --region "$AWS_REGION")
 
-    if [ -z "$distribution_id" ] || [ "$distribution_id" = "None" ]; then
+    # Clean up temporary file
+    rm -f "$temp_config_file"
+    
+    if [ -z "$distribution_id" ] || [ "$distribution_id" = "None" ] || [ "$distribution_id" = "null" ]; then
         error "Failed to create CloudFront distribution"
         return 1
     fi

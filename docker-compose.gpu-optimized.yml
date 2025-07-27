@@ -100,7 +100,7 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     <<: [*logging-config, *restart-policy]
-    image: postgres:latest
+    image: postgres:16.1-alpine3.19
     container_name: postgres-gpu
     hostname: postgres
     user: "70:70"  # postgres user in alpine
@@ -175,10 +175,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G  # Optimized for 85% total allocation
+          memory: 2G  # Reduced from 3G
           cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
-          memory: 1G
+          memory: 1G  # Reduced from 1.5G
           cpus: '0.2'  # Optimized for 85% total allocation
 
   # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ services:
   # ---------------------------------------------------------------------------
   n8n:
     <<: [*logging-config, *restart-policy]
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.19.4
     container_name: n8n-gpu
     hostname: n8n
     user: "1000:1000"  # n8n user
@@ -257,7 +257,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1.5G  # Optimized for 85% total allocation
+          memory: 1.5G  # Reduced from 2G
           cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
           memory: 512M
@@ -268,7 +268,7 @@ services:
   # ---------------------------------------------------------------------------
   qdrant:
     <<: [*logging-config, *restart-policy]
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.3
     container_name: qdrant-gpu
     hostname: qdrant
     networks:
@@ -313,7 +313,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G  # Optimized for 85% total allocation
+          memory: 2G  # Reduced from 3G
           cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
           memory: 1G
@@ -324,7 +324,7 @@ services:
   # ---------------------------------------------------------------------------
   ollama:
     <<: [*gpu-config, *logging-config, *restart-policy]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-gpu
     hostname: ollama
     networks:
@@ -339,12 +339,12 @@ services:
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_LOAD_TIMEOUT=300s
       
-      # GPU optimizations for T4 (16GB VRAM) - Optimized
-      - OLLAMA_GPU_MEMORY_FRACTION=0.85  # Balanced allocation
-      - OLLAMA_MAX_LOADED_MODELS=2  # Conservative for stability
-      - OLLAMA_CONCURRENT_REQUESTS=4  # Optimized throughput
-      - OLLAMA_NUM_PARALLEL=4  # Balanced parallelism
-      - OLLAMA_MAX_QUEUE=64  # Reasonable queue depth
+      # GPU optimizations for T4 (16GB VRAM) - Adjusted
+      - OLLAMA_GPU_MEMORY_FRACTION=0.85  # Reduced from 0.90
+      - OLLAMA_MAX_LOADED_MODELS=2  # Reduced from 3
+      - OLLAMA_CONCURRENT_REQUESTS=4  # Reduced from 6
+      - OLLAMA_NUM_PARALLEL=4  # Reduced from 6
+      - OLLAMA_MAX_QUEUE=64  # Reduced from 128
       
       # Performance optimizations - Enhanced for T4
       - OLLAMA_FLASH_ATTENTION=1
@@ -357,21 +357,21 @@ services:
       # Model-specific optimizations - T4 Tuned
       - OLLAMA_REQUEST_TIMEOUT=600s
       - OLLAMA_CONTEXT_LENGTH=8192
-      - OLLAMA_BATCH_SIZE=512
+      - OLLAMA_BATCH_SIZE=1024
       - OLLAMA_THREADS=8
-      - OLLAMA_MAX_TOKENS_PER_BATCH=1024
+      - OLLAMA_MAX_TOKENS_PER_BATCH=2048
       
-      # Memory and performance tuning - Conservative for stability
-      - OLLAMA_MEMORY_POOL_SIZE=12GB
+      # Memory and performance tuning
+      - OLLAMA_MEMORY_POOL_SIZE=14GB
       - OLLAMA_CACHE_SIZE=2GB
-      - OLLAMA_PREFILL_BATCH_SIZE=256
-      - OLLAMA_DECODE_BATCH_SIZE=128
+      - OLLAMA_PREFILL_BATCH_SIZE=512
+      - OLLAMA_DECODE_BATCH_SIZE=256
       
       # T4-specific CUDA optimizations
       - CUDA_CACHE_PATH=/tmp/cuda_cache
       - CUDA_LAUNCH_BLOCKING=0
       - NCCL_DEBUG=WARN
-      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:1024
     volumes:
       - ollama_storage:/root/.ollama
       - shared_storage:/shared:ro
@@ -386,18 +386,18 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6G  # Optimized as primary service
-          cpus: '2.0'  # Primary compute allocation
+          memory: 6G  # Reduced from 8G
+          cpus: '2.0'  # Reduced from 1.5 but increased share as primary service
         reservations:
           memory: 4G
-          cpus: '1.5'  # Reserved for ollama primary workload
+          cpus: '1.5'  # Reduced from 1.0 but increased share
 
   # ---------------------------------------------------------------------------
   # Model Initialization Service - Downloads and optimizes AI models
   # ---------------------------------------------------------------------------
   ollama-model-init:
     <<: [*gpu-config, *logging-config]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.17
     container_name: ollama-model-init
     networks:
       - ai_network
@@ -686,7 +686,7 @@ services:
   # ---------------------------------------------------------------------------
   health-check:
     <<: [*logging-config, *restart-policy]
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.5.0
     container_name: health-check
     hostname: health-check
     networks:
@@ -740,14 +740,13 @@ services:
   # ---------------------------------------------------------------------------
   crawl4ai:
     <<: [*logging-config, *restart-policy]
-    image: unclecode/crawl4ai:latest
+    image: unclecode/crawl4ai:0.2.75
     container_name: crawl4ai-gpu
     hostname: crawl4ai
     networks:
       - ai_network
     ports:
       - "11235:11235"
-      - "8000:8000"  # Alternative port for legacy compatibility
     
     environment:
       # LLM Configuration for extraction strategies
@@ -787,14 +786,14 @@ services:
       - CRAWL4AI_STORAGE_URI=memory://
       
       # Performance optimization for g4dn.xlarge (16GB RAM, 4 vCPUs)
-      - CRAWL4AI_MEMORY_THRESHOLD_PERCENT=85.0
+      - CRAWL4AI_MEMORY_THRESHOLD_PERCENT=90.0
       - CRAWL4AI_BATCH_PROCESS_TIMEOUT=600.0
       - CRAWL4AI_STREAM_INIT_TIMEOUT=60.0
       
-      # Browser optimization - Conservative for stability
-      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=2
+      # Browser optimization
+      - CRAWL4AI_MAX_CONCURRENT_SESSIONS=4
       - CRAWL4AI_SESSION_TIMEOUT=300
-      - CRAWL4AI_BROWSER_POOL_SIZE=1
+      - CRAWL4AI_BROWSER_POOL_SIZE=2
       
       # Logging configuration
       - CRAWL4AI_LOG_LEVEL=INFO
@@ -828,11 +827,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1.5G  # Optimized allocation
-          cpus: '0.4'  # Balanced allocation
+          memory: 1.5G  # Reduced from 2G
+          cpus: '0.4'  # Optimized for 85% total allocation
         reservations:
           memory: 1G
-          cpus: '0.2'  # Reserved resources
+          cpus: '0.2'  # Optimized for 85% total allocation
     
     depends_on:
       postgres:

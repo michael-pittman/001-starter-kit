@@ -5,24 +5,277 @@
 # =============================================================================
 
 # =============================================================================
-# SHARED LOGGING AND OUTPUT FUNCTIONS
+# UNIFIED LOGGING AND OUTPUT FUNCTIONS
 # =============================================================================
 
-# Color definitions
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[0;33m'
-readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
-readonly CYAN='\033[0;36m'
-readonly NC='\033[0m'
+# Color definitions - always define with defaults to prevent unbound variable errors
+# Use parameter expansion to avoid conflicts with existing definitions
+RED="${RED:-\033[0;31m}"
+GREEN="${GREEN:-\033[0;32m}"
+YELLOW="${YELLOW:-\033[0;33m}"
+BLUE="${BLUE:-\033[0;34m}"
+PURPLE="${PURPLE:-\033[0;35m}"
+MAGENTA="${MAGENTA:-\033[0;35m}"
+CYAN="${CYAN:-\033[0;36m}"
+BOLD="${BOLD:-\033[1m}"
+NC="${NC:-\033[0m}"
 
-# Logging functions
-log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
-error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
-warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
-info() { echo -e "${CYAN}[INFO] $1${NC}" >&2; }
+# Mark colors as defined to prevent redefinition
+AWS_DEPLOY_COLORS_DEFINED="${AWS_DEPLOY_COLORS_DEFINED:-true}"
+
+# Log context detection and formatting
+get_log_context() {
+    local context=""
+    
+    # Detect if we're running on AWS instance
+    if command -v curl >/dev/null 2>&1 && curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id >/dev/null 2>&1; then
+        local instance_id=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
+        local instance_type=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
+        context="[INSTANCE:${instance_id:0:8}:${instance_type}]"
+    else
+        # Local development context
+        context="[LOCAL:$(whoami)@$(hostname -s)]"
+    fi
+    
+    echo "$context"
+}
+
+# Unified timestamp format
+get_timestamp() {
+    date +'%Y-%m-%d %H:%M:%S'
+}
+
+# Core logging functions with unified formatting
+# Use parameter expansion with defaults to prevent unbound variable errors
+log() { 
+    local context=$(get_log_context)
+    echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}📋 [LOG]${NC:-} $1" >&2
+}
+
+error() { 
+    local context=$(get_log_context)
+    echo -e "${RED:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}❌ [ERROR]${NC:-} $1" >&2
+}
+
+success() { 
+    local context=$(get_log_context)
+    echo -e "${GREEN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}✅ [SUCCESS]${NC:-} $1" >&2
+}
+
+warning() { 
+    local context=$(get_log_context)
+    echo -e "${YELLOW:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${YELLOW:-}⚠️  [WARNING]${NC:-} $1" >&2
+}
+
+info() { 
+    local context=$(get_log_context)
+    echo -e "${CYAN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${CYAN:-}ℹ️  [INFO]${NC:-} $1" >&2
+}
+
+# Deployment progress functions
+step() { 
+    local context=$(get_log_context)
+    echo -e "${MAGENTA:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${MAGENTA:-}🔸 [STEP]${NC:-} $1" >&2
+}
+
+progress() { 
+    local context=$(get_log_context)
+    echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}⏳ [PROGRESS]${NC:-} $1" >&2
+}
+
+# Special deployment status functions
+deploy_start() {
+    local context=$(get_log_context)
+    echo -e "${BOLD:-}${GREEN:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}🚀 [DEPLOY-START]${NC:-} $1 ${BOLD:-}${GREEN:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
+}
+
+deploy_complete() {
+    local context=$(get_log_context)
+    echo -e "${BOLD:-}${GREEN:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}🎉 [DEPLOY-COMPLETE]${NC:-} $1 ${BOLD:-}${GREEN:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${GREEN:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
+}
+
+deploy_failed() {
+    local context=$(get_log_context)
+    echo -e "${BOLD:-}${RED:-}╔════════════════════════════════════════════════════════════════════════╗${NC:-}" >&2
+    echo -e "${BOLD:-}${RED:-}║${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}💥 [DEPLOY-FAILED]${NC:-} $1 ${BOLD:-}${RED:-}║${NC:-}" >&2
+    echo -e "${BOLD:-}${RED:-}╚════════════════════════════════════════════════════════════════════════╝${NC:-}" >&2
+}
+
+# Section headers for better organization
+section() {
+    local context=$(get_log_context)
+    echo -e "${BOLD:-}${PURPLE:-}╭─────────────────────────────────────────────────────────────────────────╮${NC:-}" >&2
+    echo -e "${BOLD:-}${PURPLE:-}│${NC:-} ${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${PURPLE:-}📂 [SECTION]${NC:-} $1 ${BOLD:-}${PURPLE:-}│${NC:-}" >&2
+    echo -e "${BOLD:-}${PURPLE:-}╰─────────────────────────────────────────────────────────────────────────╯${NC:-}" >&2
+}
+
+# Debug logging (only shown when DEBUG=true)
+debug() {
+    if [[ "${DEBUG:-false}" == "true" ]]; then
+        local context=$(get_log_context)
+        echo -e "${PURPLE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${PURPLE:-}🐛 [DEBUG]${NC:-} $1" >&2
+    fi
+}
+
+# =============================================================================
+# CONFIGURATION MANAGEMENT INTEGRATION
+# =============================================================================
+
+# Source configuration management library
+source_config_management() {
+    local lib_dir="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    local config_lib="$lib_dir/config-management.sh"
+    
+    if [[ -f "$config_lib" ]]; then
+        source "$config_lib"
+        debug "Configuration management library loaded"
+        return 0
+    else
+        warning "Configuration management library not found: $config_lib"
+        return 1
+    fi
+}
+
+# Initialize configuration system for deployment
+init_deployment_config() {
+    local environment="${1:-${ENVIRONMENT:-development}}"
+    local deployment_type="${2:-${DEPLOYMENT_TYPE:-simple}}"
+    
+    log "Initializing deployment configuration..."
+    
+    # Source configuration management library
+    source_config_management || {
+        warning "Failed to load configuration management library, using legacy approach"
+        return 1
+    }
+    
+    # Initialize configuration
+    if ! init_config "$environment" "$deployment_type"; then
+        error "Failed to initialize configuration for environment: $environment, type: $deployment_type"
+        return 1
+    fi
+    
+    # Export key configuration values for backward compatibility
+    export AWS_REGION="${AWS_REGION:-$(get_global_config "region" "us-east-1")}"
+    export STACK_NAME="${STACK_NAME:-$(get_global_config "stack_name" "GeuseMaker-${environment}")}"
+    export PROJECT_NAME="${PROJECT_NAME:-$(get_global_config "project_name" "GeuseMaker")}"
+    export VPC_CIDR="${VPC_CIDR:-$(get_infrastructure_config "networking.vpc_cidr" "10.0.0.0/16")}"
+    
+    success "Configuration initialized for environment: $environment, deployment type: $deployment_type"
+    return 0
+}
+
+# Load environment variables from configuration
+load_deployment_env_vars() {
+    local env_file="${1:-}"
+    
+    # If no specific env file provided, use current environment
+    if [[ -z "$env_file" ]]; then
+        local current_env="${ENVIRONMENT:-development}"
+        env_file=".env.${current_env}"
+    fi
+    
+    if [[ -f "$env_file" ]]; then
+        log "Loading environment variables from: $env_file"
+        set -a  # automatically export all variables
+        source "$env_file"
+        set +a
+        success "Environment variables loaded from: $env_file"
+    else
+        warning "Environment file not found: $env_file"
+        return 1
+    fi
+}
+
+# Generate environment file if configuration management is available
+ensure_env_file() {
+    local environment="${ENVIRONMENT:-development}"
+    local env_file=".env.${environment}"
+    
+    # Check if env file exists and is recent (less than 1 hour old)
+    if [[ -f "$env_file" ]]; then
+        local file_age=$(($(date +%s) - $(stat -c %Y "$env_file" 2>/dev/null || stat -f %m "$env_file" 2>/dev/null || echo 0)))
+        if [[ $file_age -lt 3600 ]]; then
+            debug "Environment file is recent: $env_file"
+            return 0
+        fi
+    fi
+    
+    log "Generating environment file for: $environment"
+    
+    # Try to generate using configuration management
+    if declare -f generate_env_file >/dev/null 2>&1; then
+        if generate_env_file "$env_file"; then
+            success "Environment file generated: $env_file"
+            return 0
+        fi
+    fi
+    
+    warning "Failed to generate environment file, deployment may use default values"
+    return 1
+}
+
+# Validate configuration before deployment
+validate_deployment_config() {
+    local environment="${ENVIRONMENT:-development}"
+    local deployment_type="${DEPLOYMENT_TYPE:-simple}"
+    
+    log "Validating deployment configuration..."
+    
+    # Validate required variables
+    local required_vars=("AWS_REGION" "STACK_NAME" "PROJECT_NAME")
+    local missing_vars=()
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        error "Missing required configuration variables: ${missing_vars[*]}"
+        return 1
+    fi
+    
+    # Validate using configuration management functions if available
+    if declare -f validate_environment >/dev/null 2>&1; then
+        validate_environment "$environment" || return 1
+    fi
+    
+    if declare -f validate_deployment_type >/dev/null 2>&1; then
+        validate_deployment_type "$deployment_type" || return 1
+    fi
+    
+    if declare -f validate_aws_region >/dev/null 2>&1; then
+        validate_aws_region "$AWS_REGION" || return 1
+    fi
+    
+    success "Configuration validation passed"
+    return 0
+}
+
+# Display configuration summary
+show_deployment_config() {
+    log "Deployment Configuration Summary:"
+    echo "  Environment: ${ENVIRONMENT:-development}"
+    echo "  Deployment Type: ${DEPLOYMENT_TYPE:-simple}"
+    echo "  AWS Region: ${AWS_REGION:-us-east-1}"
+    echo "  Stack Name: ${STACK_NAME:-GeuseMaker}"
+    echo "  Project Name: ${PROJECT_NAME:-GeuseMaker}"
+    echo "  VPC CIDR: ${VPC_CIDR:-10.0.0.0/16}"
+    echo "  Spot Instances: ${SPOT_INSTANCES_ENABLED:-false}"
+    echo "  Auto Scaling: ${AUTO_SCALING_ENABLED:-true}"
+    
+    # Show detailed summary if configuration management is available
+    if declare -f get_config_summary >/dev/null 2>&1; then
+        echo
+        get_config_summary
+    fi
+}
 
 # =============================================================================
 # SHARED PREREQUISITE CHECKING
@@ -89,6 +342,151 @@ check_common_prerequisites() {
     fi
 
     success "All prerequisites check passed."
+    return 0
+}
+
+# =============================================================================
+# ERROR HANDLING AND RECOVERY UTILITIES
+# =============================================================================
+
+# Enhanced error handling wrapper for AWS commands
+aws_safe_execute() {
+    local command="$1"
+    local description="${2:-AWS operation}"
+    local max_retries="${3:-3}"
+    local retry_delay="${4:-5}"
+    
+    local attempt=1
+    local result
+    local exit_code
+    
+    while [ $attempt -le $max_retries ]; do
+        log "$description (attempt $attempt/$max_retries)"
+        
+        # Execute the AWS command and capture both output and exit code
+        if result=$(eval "$command" 2>&1); then
+            success "$description completed successfully"
+            echo "$result"
+            return 0
+        else
+            exit_code=$?
+            warning "$description failed on attempt $attempt: $result"
+            
+            # Check for specific AWS errors that shouldn't be retried
+            if echo "$result" | grep -qE "(AccessDenied|InvalidUserID.NotFound|InvalidKeyPair.NotFound|InvalidAMIID.NotFound)"; then
+                error "$description failed with non-retryable error: $result"
+                return $exit_code
+            fi
+            
+            # Check for rate limiting
+            if echo "$result" | grep -qE "(Throttling|RequestLimitExceeded|TooManyRequests)"; then
+                warning "Rate limiting detected, increasing retry delay"
+                retry_delay=$((retry_delay * 2))
+            fi
+            
+            if [ $attempt -lt $max_retries ]; then
+                log "Retrying in ${retry_delay} seconds..."
+                sleep $retry_delay
+            fi
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    error "$description failed after $max_retries attempts: $result"
+    return 1
+}
+
+# Check if an AWS resource exists
+aws_resource_exists() {
+    local resource_type="$1"
+    local resource_identifier="$2"
+    local region="${3:-$AWS_REGION}"
+    
+    case "$resource_type" in
+        "instance")
+            aws ec2 describe-instances --instance-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "security-group")
+            aws ec2 describe-security-groups --group-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "vpc")
+            aws ec2 describe-vpcs --vpc-ids "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "key-pair")
+            aws ec2 describe-key-pairs --key-names "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "load-balancer")
+            aws elbv2 describe-load-balancers --names "$resource_identifier" --region "$region" >/dev/null 2>&1
+            ;;
+        "cloudfront-distribution")
+            aws cloudfront get-distribution --id "$resource_identifier" >/dev/null 2>&1
+            ;;
+        *)
+            warning "Unknown resource type: $resource_type"
+            return 1
+            ;;
+    esac
+}
+
+# Cleanup function for failed deployments
+cleanup_failed_deployment() {
+    local stack_name="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    warning "Attempting to clean up failed deployment: $stack_name"
+    
+    # List of resources to clean up (in reverse order of dependencies)
+    local cleanup_commands=(
+        "aws cloudfront list-distributions --query 'DistributionList.Items[?Comment.contains(@, \\\"$stack_name\\\")].Id' --output text"
+        "aws elbv2 describe-load-balancers --names \\\"$stack_name-alb\\\" --query 'LoadBalancers[0].LoadBalancerArn' --output text --region \\\"$region\\\""
+        "aws ec2 describe-instances --filters \\\"Name=tag:Name,Values=$stack_name-instance\\\" --query 'Reservations[*].Instances[*].InstanceId' --output text --region \\\"$region\\\""
+        "aws ec2 describe-security-groups --filters \\\"Name=group-name,Values=$stack_name-sg\\\" --query 'SecurityGroups[0].GroupId' --output text --region \\\"$region\\\""
+    )
+    
+    # Attempt cleanup (non-blocking)
+    for cmd in "${cleanup_commands[@]}"; do
+        if resource_id=$(eval "$cmd" 2>/dev/null) && [ -n "$resource_id" ] && [ "$resource_id" != "None" ]; then
+            warning "Found resource to clean up: $resource_id"
+            # Actual cleanup would depend on resource type
+            # This is just identification for now
+        fi
+    done
+    
+    info "Manual cleanup may be required for stack: $stack_name"
+}
+
+# Validate environment before deployment
+validate_deployment_environment() {
+    local stack_name="$1"
+    local region="${2:-$AWS_REGION}"
+    
+    log "Validating deployment environment for stack: $stack_name"
+    
+    # Check if resources already exist
+    if aws_resource_exists "instance" "$stack_name-instance" "$region"; then
+        warning "Instance with name $stack_name-instance already exists"
+        return 1
+    fi
+    
+    # Check AWS service availability
+    if ! aws ec2 describe-regions --region "$region" >/dev/null 2>&1; then
+        error "Region $region is not accessible or does not exist"
+        return 1
+    fi
+    
+    # Check quotas (simplified)
+    local running_instances
+    running_instances=$(aws ec2 describe-instances \
+        --filters "Name=instance-state-name,Values=running" \
+        --query 'length(Reservations[*].Instances[*])' \
+        --output text --region "$region" 2>/dev/null || echo "0")
+    
+    if [ "$running_instances" -gt 50 ]; then
+        warning "High number of running instances ($running_instances). Check EC2 limits."
+    fi
+    
+    success "Deployment environment validation passed"
     return 0
 }
 
@@ -411,32 +809,181 @@ create_efs_mount_target_for_az() {
 # SHARED INSTANCE MANAGEMENT
 # =============================================================================
 
+refresh_instance_public_ip() {
+    local instance_id="$1"
+    
+    if [ -z "$instance_id" ]; then
+        error "refresh_instance_public_ip requires instance_id parameter"
+        return 1
+    fi
+    
+    local public_ip
+    public_ip=$(aws ec2 describe-instances \
+        --instance-ids "$instance_id" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null)
+    
+    if [ "$public_ip" = "None" ] || [ -z "$public_ip" ] || [ "$public_ip" = "null" ]; then
+        return 1
+    fi
+    
+    echo "$public_ip"
+    return 0
+}
+
 wait_for_ssh_ready() {
     local instance_ip="$1"
     local key_file="$2"
-    local max_attempts="${3:-30}"
-    local sleep_interval="${4:-10}"
+    local max_attempts="${3:-60}"  # Default for non-GPU instances
+    local sleep_interval="${4:-30}"  # 30 seconds for better reliability
+    local instance_type="${5:-}"  # Instance type for GPU detection
+    local instance_id="${6:-}"  # Instance ID for IP refresh
     
     if [ -z "$instance_ip" ] || [ -z "$key_file" ]; then
         error "wait_for_ssh_ready requires instance_ip and key_file parameters"
         return 1
     fi
-
-    log "Waiting for SSH to be ready on $instance_ip..."
     
-    local attempt=1
-    while [ $attempt -le $max_attempts ]; do
-        if ssh -i "$key_file" -o ConnectTimeout=5 -o StrictHostKeyChecking=no ubuntu@"$instance_ip" "echo 'SSH is ready'" &> /dev/null; then
-            success "SSH is ready on $instance_ip"
-            return 0
+    # Validate key file exists and has correct permissions
+    if [ ! -f "$key_file" ]; then
+        error "SSH key file not found: $key_file"
+        return 1
+    fi
+    
+    if [ ! -r "$key_file" ]; then
+        error "SSH key file not readable: $key_file"
+        return 1
+    fi
+    
+    # Check key file permissions (should be 400 or 600) - cross-platform
+    local key_perms=""
+    if [ -f "$key_file" ]; then
+        # Use portable method for both Linux and macOS
+        if stat -c %a "$key_file" >/dev/null 2>&1; then
+            key_perms=$(stat -c %a "$key_file")
+        elif stat -f %Mp%Lp "$key_file" >/dev/null 2>&1; then
+            key_perms=$(stat -f %Mp%Lp "$key_file")
+        else
+            # Fallback for systems without stat
+            key_perms=$(ls -l "$key_file" | cut -c2-10)
         fi
         
-        info "SSH attempt $attempt/$max_attempts failed. Waiting ${sleep_interval}s..."
+        if [ "$key_perms" != "400" ] && [ "$key_perms" != "600" ] && [ -n "$key_perms" ]; then
+            warning "SSH key file has permissive permissions ($key_perms), consider: chmod 400 $key_file"
+        fi
+    fi
+    
+    # Basic IP validation
+    if [[ ! "$instance_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        error "Invalid IP address format: $instance_ip"
+        return 1
+    fi
+    
+    # Prevent excessive timeouts
+    if [ "$max_attempts" -gt 180 ]; then  # Cap at 90 minutes max
+        warning "Capping max_attempts at 180 (from $max_attempts) to prevent excessive waiting"
+        max_attempts=180
+    fi
+
+    # Detect GPU instances and extend timeout
+    local is_gpu_instance=false
+    if [[ "$instance_type" =~ ^(g[0-9]|p[0-9]|inf[0-9]) ]]; then
+        is_gpu_instance=true
+        # GPU instances need more time for driver installation and user data
+        if [ "$max_attempts" -eq 60 ]; then  # Only override if using default
+            max_attempts=90  # 45 minutes (90 * 30s)
+        fi
+        log "GPU instance detected ($instance_type) - extending SSH timeout to $((max_attempts * sleep_interval / 60)) minutes"
+        warning "GPU instances take 20-30+ minutes to boot due to NVIDIA driver installation and comprehensive setup"
+        info "You can monitor progress in the AWS EC2 Console under 'Instance Settings > Get System Log'"
+    fi
+
+    # Ensure we have the latest public IP before starting
+    local current_ip="$instance_ip"
+    if [ -n "$instance_id" ]; then
+        local refreshed_ip
+        refreshed_ip=$(refresh_instance_public_ip "$instance_id")
+        if [ $? -eq 0 ] && [ "$refreshed_ip" != "$current_ip" ]; then
+            warning "Public IP changed from $current_ip to $refreshed_ip - using latest IP"
+            current_ip="$refreshed_ip"
+        fi
+    fi
+    
+    log "Waiting for SSH to be ready on $current_ip..."
+    info "Using public IP: $current_ip (retrieved from AWS API)"
+    log "Maximum wait time: $((max_attempts * sleep_interval / 60)) minutes ($max_attempts attempts, ${sleep_interval}s intervals)"
+    
+    local attempt=1
+    local progress_interval=10  # Show progress every 10 attempts (5 minutes)
+    local last_troubleshoot_attempt=0
+    local last_ip_refresh=0
+    
+    while [ $attempt -le $max_attempts ]; do
+        # Refresh IP every 20 attempts (10 minutes) if instance_id is provided
+        if [ -n "$instance_id" ] && [ $((attempt - last_ip_refresh)) -ge 20 ]; then
+            local refreshed_ip
+            refreshed_ip=$(refresh_instance_public_ip "$instance_id")
+            if [ $? -eq 0 ] && [ "$refreshed_ip" != "$current_ip" ]; then
+                warning "Public IP changed from $current_ip to $refreshed_ip during SSH wait - switching to new IP"
+                current_ip="$refreshed_ip"
+            fi
+            last_ip_refresh=$attempt
+        fi
+        
+        # First check if SSH port is open
+        if nc -z -w5 "$current_ip" 22 2>/dev/null; then
+            # Then try SSH connection
+            if ssh -i "$key_file" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes ubuntu@"$current_ip" "echo 'SSH is ready'" &> /dev/null; then
+                success "SSH is ready on $current_ip (attempt $attempt/$max_attempts)"
+                return 0
+            fi
+        fi
+        
+        # Show progress every 10 attempts (5 minutes with 30s intervals)
+        if [ $((attempt % progress_interval)) -eq 0 ]; then
+            local elapsed_minutes=$((attempt * sleep_interval / 60))
+            local total_minutes=$((max_attempts * sleep_interval / 60))
+            local percent_complete=$((attempt * 100 / max_attempts))
+            info "SSH attempt $attempt/$max_attempts failed. Elapsed: ${elapsed_minutes}/${total_minutes} minutes (${percent_complete}% complete)"
+            info "Current target IP: $current_ip"
+            
+            # Show troubleshooting notes after 30 minutes for any instance type
+            if [ $elapsed_minutes -ge 30 ] && [ $((attempt - last_troubleshoot_attempt)) -ge 20 ]; then
+                last_troubleshoot_attempt=$attempt
+                warning "SSH wait has exceeded 30 minutes. Troubleshooting suggestions:"
+                warning "1. Check AWS EC2 Console: Instance Settings > Get System Log for boot progress"
+                warning "2. Check AWS EC2 Console: Monitoring tab for CPU/Network activity"
+                warning "3. Verify current public IP in AWS Console matches: $current_ip"
+                if [ "$is_gpu_instance" = true ]; then
+                    warning "4. GPU instances: User data installs NVIDIA drivers and Docker GPU support (can take 20-30+ minutes)"
+                    warning "5. GPU instances: Check CloudWatch logs in /aws/GeuseMaker/development for detailed progress"
+                else
+                    warning "4. Check CloudWatch logs for user data script progress"
+                fi
+                warning "6. Verify Security Group allows SSH (port 22) from your IP"
+                warning "7. Instance will continue waiting until ${total_minutes} minute timeout"
+            fi
+        else
+            info "SSH attempt $attempt/$max_attempts failed on $current_ip. Waiting ${sleep_interval}s..."
+        fi
+        
         sleep $sleep_interval
         ((attempt++))
     done
 
-    error "SSH failed to become ready after $max_attempts attempts"
+    error "SSH failed to become ready after $max_attempts attempts ($((max_attempts * sleep_interval / 60)) minutes)"
+    error "Final target IP was: $current_ip"
+    error "Instance may still be booting or have configuration issues. Check:"
+    error "1. AWS EC2 Console > Instance Settings > Get System Log"
+    error "2. AWS EC2 Console > Monitoring tab for activity"
+    error "3. Verify public IP in AWS Console matches script target: $current_ip"
+    if [ "$is_gpu_instance" = true ]; then
+        error "4. CloudWatch logs: /aws/GeuseMaker/development"
+        error "5. GPU driver installation can take 20-30+ minutes"
+    fi
+    error "6. Security group SSH access (port 22)"
+    warning "Instance is NOT being terminated - you can continue troubleshooting in AWS Console"
     return 1
 }
 
@@ -528,7 +1075,11 @@ stream_provisioning_logs() {
         # Also stream any existing docker-compose logs
         if [ -d \"/home/ubuntu/GeuseMaker\" ]; then
             cd /home/ubuntu/GeuseMaker
-            if command -v docker-compose >/dev/null 2>&1; then
+            if command -v docker compose >/dev/null 2>&1; then
+                docker compose logs --tail=50 -f 2>/dev/null | while read -r line; do
+                    echo \"$log_prefix [COMPOSE] \$line\"
+                done &
+            elif command -v docker-compose >/dev/null 2>&1; then
                 docker-compose logs --tail=50 -f 2>/dev/null | while read -r line; do
                     echo \"$log_prefix [COMPOSE] \$line\"
                 done &
@@ -569,22 +1120,29 @@ deploy_application_stack() {
         return 1
     fi
     
-    # Sanitize inputs to prevent command injection
-    stack_name=$(echo "$stack_name" | sed 's/[^a-zA-Z0-9-]//g')
-    environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9-]//g')
-    compose_file=$(basename "$compose_file" | sed 's/[^a-zA-Z0-9.-]//g')
-    
-    # Validate sanitized inputs
-    if [[ -z "$stack_name" ]] || [[ -z "$environment" ]] || [[ -z "$compose_file" ]]; then
-        error "Invalid input after sanitization"
+    # Validate and sanitize inputs to prevent command injection
+    # Validate stack name format first
+    if [[ ! "$stack_name" =~ ^[a-zA-Z][a-zA-Z0-9-]{0,31}$ ]]; then
+        error "Invalid stack name format. Must start with letter, contain only alphanumeric and hyphens, max 32 chars: '$stack_name'"
         return 1
     fi
     
-    # Validate stack name length
-    if [[ ${#stack_name} -gt 32 ]]; then
-        error "Stack name too long: '$stack_name'. Maximum 32 characters."
+    # Validate environment format
+    if [[ ! "$environment" =~ ^[a-zA-Z][a-zA-Z0-9-]{0,31}$ ]]; then
+        error "Invalid environment format. Must start with letter, contain only alphanumeric and hyphens, max 32 chars: '$environment'"
         return 1
     fi
+    
+    # Validate compose file name format
+    if [[ ! "$(basename "$compose_file")" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,63}\.(yml|yaml)$ ]]; then
+        error "Invalid compose file format. Must be a valid YAML file: '$compose_file'"
+        return 1
+    fi
+    
+    # Use validated inputs (no need for further sanitization)
+    local sanitized_stack_name="$stack_name"
+    local sanitized_environment="$environment"
+    local sanitized_compose_file="$(basename "$compose_file")"
 
     log "Deploying application stack to $instance_ip..."
     
@@ -612,12 +1170,12 @@ deploy_application_stack() {
         sleep 3  # Give user time to see the message
     fi
     
-    # Copy and run the fix script
+    # Copy and run the fix script using validated variables
     scp -i "$key_file" -o StrictHostKeyChecking=no \
         ./scripts/fix-deployment-issues.sh ubuntu@"$instance_ip":/tmp/
     
     ssh -i "$key_file" -o StrictHostKeyChecking=no ubuntu@"$instance_ip" \
-        "chmod +x /tmp/fix-deployment-issues.sh && sudo /tmp/fix-deployment-issues.sh '$stack_name' '$AWS_REGION' 2>&1 | tee -a /var/log/deployment.log"
+        "chmod +x /tmp/fix-deployment-issues.sh && sudo /tmp/fix-deployment-issues.sh '$sanitized_stack_name' '$AWS_REGION' 2>&1 | tee -a /var/log/deployment.log"
 
     # Generate environment configuration
     info "Generating environment configuration..."
@@ -625,10 +1183,10 @@ deploy_application_stack() {
 cd /home/ubuntu/GeuseMaker
 echo "\$(date): Starting environment configuration..." | tee -a /var/log/deployment.log
 chmod +x scripts/config-manager.sh
-echo "\$(date): Generating $environment configuration..." | tee -a /var/log/deployment.log
-./scripts/config-manager.sh generate $environment 2>&1 | tee -a /var/log/deployment.log
+echo "\$(date): Generating $sanitized_environment configuration..." | tee -a /var/log/deployment.log
+./scripts/config-manager.sh generate $sanitized_environment 2>&1 | tee -a /var/log/deployment.log
 echo "\$(date): Setting up environment variables..." | tee -a /var/log/deployment.log
-./scripts/config-manager.sh env $environment 2>&1 | tee -a /var/log/deployment.log
+./scripts/config-manager.sh env $sanitized_environment 2>&1 | tee -a /var/log/deployment.log
 echo "\$(date): Environment configuration completed" | tee -a /var/log/deployment.log
 EOF
 
@@ -675,27 +1233,32 @@ echo "\$(date): Installing missing dependencies..." | tee -a "\$DEPLOY_LOG"
 sudo apt-get update -qq 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Install docker-compose and other dependencies
-if ! command -v docker-compose >/dev/null 2>&1; then
-    echo "\$(date): Installing docker-compose..." | tee -a "\$DEPLOY_LOG"
-    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
+if ! command -v docker compose >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    echo "\$(date): Docker Compose not found, installation will be handled by user data script" | tee -a "\$DEPLOY_LOG"
 fi
 
 sudo apt-get install -y yq jq gettext-base 2>&1 | tee -a "\$DEPLOY_LOG"
 
-# Verify docker-compose installation
-if ! command -v docker-compose >/dev/null 2>&1; then
-    echo "\$(date): ERROR: docker-compose installation failed" | tee -a "\$DEPLOY_LOG"
+# Define docker compose command to use (check both)
+if command -v docker compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker compose"
+    echo "\$(date): Using docker compose plugin" | tee -a "\$DEPLOY_LOG"
+elif command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+    echo "\$(date): Using legacy docker-compose binary" | tee -a "\$DEPLOY_LOG"
+else
+    echo "\$(date): ERROR: Neither 'docker compose' nor 'docker-compose' command found" | tee -a "\$DEPLOY_LOG"
+    echo "\$(date): This should have been installed by the user data script" | tee -a "\$DEPLOY_LOG"
     exit 1
 fi
 
 # Pull latest images
 echo "\$(date): Pulling Docker images..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file pull 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Start services
 echo "\$(date): Starting Docker services..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file up -d 2>&1 | tee -a "\$DEPLOY_LOG"
 
 # Wait for services to stabilize
 echo "\$(date): Waiting for services to stabilize..." | tee -a "\$DEPLOY_LOG"
@@ -703,7 +1266,7 @@ sleep 30
 
 # Check service status
 echo "\$(date): Checking service status..." | tee -a "\$DEPLOY_LOG"
-docker-compose -f $compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
+\$DOCKER_COMPOSE_CMD -f $sanitized_compose_file ps 2>&1 | tee -a "\$DEPLOY_LOG"
 
 echo "\$(date): Application deployment completed" | tee -a "\$DEPLOY_LOG"
 EOF
@@ -735,15 +1298,27 @@ validate_service_endpoints() {
 
     # Default services if none provided
     if [ ${#services[@]} -eq 0 ]; then
-        services=("n8n:5678" "ollama:11434" "qdrant:6333")
+        services=("n8n:5678" "ollama:11434" "qdrant:6333" "crawl4ai:11235")
     fi
 
     log "Validating service endpoints..."
+    
+    # Define health check endpoints for each service (bash 3.x compatible)
+    get_health_endpoint() {
+        case "$1" in
+            "n8n") echo "/healthz" ;;
+            "ollama") echo "/api/tags" ;;
+            "qdrant") echo "/health" ;;
+            "crawl4ai") echo "/health" ;;
+            *) echo "/" ;;
+        esac
+    }
     
     local all_healthy=true
     for service_port in "${services[@]}"; do
         local service_name="${service_port%:*}"
         local port="${service_port#*:}"
+        local health_path="$(get_health_endpoint "$service_name")"
         
         info "Checking $service_name on port $port..."
         
@@ -751,19 +1326,24 @@ validate_service_endpoints() {
         local service_healthy=false
         
         while [ $attempt -le $max_attempts ]; do
-            if curl -s --connect-timeout 5 "http://$instance_ip:$port" > /dev/null; then
+            # Use the specific health endpoint for each service
+            if curl -s --connect-timeout 10 --max-time 15 "http://$instance_ip:$port$health_path" > /dev/null 2>&1; then
                 success "$service_name is healthy"
                 service_healthy=true
                 break
             fi
             
             warning "$service_name health check attempt $attempt/$max_attempts failed"
-            sleep $sleep_interval
+            
+            # Increase wait time for subsequent attempts
+            local current_sleep=$((sleep_interval + (attempt - 1) * 5))
+            info "Waiting ${current_sleep}s before next attempt..."
+            sleep $current_sleep
             ((attempt++))
         done
         
         if [ "$service_healthy" = false ]; then
-            error "$service_name failed health checks"
+            error "$service_name failed health checks after $max_attempts attempts"
             all_healthy=false
         fi
     done
@@ -772,7 +1352,7 @@ validate_service_endpoints() {
         success "All services are healthy"
         return 0
     else
-        warning "Some services failed health checks"
+        warning "Some services failed health checks. Check the logs and service status."
         return 1
     fi
 }
@@ -835,16 +1415,35 @@ cleanup_instances() {
     
     log "Cleaning up instances for stack: $stack_name"
     
-    local instance_ids
-    instance_ids=$(aws ec2 describe-instances \
+    # Try multiple tagging strategies to find instances
+    local instance_ids=""
+    
+    # Strategy 1: Look for Stack tag (new tagging)
+    local stack_tagged_instances
+    stack_tagged_instances=$(aws ec2 describe-instances \
         --filters "Name=tag:Stack,Values=$stack_name" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
         --query 'Reservations[].Instances[].InstanceId' \
         --output text \
-        --region "$AWS_REGION" 2>/dev/null)
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Strategy 2: Look for Name tag with stack pattern (legacy tagging)
+    local name_tagged_instances
+    name_tagged_instances=$(aws ec2 describe-instances \
+        --filters "Name=tag:Name,Values=${stack_name}-*" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Combine results and remove duplicates
+    instance_ids=$(echo "$stack_tagged_instances $name_tagged_instances" | tr ' ' '\n' | grep -v "^$" | sort -u | tr '\n' ' ' | xargs)
 
     if [ -n "$instance_ids" ] && [ "$instance_ids" != "None" ]; then
-        aws ec2 terminate-instances --instance-ids $instance_ids --region "$AWS_REGION" > /dev/null
-        success "Terminated instances: $instance_ids"
+        echo "$instance_ids" | tr ' ' '\n' | while read -r instance_id; do
+            if [ -n "$instance_id" ] && [ "$instance_id" != "None" ]; then
+                aws ec2 terminate-instances --instance-ids "$instance_id" --region "$AWS_REGION" > /dev/null 2>&1 || true
+                success "Terminated instance: $instance_id"
+            fi
+        done
     else
         info "No instances found for cleanup"
     fi
@@ -855,16 +1454,37 @@ cleanup_security_groups() {
     
     log "Cleaning up security groups for stack: $stack_name"
     
-    local sg_id
-    sg_id=$(aws ec2 describe-security-groups \
-        --filters "Name=group-name,Values=${stack_name}-sg" \
-        --query 'SecurityGroups[0].GroupId' \
+    # Try multiple strategies to find security groups
+    local sg_ids=""
+    
+    # Strategy 1: Look for Stack tag
+    local stack_tagged_sgs
+    stack_tagged_sgs=$(aws ec2 describe-security-groups \
+        --filters "Name=tag:Stack,Values=${stack_name}" \
+        --query 'SecurityGroups[].GroupId' \
         --output text \
-        --region "$AWS_REGION" 2>/dev/null)
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Strategy 2: Look for group name pattern
+    local name_pattern_sgs
+    name_pattern_sgs=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${stack_name}-*" \
+        --query 'SecurityGroups[].GroupId' \
+        --output text \
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+    
+    # Combine results and remove duplicates
+    sg_ids=$(echo "$stack_tagged_sgs $name_pattern_sgs" | tr ' ' '\n' | grep -v "^$" | sort -u | tr '\n' ' ' | xargs)
 
-    if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
-        aws ec2 delete-security-group --group-id "$sg_id" --region "$AWS_REGION" > /dev/null
-        success "Deleted security group: $sg_id"
+    if [ -n "$sg_ids" ] && [ "$sg_ids" != "None" ]; then
+        echo "$sg_ids" | tr ' ' '\n' | while read -r sg_id; do
+            if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                # Wait a bit for instances to be terminated first
+                sleep 5
+                aws ec2 delete-security-group --group-id "$sg_id" --region "$AWS_REGION" > /dev/null 2>&1 || true
+                success "Deleted security group: $sg_id"
+            fi
+        done
     else
         info "No security groups found for cleanup"
     fi
@@ -944,8 +1564,8 @@ create_instance_alarms() {
         --threshold 80 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # High memory alarm (if CloudWatch agent is installed)
     aws cloudwatch put-metric-alarm \
@@ -958,8 +1578,8 @@ create_instance_alarms() {
         --threshold 90 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # Instance status check alarm
     aws cloudwatch put-metric-alarm \
@@ -972,8 +1592,8 @@ create_instance_alarms() {
         --threshold 1 \
         --comparison-operator "GreaterThanOrEqualToThreshold" \
         --evaluation-periods 1 \
-        --dimensions Name=InstanceId,Value="$instance_id" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=InstanceId,Value=${instance_id}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 }
 
 create_alb_alarms() {
@@ -995,8 +1615,8 @@ create_alb_alarms() {
         --threshold 5 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=LoadBalancer,Value="$alb_name" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=LoadBalancer,Value=${alb_name}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 
     # High error rate alarm
     aws cloudwatch put-metric-alarm \
@@ -1009,13 +1629,14 @@ create_alb_alarms() {
         --threshold 10 \
         --comparison-operator "GreaterThanThreshold" \
         --evaluation-periods 2 \
-        --dimensions Name=LoadBalancer,Value="$alb_name" \
-        --region "$AWS_REGION" || true
+        --dimensions "Name=LoadBalancer,Value=${alb_name}" \
+        --region "$AWS_REGION" 2>/dev/null || true
 }
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 generate_user_data_script() {
     local stack_name="$1"
@@ -1089,28 +1710,206 @@ usermod -aG docker ubuntu
 
 # Install Docker Compose
 echo "\$(date): Installing Docker Compose..."
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
 
-# Optimize Docker daemon for limited disk space
+# Define Docker Compose installation functions
+install_docker_compose() {
+    # Detect distribution
+    local distro=""
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        distro="\$ID"
+    fi
+    
+    echo "\$(date): Detecting distribution: \$distro"
+    
+    # Check if Docker Compose is already installed
+    if command -v docker compose >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1; then
+        echo "\$(date): Docker Compose already installed"
+        # Verify it works
+        if docker compose version >/dev/null 2>&1; then
+            echo "\$(date): Docker Compose plugin verified working"
+            return 0
+        elif docker-compose version >/dev/null 2>&1; then
+            echo "\$(date): Legacy docker-compose binary found, installing plugin version..."
+        else
+            echo "\$(date): Docker Compose found but not working, reinstalling..."
+        fi
+    fi
+    
+    # Install Docker Compose plugin (preferred method)
+    echo "\$(date): Installing Docker Compose plugin..."
+    
+    case "\$distro" in
+        ubuntu|debian)
+            # Install Docker Compose plugin via apt (Ubuntu 20.04+ and Debian 11+)
+            echo "\$(date): Attempting apt package manager installation..."
+            wait_for_apt_lock
+            if apt-get update -qq && apt-get install -y docker-compose-plugin; then
+                echo "\$(date): Docker Compose plugin installed via apt"
+                return 0
+            else
+                echo "\$(date): Package manager installation failed, trying manual download..."
+                install_compose_manual
+            fi
+            ;;
+        amzn|rhel|centos|fedora)
+            # For Amazon Linux and RHEL-based systems, use manual installation
+            echo "\$(date): Installing via manual download for RHEL-based system..."
+            install_compose_manual
+            ;;
+        *)
+            echo "\$(date): Unknown distribution, using manual installation..."
+            install_compose_manual
+            ;;
+    esac
+    
+    # Verify installation
+    verify_docker_compose_installation
+}
+
+install_compose_manual() {
+    local compose_version
+    # Use portable method instead of Perl regex
+    compose_version=\$(curl -s --connect-timeout 10 --retry 3 https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/' 2>/dev/null)
+    
+    if [ -z "\$compose_version" ]; then
+        echo "\$(date): Could not determine latest version, using fallback..."
+        compose_version="v2.24.5"
+    fi
+    
+    echo "\$(date): Installing Docker Compose \$compose_version manually..."
+    
+    # Create the Docker CLI plugins directory
+    sudo mkdir -p /usr/local/lib/docker/cli-plugins
+    
+    # Download Docker Compose plugin with proper architecture detection
+    local arch
+    arch=\$(uname -m)
+    case \$arch in
+        x86_64) arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        arm64) arch="aarch64" ;;
+        *) echo "\$(date): Unsupported architecture: \$arch"; return 1 ;;
+    esac
+    
+    local compose_url="https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-linux-\${arch}"
+    
+    echo "\$(date): Downloading from: \$compose_url"
+    if sudo curl -L --connect-timeout 30 --retry 3 "\$compose_url" -o /usr/local/lib/docker/cli-plugins/docker-compose; then
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+        
+        # Also create a symlink for backwards compatibility
+        sudo ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+        
+        echo "\$(date): Docker Compose plugin installed successfully"
+        return 0
+    else
+        echo "\$(date): Failed to download Docker Compose, trying fallback method..."
+        # Fallback to older installation method
+        if sudo curl -L --connect-timeout 30 --retry 3 "https://github.com/docker/compose/releases/download/\${compose_version}/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose; then
+            sudo chmod +x /usr/local/bin/docker-compose
+            echo "\$(date): Fallback Docker Compose installation completed"
+            return 0
+        else
+            echo "\$(date): ERROR: All Docker Compose installation methods failed"
+            return 1
+        fi
+    fi
+}
+
+verify_docker_compose_installation() {
+    echo "\$(date): Verifying Docker Compose installation..."
+    
+    # Test Docker Compose plugin first (preferred)
+    if docker compose version >/dev/null 2>&1; then
+        local version
+        version=\$(docker compose version 2>/dev/null | head -1)
+        echo "\$(date): Docker Compose plugin verified: \$version"
+        return 0
+    fi
+    
+    # Test legacy docker-compose binary
+    if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
+        local version
+        version=\$(docker-compose version 2>/dev/null | head -1)
+        echo "\$(date): Legacy docker-compose verified: \$version"
+        return 0
+    fi
+    
+    echo "\$(date): ERROR: Neither 'docker compose' nor 'docker-compose' command found or working"
+    return 1
+}
+
+# Install Docker Compose
+if ! install_docker_compose; then
+    echo "\$(date): ERROR: Docker Compose installation failed"
+    exit 1
+fi
+
+# Optimize Docker daemon for limited disk space with improved configuration
 echo "\$(date): Optimizing Docker configuration..."
 mkdir -p /etc/docker
+
+# Create enhanced Docker daemon configuration
 cat > /etc/docker/daemon.json << 'DOCKEREOF'
 {
     "log-driver": "json-file",
     "log-opts": {
         "max-size": "10m",
-        "max-file": "3"
+        "max-file": "5",
+        "compress": "true"
     },
     "storage-driver": "overlay2",
     "storage-opts": [
-        "overlay2.size=25G"
+        "overlay2.size=30G"
     ],
-    "max-concurrent-downloads": 2,
-    "max-concurrent-uploads": 2,
-    "live-restore": true
+    "max-concurrent-downloads": 3,
+    "max-concurrent-uploads": 3,
+    "default-ulimits": {
+        "nofile": {
+            "Name": "nofile",
+            "Hard": 64000,
+            "Soft": 64000
+        }
+    },
+    "live-restore": true,
+    "userland-proxy": false,
+    "experimental": false,
+    "features": {
+        "buildkit": true
+    }
 }
 DOCKEREOF
+
+# Reload systemd and restart Docker with proper error handling
+echo "\$(date): Restarting Docker with new configuration..."
+systemctl daemon-reload
+if ! systemctl restart docker; then
+    echo "\$(date): Docker restart failed, attempting recovery..."
+    # Try to recover by resetting to default configuration
+    cp /etc/docker/daemon.json /etc/docker/daemon.json.backup
+    echo '{}' > /etc/docker/daemon.json
+    systemctl restart docker
+    sleep 5
+    # Restore configuration if basic restart worked
+    if docker info >/dev/null 2>&1; then
+        mv /etc/docker/daemon.json.backup /etc/docker/daemon.json
+        systemctl restart docker
+    fi
+fi
+
+# Wait for Docker to be ready
+echo "\$(date): Waiting for Docker daemon to be ready..."
+for i in \$(seq 1 30); do
+    if docker info >/dev/null 2>&1; then
+        echo "\$(date): Docker daemon is ready"
+        break
+    fi
+    if [ \$i -eq 30 ]; then
+        echo "\$(date): WARNING: Docker daemon failed to become ready"
+    fi
+    sleep 2
+done
 
 # Install NVIDIA Container Toolkit (for GPU instances)
 if lspci | grep -i nvidia; then

@@ -1,4 +1,4 @@
-# 🚀 AI SelfHost Kit - GPU-Optimized AWS Deployment
+# GeuseMaker
 
 > Enterprise-ready AI infrastructure platform with automated deployment, monitoring, and scaling capabilities.
 
@@ -57,6 +57,7 @@ make deploy-simple STACK_NAME=my-dev-stack
 ### ⚙️ **Operations**
 - [**Monitoring**](docs/reference/api/monitoring.md) - System monitoring and observability
 - [**Backup & Recovery**](docs/setup/troubleshooting.md) - Data protection and disaster recovery procedures
+- [**EFS Cleanup Guide**](docs/efs-cleanup-guide.md) - EFS file system cleanup and management
 
 ## 🌟 Core Features
 
@@ -66,7 +67,7 @@ make deploy-simple STACK_NAME=my-dev-stack
 | **Infrastructure as Code** | Terraform and shell script automation | [Terraform Config](terraform/main.tf) |
 | **AI Services** | n8n, Ollama, Qdrant, Crawl4AI pre-configured | [API Reference](docs/reference/api/) |
 | **Monitoring Stack** | Docker logging and health checks | [Monitoring Guide](docs/reference/api/monitoring.md) |
-| **Cost Optimization** | Intelligent instance selection and scaling | [Cost Scripts](scripts/cost-optimization.py) |
+| **Cost Optimization** | Intelligent instance selection and scaling | [AWS Cost Explorer](https://console.aws.amazon.com/cost-explorer/) |
 | **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Guide](docs/security-guide.md) |
 
 ## 🛠️ Available Commands
@@ -83,6 +84,8 @@ make deploy-simple STACK_NAME=my-dev-stack
 | `make test` | Run all tests |
 | `make status STACK_NAME=name` | Check deployment status (requires STACK_NAME) |
 | `make destroy STACK_NAME=name` | Destroy infrastructure (requires STACK_NAME) |
+| `./scripts/cleanup-consolidated.sh --mode failed-deployments` | Cleanup failed deployment EFS file systems |
+| `./scripts/cleanup-consolidated.sh --mode efs "pattern"` | Cleanup EFS file systems matching pattern |
 
 [**→ Complete CLI Reference**](docs/reference/cli/)
 
