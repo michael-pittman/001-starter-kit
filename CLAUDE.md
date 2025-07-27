@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Current Branch**: `GeuseMaker` (feature branch)  
 **Main Branch**: `main` (for pull requests)  
-**Recent Changes**: Enhanced AWS deployment scripts, test runner improvements, specialized agent integration
+**Recent Changes**: Modular deployment architecture, enhanced test runner, specialized agent integration
 
 ### Branch Workflow
 - Work on feature branch `GeuseMaker`
@@ -44,7 +44,7 @@ make destroy STACK_NAME=test        # Clean up test resources
 
 ### Single Test Command Patterns
 ```bash
-# Test individual functions without full deployment
+# Test individual features without full deployment
 ./test-function-logic.sh             # Test specific function logic
 ./test-function-issues.sh            # Test issue handling functions
 ./test-spot-alb-commands.sh          # Test spot instance + ALB commands
@@ -53,13 +53,29 @@ make destroy STACK_NAME=test        # Clean up test resources
 ./tests/test-compose-validation.sh   # Docker Compose validation
 ./tests/test-config-integration.sh   # Configuration integration tests
 ./tests/test-docker-compose.sh       # Full Docker Compose testing
+./tests/test-modular-system.sh       # Test modular architecture components
+
+# Run single test categories
+./tools/test-runner.sh unit          # Just unit tests
+./tools/test-runner.sh security      # Just security tests
+./tools/test-runner.sh deployment    # Just deployment tests
 ```
 
 ### Architecture Overview
 - **Shared Libraries**: `/lib/*.sh` - Common functions sourced by all scripts
   - Always source `aws-deployment-common.sh` and `error-handling.sh` in deployment scripts
-- **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main orchestrators with unified deployment
+- **Modular Components**: `/lib/modules/` - New modular architecture for cleaner separation
+  - `core/` - Error handling, registry management
+  - `config/` - Variable management
+  - `infrastructure/` - VPC, security groups
+  - `instances/` - AMI selection, instance launching
+  - `deployment/` - User data generation
+  - `monitoring/` - Health checks
+  - `cleanup/` - Resource cleanup
+- **Deployment Scripts**: `/scripts/aws-deployment-*.sh` - Main orchestrators
+  - **NEW**: `aws-deployment-modular.sh` - Modular deployment using new architecture
 - **Testing Framework**: `/tests/` (shell-based) + `/tools/test-runner.sh` (comprehensive orchestration)
+  - **NEW**: `test-modular-system.sh` - Tests for modular architecture
 - **Configuration**: `/config/` - Environment settings and version locks
 
 ## Project Overview
@@ -175,6 +191,13 @@ docker compose -f docker-compose.gpu-optimized.yml up
 # Options: -t spot|ondemand|simple, -e development|staging|production
 ```
 
+**Modular Deployment (NEW):**
+```bash
+./scripts/aws-deployment-modular.sh [OPTIONS] STACK_NAME
+# Cleaner architecture with modular components
+# Options: -t TYPE, -r REGION, -i INSTANCE_TYPE, -e ENVIRONMENT
+```
+
 **Specialized Scripts:**
 ```bash
 ./scripts/aws-deployment.sh --cross-region     # Intelligent cross-region analysis
@@ -263,9 +286,18 @@ Test deployment logic without AWS costs using validation scripts:
 - `./scripts/simple-demo.sh` - Basic intelligent selection demo
 - `./scripts/test-intelligent-selection.sh` - Comprehensive testing with cross-region analysis
 - `./tests/test-alb-cloudfront.sh` - ALB/CloudFront functionality validation
+- `./tests/test-modular-system.sh` - Tests for new modular architecture
 - **Shell Test Framework**: bash-based unit and integration tests in `/tests/`
 - **Configuration Testing**: Docker and image validation scripts
 - **Security Testing**: Automated security validation with `/tests/test-security-validation.sh`
+
+### Modular Architecture (NEW)
+The project is transitioning to a cleaner modular architecture:
+- **Module Registry**: Central registry for managing module dependencies
+- **Variable Management**: Centralized variable storage and retrieval
+- **Function Isolation**: Each module focuses on a single responsibility
+- **Compatibility**: Modules work alongside existing scripts during transition
+- **Testing**: Comprehensive tests ensure module compatibility
 
 ### Development Workflow
 The recommended development workflow follows this pattern:
@@ -310,6 +342,7 @@ The Terraform configuration (`terraform/main.tf`) provides:
 
 ### Deployment Scripts
 - `aws-deployment-unified.sh`: **Main orchestrator** supporting spot/ondemand/simple deployment types
+- `aws-deployment-modular.sh`: **NEW** Modular deployment with cleaner architecture
 - `aws-deployment.sh`: Intelligent deployment with auto-selection and cross-region analysis
 - `aws-deployment-simple.sh`: Simple on-demand deployment
 - `aws-deployment-ondemand.sh`: Full on-demand deployment with guaranteed instances
@@ -591,6 +624,19 @@ make test                                    # Run all tests via test-runner.sh
 4. **MUST** run `make security-check` before production deployments
 5. **MUST** respect AWS API rate limits - use cached pricing when possible
 
+### Code Quality Checks
+After completing any code changes, run these commands to ensure quality:
+```bash
+make lint                            # Run shellcheck and other linters
+make test                            # Run comprehensive test suite
+./scripts/security-validation.sh     # Validate security configurations
+```
+
+Since this is a shell-based project, there are no npm/yarn typecheck commands. The project uses:
+- **ShellCheck** for shell script validation (via `make lint`)
+- **Security validation scripts** for configuration checking
+- **Test suite** for functional validation
+
 ### Specialized Agent Usage Patterns
 **When to Use Each Agent Proactively:**
 - **ec2-provisioning-specialist**: When encountering EC2 launch failures, spot instance capacity issues, AMI availability problems, or service quota limits during AWS deployments
@@ -623,10 +669,19 @@ make test                                    # Run all tests via test-runner.sh
   ├── simple-instance.sh       # Simple deployment specific functions
   ├── aws-config.sh           # Configuration defaults and environment
   ├── config-management.sh    # Configuration generation and validation
-  └── docker-compose-installer.sh # Docker Compose installation utilities
+  ├── docker-compose-installer.sh # Docker Compose installation utilities
+  └── modules/                # NEW modular architecture components
+      ├── core/              # Core functionality (errors.sh, registry.sh)
+      ├── config/            # Configuration management (variables.sh)
+      ├── infrastructure/    # Infrastructure setup (vpc.sh, security.sh)
+      ├── instances/         # Instance management (ami.sh, launch.sh)
+      ├── deployment/        # Deployment logic (userdata.sh)
+      ├── monitoring/        # Health monitoring (health.sh)
+      └── cleanup/           # Resource cleanup (resources.sh)
 
 /scripts/                      # Main deployment orchestrators
   ├── aws-deployment-unified.sh # Main orchestrator (recommended)
+  ├── aws-deployment-modular.sh # NEW modular deployment orchestrator
   ├── aws-deployment-simple.sh # Simple on-demand deployment
   ├── aws-deployment-ondemand.sh # Full on-demand deployment
   ├── simple-demo.sh           # Test deployment logic without AWS costs
@@ -647,6 +702,7 @@ make test                                    # Run all tests via test-runner.sh
 /tests/                        # Testing framework
   ├── lib/                    # Shell test libraries and framework
   ├── test-*.sh              # Shell-based validation scripts
+  ├── test-modular-system.sh  # NEW tests for modular architecture
   └── unit/                   # Python unit tests (if present)
 
 /config/                       # Environment settings and version locks
