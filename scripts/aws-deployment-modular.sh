@@ -26,7 +26,7 @@ usage() {
     cat <<EOF
 Usage: $0 [OPTIONS] STACK_NAME
 
-Modular AWS deployment orchestrator for AI Starter Kit
+Modular AWS deployment orchestrator for AI Starter Kit with comprehensive infrastructure
 
 Options:
     -t, --type TYPE           Deployment type: spot, ondemand, simple (default: spot)
@@ -35,15 +35,35 @@ Options:
     -k, --key-name NAME       SSH key name (default: STACK_NAME-key)
     -s, --volume-size SIZE    Volume size in GB (default: 100)
     -e, --environment ENV     Environment: development, staging, production (default: production)
+    
+    Infrastructure Options:
+    --multi-az                Enable multi-AZ deployment with redundant subnets
+    --private-subnets         Create private subnets (requires --nat-gateway for outbound)
+    --nat-gateway             Create NAT Gateway for private subnet internet access
+    --no-efs                  Disable EFS persistent storage (enabled by default)
+    --alb                     Create Application Load Balancer (future enhancement)
+    
+    Deployment Options:
     --validate-only           Validate configuration without deploying
     --cleanup                 Clean up existing resources before deploying
     --no-cleanup-on-failure   Don't clean up resources if deployment fails
+    --dry-run                 Show what would be deployed without creating resources
+    
+    Help:
     -h, --help               Show this help message
 
 Examples:
+    # Basic deployment
     $0 my-stack
-    $0 --type ondemand --region us-west-2 my-stack
-    $0 --validate-only my-stack
+    
+    # Production deployment with multi-AZ and private subnets
+    $0 --type ondemand --multi-az --private-subnets --nat-gateway prod-stack
+    
+    # Development deployment without EFS
+    $0 --type simple --no-efs --environment development dev-stack
+    
+    # Validation only
+    $0 --validate-only --multi-az test-stack
 
 EOF
     exit "${1:-0}"
@@ -81,6 +101,26 @@ parse_arguments() {
                 set_variable "ENVIRONMENT" "$2"
                 shift 2
                 ;;
+            --multi-az)
+                ENABLE_MULTI_AZ="true"
+                shift
+                ;;
+            --private-subnets)
+                ENABLE_PRIVATE_SUBNETS="true"
+                shift
+                ;;
+            --nat-gateway)
+                ENABLE_NAT_GATEWAY="true"
+                shift
+                ;;
+            --no-efs)
+                ENABLE_EFS="false"
+                shift
+                ;;
+            --alb)
+                ENABLE_ALB="true"
+                shift
+                ;;
             --validate-only)
                 set_variable "VALIDATE_ONLY" "true"
                 shift
@@ -91,6 +131,10 @@ parse_arguments() {
                 ;;
             --no-cleanup-on-failure)
                 set_variable "CLEANUP_ON_FAILURE" "false"
+                shift
+                ;;
+            --dry-run)
+                set_variable "DRY_RUN" "true"
                 shift
                 ;;
             -h|--help)
@@ -152,42 +196,119 @@ run_deployment() {
 # =============================================================================
 
 setup_infrastructure() {
-    echo "Setting up infrastructure..."
+    echo "Setting up comprehensive infrastructure..."
     
-    # Source infrastructure modules
+    # Source all infrastructure modules
     source "$PROJECT_ROOT/lib/modules/infrastructure/vpc.sh"
     source "$PROJECT_ROOT/lib/modules/infrastructure/security.sh"
+    source "$PROJECT_ROOT/lib/modules/infrastructure/iam.sh"
+    source "$PROJECT_ROOT/lib/modules/infrastructure/efs.sh"
     
-    # Setup network
+    # Get configuration variables
+    local stack_name="$(get_variable STACK_NAME)"
+    local deployment_type="$(get_variable DEPLOYMENT_TYPE)"
+    local enable_multi_az="${ENABLE_MULTI_AZ:-false}"
+    local enable_efs="${ENABLE_EFS:-true}"
+    local enable_private_subnets="${ENABLE_PRIVATE_SUBNETS:-false}"
+    local enable_nat_gateway="${ENABLE_NAT_GATEWAY:-false}"
+    
+    echo "Configuration: Multi-AZ=$enable_multi_az, EFS=$enable_efs, Private Subnets=$enable_private_subnets" >&2
+    
+    # Setup network infrastructure based on deployment type
     local network_info
-    network_info=$(setup_network_infrastructure) || {
-        echo "ERROR: Failed to setup network infrastructure" >&2
-        return 1
-    }
+    if [ "$enable_multi_az" = "true" ] || [ "$deployment_type" = "production" ]; then
+        echo "Setting up enterprise multi-AZ network..." >&2
+        network_info=$(setup_enterprise_network_infrastructure "$stack_name" "10.0.0.0/16" "$enable_private_subnets" "$enable_nat_gateway") || {
+            echo "ERROR: Failed to setup enterprise network infrastructure" >&2
+            return 1
+        }
+    else
+        echo "Setting up basic network..." >&2
+        network_info=$(setup_network_infrastructure "$stack_name") || {
+            echo "ERROR: Failed to setup basic network infrastructure" >&2
+            return 1
+        }
+    fi
     
     # Extract network details
     VPC_ID=$(echo "$network_info" | jq -r '.vpc_id')
-    SUBNET_ID=$(echo "$network_info" | jq -r '.subnet_id')
+    if [ "$enable_multi_az" = "true" ]; then
+        # Get all public subnets for multi-AZ
+        PUBLIC_SUBNETS_JSON=$(echo "$network_info" | jq -r '.public_subnets')
+        SUBNET_ID=$(echo "$PUBLIC_SUBNETS_JSON" | jq -r '.[0].id')  # First subnet for backward compatibility
+        PRIVATE_SUBNETS_JSON=$(echo "$network_info" | jq -r '.private_subnets // []')
+    else
+        SUBNET_ID=$(echo "$network_info" | jq -r '.subnet_id')
+        PUBLIC_SUBNETS_JSON="[{\"id\": \"$SUBNET_ID\", \"az\": \"$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID --query 'Subnets[0].AvailabilityZone' --output text)\", \"cidr\": \"$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID --query 'Subnets[0].CidrBlock' --output text)\"}]"
+        PRIVATE_SUBNETS_JSON="[]"
+    fi
     
-    # Create security group
-    SECURITY_GROUP_ID=$(create_security_group "$VPC_ID") || {
-        echo "ERROR: Failed to create security group" >&2
+    echo "VPC: $VPC_ID, Primary Subnet: $SUBNET_ID" >&2
+    
+    # Create comprehensive security groups
+    local security_groups_info
+    security_groups_info=$(create_comprehensive_security_groups "$VPC_ID" "$stack_name") || {
+        echo "ERROR: Failed to create security groups" >&2
         return 1
     }
     
-    # Setup IAM role
-    IAM_ROLE_NAME=$(create_iam_role) || {
-        echo "ERROR: Failed to create IAM role" >&2
+    # Extract security group IDs
+    SECURITY_GROUP_ID=$(echo "$security_groups_info" | jq -r '.application_sg_id')
+    ALB_SECURITY_GROUP_ID=$(echo "$security_groups_info" | jq -r '.alb_sg_id')
+    EFS_SECURITY_GROUP_ID=$(echo "$security_groups_info" | jq -r '.efs_sg_id')
+    
+    echo "Security Groups - App: $SECURITY_GROUP_ID, ALB: $ALB_SECURITY_GROUP_ID, EFS: $EFS_SECURITY_GROUP_ID" >&2
+    
+    # Setup comprehensive IAM
+    local iam_info
+    iam_info=$(setup_comprehensive_iam "$stack_name" "$enable_efs" "true" "false") || {
+        echo "ERROR: Failed to setup IAM" >&2
         return 1
     }
+    
+    IAM_ROLE_NAME=$(echo "$iam_info" | jq -r '.role_name')
+    IAM_INSTANCE_PROFILE=$(echo "$iam_info" | jq -r '.instance_profile')
+    
+    echo "IAM Role: $IAM_ROLE_NAME, Instance Profile: $IAM_INSTANCE_PROFILE" >&2
+    
+    # Setup EFS if enabled
+    if [ "$enable_efs" = "true" ]; then
+        echo "Setting up EFS infrastructure..." >&2
+        local efs_info
+        efs_info=$(setup_efs_infrastructure "$stack_name" "$PUBLIC_SUBNETS_JSON" "$EFS_SECURITY_GROUP_ID") || {
+            echo "WARNING: Failed to setup EFS, continuing without persistent storage" >&2
+            EFS_ID=""
+            EFS_DNS=""
+        }
+        
+        if [ -n "$efs_info" ]; then
+            EFS_ID=$(echo "$efs_info" | jq -r '.efs_id')
+            EFS_DNS=$(echo "$efs_info" | jq -r '.efs_dns')
+            echo "EFS: $EFS_ID ($EFS_DNS)" >&2
+        fi
+    fi
     
     # Ensure key pair
-    KEY_NAME=$(ensure_key_pair "$(get_variable KEY_NAME)") || {
+    local key_name="$(get_variable KEY_NAME)"
+    if [ -z "$key_name" ]; then
+        key_name="${stack_name}-key"
+        set_variable "KEY_NAME" "$key_name"
+    fi
+    
+    KEY_NAME=$(ensure_key_pair "$key_name") || {
         echo "ERROR: Failed to ensure key pair" >&2
         return 1
     }
     
-    echo "Infrastructure setup complete"
+    echo "Key Pair: $KEY_NAME" >&2
+    
+    # Export variables for use in other stages
+    export VPC_ID SUBNET_ID PUBLIC_SUBNETS_JSON PRIVATE_SUBNETS_JSON
+    export SECURITY_GROUP_ID ALB_SECURITY_GROUP_ID EFS_SECURITY_GROUP_ID
+    export IAM_ROLE_NAME IAM_INSTANCE_PROFILE KEY_NAME
+    export EFS_ID EFS_DNS
+    
+    echo "Comprehensive infrastructure setup complete" >&2
     return 0
 }
 
@@ -209,17 +330,20 @@ launch_deployment_instance() {
         return 1
     }
     
-    # Build launch configuration
+    # Build enhanced launch configuration
     local launch_config=$(cat <<EOF
 {
     "instance_type": "$(get_variable INSTANCE_TYPE)",
     "key_name": "$KEY_NAME",
     "security_group_id": "$SECURITY_GROUP_ID",
     "subnet_id": "$SUBNET_ID",
-    "iam_instance_profile": "${IAM_ROLE_NAME}-profile",
+    "iam_instance_profile": "$IAM_INSTANCE_PROFILE",
     "volume_size": $(get_variable VOLUME_SIZE),
     "user_data": "$user_data",
-    "stack_name": "$(get_variable STACK_NAME)"
+    "stack_name": "$(get_variable STACK_NAME)",
+    "efs_id": "${EFS_ID:-}",
+    "efs_dns": "${EFS_DNS:-}",
+    "vpc_id": "$VPC_ID"
 }
 EOF
 )
@@ -290,20 +414,37 @@ print_deployment_summary() {
     cat <<EOF
 
 ================================================================================
-DEPLOYMENT SUMMARY
+COMPREHENSIVE DEPLOYMENT SUMMARY
 ================================================================================
 Stack Name:     $(get_variable STACK_NAME)
-Instance ID:    $INSTANCE_ID
-Instance Type:  $(get_variable INSTANCE_TYPE)
-Public IP:      $public_ip
+Deployment Type: $(get_variable DEPLOYMENT_TYPE)
 Region:         $(get_variable AWS_REGION)
 
+Infrastructure:
+- VPC ID:       ${VPC_ID:-N/A}
+- Subnet ID:    ${SUBNET_ID:-N/A}
+- Security Groups:
+  * Application: ${SECURITY_GROUP_ID:-N/A}
+  * ALB:         ${ALB_SECURITY_GROUP_ID:-N/A}
+  * EFS:         ${EFS_SECURITY_GROUP_ID:-N/A}
+- IAM Role:     ${IAM_ROLE_NAME:-N/A}
+- Key Pair:     ${KEY_NAME:-N/A}
+
+Compute:
+- Instance ID:  $INSTANCE_ID
+- Instance Type: $(get_variable INSTANCE_TYPE)
+- Public IP:    $public_ip
+
+Storage:
+- EFS ID:       ${EFS_ID:-Not configured}
+- EFS DNS:      ${EFS_DNS:-Not configured}
+
 Service URLs:
-- n8n:          http://${public_ip}:5678
-- Qdrant:       http://${public_ip}:6333
-- Ollama:       http://${public_ip}:11434
-- Crawl4AI:     http://${public_ip}:11235
-- Health Check: http://${public_ip}:8080/health
+- n8n Workflow UI:    http://${public_ip}:5678
+- Qdrant Vector DB:   http://${public_ip}:6333
+- Ollama LLM API:     http://${public_ip}:11434
+- Crawl4AI Scraper:   http://${public_ip}:11235
+- Health Check:       http://${public_ip}:8080/health
 
 SSH Access:
 ssh -i ~/.ssh/${KEY_NAME}.pem ubuntu@${public_ip}

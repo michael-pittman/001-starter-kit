@@ -103,30 +103,8 @@ _create_public_subnet_impl() {
     
     echo "Creating public subnet in AZ: $availability_zone" >&2
     
-    # Create subnet
-    local subnet_id
-    subnet_id=$(aws ec2 create-subnet \
-        --vpc-id "$vpc_id" \
-        --cidr-block "$cidr_block" \
-        --availability-zone "$availability_zone" \
-        --tag-specifications "$(tags_to_tag_spec "$(generate_tags "$stack_name" '{"Type": "public"}')" "subnet")" \
-        --query 'Subnet.SubnetId' \
-        --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create subnet"
-    }
-    
-    # Enable auto-assign public IP
-    aws ec2 modify-subnet-attribute \
-        --subnet-id "$subnet_id" \
-        --map-public-ip-on-launch || {
-        throw_error $ERROR_AWS_API "Failed to enable public IP auto-assignment"
-    }
-    
-    # Register subnet
-    register_resource "subnets" "$subnet_id" \
-        "{\"vpc\": \"$vpc_id\", \"az\": \"$availability_zone\", \"cidr\": \"$cidr_block\"}"
-    
-    echo "$subnet_id"
+    # Use the new create_subnet function
+    create_subnet "$vpc_id" "$availability_zone" "$cidr_block" "$stack_name" "public"
 }
 
 # Get available AZ

@@ -344,10 +344,14 @@ register_cleanup_handler() {
 execute_cleanup_handlers() {
     echo "Executing cleanup handlers..." >&2
     
-    for handler in "${CLEANUP_HANDLERS[@]}"; do
-        echo "Running cleanup: $handler" >&2
-        $handler || echo "Cleanup handler failed: $handler" >&2
-    done
+    # Check if array has elements to avoid bash 3.x issues with empty arrays
+    if [ ${#CLEANUP_HANDLERS[@]} -gt 0 ]; then
+        for handler in "${CLEANUP_HANDLERS[@]}"; do
+            echo "Running cleanup: $handler" >&2
+            $handler || echo "Cleanup handler failed: $handler" >&2
+        done
+    fi
+    return 0
 }
 
 # Initialize cleanup handlers array

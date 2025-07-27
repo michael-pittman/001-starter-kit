@@ -1,15 +1,15 @@
 # GeuseMaker
 
-> Enterprise-ready AI infrastructure platform with automated deployment, monitoring, and scaling capabilities.
+> Enterprise-ready AI infrastructure platform with modular deployment, intelligent cost optimization, and comprehensive monitoring.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://www.docker.com/)
-[![Terraform](https://img.shields.io/badge/Terraform-Ready-purple.svg)](https://www.terraform.io/)
 [![AWS](https://img.shields.io/badge/AWS-Optimized-orange.svg)](https://aws.amazon.com/)
+[![Bash](https://img.shields.io/badge/Bash-3.x%2F4.x-green.svg)](https://www.gnu.org/software/bash/)
 
 ## 🚀 Quick Start
 
-Get your AI infrastructure running in 5 minutes:
+Deploy your AI infrastructure in under 5 minutes:
 
 ```bash
 # Clone and setup
@@ -21,146 +21,289 @@ make deploy-simple STACK_NAME=my-dev-stack
 
 # Access your AI services
 # n8n: http://your-ip:5678 (workflow automation)
-# Ollama: http://your-ip:11434 (LLM API)
+# Ollama: http://your-ip:11434 (LLM API with DeepSeek-R1, Qwen2.5-VL)
 # Qdrant: http://your-ip:6333 (vector database)
+# Crawl4AI: http://your-ip:11235 (web scraping)
 ```
 
-[**→ Detailed Quick Start Guide**](docs/getting-started/quick-start.md)
+## 🌟 Key Features
 
-## 📚 Documentation Hub
+### 💰 **70% Cost Savings**
+- Intelligent spot instance management with cross-region failover
+- Automatic price optimization and capacity analysis
+- Smart instance type selection with GPU optimization
+
+### 🔧 **Modular Architecture**
+- 23 specialized modules for maintainable, scalable deployments
+- bash 3.x/4.x compatibility (macOS + Linux)
+- Comprehensive error handling with recovery strategies
+
+### 🤖 **Complete AI Stack**
+- **n8n**: Workflow automation and AI orchestration
+- **Ollama**: Local LLM inference (DeepSeek-R1:8B, Qwen2.5-VL:7B)
+- **Qdrant**: High-performance vector database
+- **Crawl4AI**: Intelligent web scraping with LLM extraction
+- **PostgreSQL**: Reliable data persistence
+
+### 🏗️ **Enterprise Ready**
+- Multi-AZ deployment with high availability
+- Application Load Balancer with health checks
+- CloudFront CDN for global distribution
+- EFS persistent storage with encryption
+- Comprehensive monitoring and alerting
+
+## 📚 Documentation
 
 ### 🎯 **Getting Started**
-- [**Prerequisites & Setup**](docs/getting-started/prerequisites.md) - Required tools and configuration
-- [**Quick Start Guide**](docs/getting-started/quick-start.md) - 5-minute deployment walkthrough  
-- [**Security Guide**](docs/security-guide.md) - Security implementation and best practices
+- [**Deployment Guide**](docs/guides/deployment.md) - Complete deployment walkthrough
+- [**Architecture Guide**](docs/guides/architecture.md) - System design and patterns
+- [**Security Guide**](docs/security-guide.md) - Security implementation
 
-### 📖 **User Guides**
-- [**Deployment Guide**](docs/reference/cli/deployment.md) - All deployment methods and options
-- [**Configuration Guide**](docs/reference/configuration/) - Service configuration and customization (directory structure)
-- [**Troubleshooting Guide**](docs/setup/troubleshooting.md) - Common issues and solutions
-
-### 🔧 **Reference Documentation**
-- [**API Reference**](docs/reference/api/) - Complete API documentation for all services
-- [**CLI Reference**](docs/reference/cli/) - Command-line tools and scripts
-- [**Configuration Reference**](docs/reference/cli/makefile.md) - Build and configuration commands
-
-### 🏗️ **Architecture & Design**
-- [**ALB CloudFront Setup**](docs/alb-cloudfront-setup.md) - Load balancer and CDN configuration
-- [**Security Guide**](docs/security-guide.md) - Security design and best practices
-- [**Docker Image Management**](docs/docker-image-management.md) - Container management strategies
-
-### 💡 **Examples & Tutorials**
-- [**Basic Examples**](docs/examples/basic/) - Example directory for simple use cases
-- [**Advanced Examples**](docs/examples/advanced/) - Example directory for complex AI pipelines
-- [**Integration Patterns**](docs/examples/integrations/) - Example directory for third-party integrations
-
-### ⚙️ **Operations**
-- [**Monitoring**](docs/reference/api/monitoring.md) - System monitoring and observability
-- [**Backup & Recovery**](docs/setup/troubleshooting.md) - Data protection and disaster recovery procedures
-- [**EFS Cleanup Guide**](docs/efs-cleanup-guide.md) - EFS file system cleanup and management
-
-## 🌟 Core Features
-
-| Feature | Description | Documentation |
-|---------|-------------|---------------|
-| **Multi-Deployment** | Spot, On-demand, Simple deployment options | [Deployment Guide](docs/reference/cli/deployment.md) |
-| **Infrastructure as Code** | Terraform and shell script automation | [Terraform Config](terraform/main.tf) |
-| **AI Services** | n8n, Ollama, Qdrant, Crawl4AI pre-configured | [API Reference](docs/reference/api/) |
-| **Monitoring Stack** | Docker logging and health checks | [Monitoring Guide](docs/reference/api/monitoring.md) |
-| **Cost Optimization** | Intelligent instance selection and scaling | [AWS Cost Explorer](https://console.aws.amazon.com/cost-explorer/) |
-| **Security Hardening** | Input sanitization, encrypted storage, IAM, advanced health checks | [Security Guide](docs/security-guide.md) |
+### 🔧 **Operations**
+- [**Testing Guide**](docs/guides/testing.md) - Comprehensive testing framework
+- [**Troubleshooting Guide**](docs/guides/troubleshooting.md) - Common issues and solutions
+- [**CLI Reference**](docs/reference/cli/) - Command-line tools
 
 ## 🛠️ Available Commands
 
+### Core Deployment Commands
+
+| Command | Description | Use Case |
+|---------|-------------|----------|
+| `make deploy-simple STACK_NAME=dev` | Development deployment | Quick testing |
+| `make deploy-spot STACK_NAME=prod` | Production with spot instances | Cost-optimized production |
+| `./scripts/aws-deployment-modular.sh --multi-az --alb prod` | Enterprise deployment | High-availability production |
+
+### Advanced Deployment Options
+
+```bash
+# Cost-optimized deployment with intelligent fallback
+./scripts/aws-deployment-modular.sh --spot --multi-az stack-name
+
+# Enterprise deployment with all features
+./scripts/aws-deployment-modular.sh \
+  --multi-az \
+  --private-subnets \
+  --nat-gateway \
+  --alb \
+  --spot \
+  production-stack
+
+# Simple development deployment
+./scripts/aws-deployment-v2-simple.sh dev-stack
+```
+
+### Management Commands
+
 | Command | Description |
 |---------|-------------|
-| `make setup` | Complete initial setup with security |
-| `make deploy STACK_NAME=name` | Deploy infrastructure (requires STACK_NAME) |
-| `make deploy-spot STACK_NAME=name` | Deploy with spot instances (requires STACK_NAME) |
-| `make deploy-ondemand STACK_NAME=name` | Deploy with on-demand instances (requires STACK_NAME) |
-| `make deploy-simple STACK_NAME=name` | Deploy simple development instance (requires STACK_NAME) |
-| `make health-check STACK_NAME=name` | Basic health check of services (requires STACK_NAME) |
-| `make health-check-advanced STACK_NAME=name` | Comprehensive health diagnostics (requires deployed instance) |
-| `make test` | Run all tests |
-| `make status STACK_NAME=name` | Check deployment status (requires STACK_NAME) |
-| `make destroy STACK_NAME=name` | Destroy infrastructure (requires STACK_NAME) |
-| `./scripts/cleanup-consolidated.sh --mode failed-deployments` | Cleanup failed deployment EFS file systems |
-| `./scripts/cleanup-consolidated.sh --mode efs "pattern"` | Cleanup EFS file systems matching pattern |
+| `make setup` | Initial setup with security validation |
+| `make test` | Run comprehensive test suite |
+| `make lint` | Code quality checks |
+| `make health-check STACK_NAME=stack` | Service health validation |
+| `make destroy STACK_NAME=stack` | Clean resource removal |
 
-[**→ Complete CLI Reference**](docs/reference/cli/)
+### Testing Commands (No AWS Costs)
+
+```bash
+# Test deployment logic locally
+./scripts/simple-demo.sh
+
+# Validate modular system
+./tests/final-validation.sh
+
+# Run specific test categories
+./tools/test-runner.sh unit
+./tools/test-runner.sh --report
+```
+
+## 🏗️ Architecture Overview
+
+### Modular System Structure
+
+```
+GeuseMaker/
+├── lib/modules/           # 23 specialized modules
+│   ├── core/             # Variable management, resource registry
+│   ├── infrastructure/   # VPC, security, IAM, EFS, ALB
+│   ├── compute/          # EC2 provisioning, spot optimization
+│   ├── application/      # Docker, AI services, monitoring
+│   └── errors/           # Structured error handling
+├── scripts/              # Deployment orchestrators
+│   ├── aws-deployment-v2-simple.sh      # Bash 3.x compatible
+│   └── aws-deployment-modular.sh        # Enterprise features
+├── tests/                # Comprehensive test suite
+└── docs/                 # Complete documentation
+```
+
+### Service Architecture
+
+```yaml
+Infrastructure:
+  AWS: EC2 (g4dn.xlarge) + EFS + ALB + CloudFront
+  
+Container Services:
+  n8n:      5678  | Workflow automation
+  ollama:   11434 | LLM inference (GPU optimized)
+  qdrant:   6333  | Vector database
+  crawl4ai: 11235 | Web scraping
+  postgres: 5432  | Data persistence
+
+Resource Allocation (g4dn.xlarge):
+  CPU: 4 vCPUs (85% target utilization)
+  Memory: 16GB (Ollama: 6GB, others: 2GB each)
+  GPU: T4 16GB (Ollama: 13.6GB, system: 2.4GB)
+```
+
+## 💡 Use Cases
+
+### 🔬 **AI Research & Development**
+- Rapid prototyping with n8n workflows
+- Local LLM experimentation with Ollama
+- Vector similarity search with Qdrant
+- Data collection with Crawl4AI
+
+### 🏢 **Enterprise AI Applications**
+- Multi-AZ deployment for production reliability
+- Cost optimization with spot instances
+- Scalable AI API endpoints
+- Comprehensive monitoring and alerting
+
+### 📊 **Data Processing Pipelines**
+- Automated web scraping and content extraction
+- LLM-powered data analysis and transformation
+- Vector embeddings for similarity search
+- Workflow automation with n8n
 
 ## 🔧 System Requirements
 
-| Component | Minimum | Recommended | Purpose |
-|-----------|---------|-------------|---------|
-| **AWS Account** | Basic permissions | Admin access | Cloud infrastructure |
-| **Local Machine** | 4GB RAM, 10GB disk | 8GB RAM, 50GB disk | Development tools |
-| **Network** | Internet access | Stable broadband | Service deployment |
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **AWS Account** | Basic permissions | Admin access for full features |
+| **Local Machine** | 4GB RAM, bash 3.x+ | 8GB RAM, latest bash |
+| **Network** | Internet access | Stable broadband |
 
-**Supported Platforms:** macOS, Linux, Windows (WSL)
+**Supported Platforms:** macOS (bash 3.x), Linux (bash 4.x+), Windows WSL
 
-[**→ Detailed Prerequisites**](docs/getting-started/prerequisites.md)
+## 🚦 Getting Started
 
-## 🎯 Deployment Types
+### 1. Prerequisites Setup
 
-### Simple Deployment
-Perfect for development and learning:
-- Single t3.medium instance
-- Basic AI services (n8n, Ollama)
-- Cost: ~$30/month
-- Setup time: 5 minutes
+```bash
+# Install AWS CLI
+aws configure
 
-### Spot Deployment  
-Cost-optimized for development:
-- GPU-enabled g4dn.xlarge spot instances
-- Full AI stack with monitoring
-- Cost: ~$50-100/month (60-90% savings)
-- Setup time: 10 minutes
+# Verify prerequisites
+make check-deps
+```
 
-### On-Demand Deployment
-Production-ready with high availability:
-- Load-balanced, auto-scaling
-- Full monitoring and alerting
-- Cost: ~$200-500/month
-- Setup time: 15 minutes
+### 2. Security Configuration
 
-[**→ Complete CLI Reference**](docs/reference/cli/)
+```bash
+# Setup required secrets
+make setup-secrets
 
-## 🚨 Support & Community
+# Validate security
+make security-check
+```
 
-### Getting Help
-1. **Check Documentation**: Start with our comprehensive guides
-2. **Review Troubleshooting**: Common issues and solutions
-3. **Search Issues**: GitHub issues for known problems
-4. **Ask Questions**: Create new issue with details
+### 3. Deploy Your First Stack
 
-### Contributing
-We welcome contributions! See our documentation for:
-- Code contribution guidelines
-- Documentation improvements
-- Bug reporting procedures
-- Feature request process
+```bash
+# Development deployment
+make deploy-simple STACK_NAME=my-first-stack
 
-### Community Resources
-- **Documentation**: Complete guides and API references
-- **Examples**: Real-world usage patterns and tutorials  
-- **Best Practices**: Proven deployment and scaling strategies
-- **Security Guidelines**: Comprehensive security implementation
+# Check deployment status
+make health-check STACK_NAME=my-first-stack
+```
+
+### 4. Access Your Services
+
+After deployment, access your AI services at:
+- **n8n**: `http://YOUR_IP:5678` - Create AI workflows
+- **Ollama**: `http://YOUR_IP:11434` - LLM API endpoints
+- **Qdrant**: `http://YOUR_IP:6333` - Vector database
+- **Crawl4AI**: `http://YOUR_IP:11235` - Web scraping API
+
+## 📈 Cost Optimization
+
+### Spot Instance Benefits
+
+| Deployment Type | Hourly Cost | Monthly Cost | Savings |
+|----------------|-------------|--------------|---------|
+| On-Demand | $0.52 | $380 | Baseline |
+| Spot (Single AZ) | $0.15 | $110 | 71% |
+| Spot (Multi-AZ) | $0.25 | $180 | 53% |
+
+### Intelligent Cost Features
+
+- **Cross-region spot analysis** - Finds optimal pricing
+- **Instance type fallbacks** - Automatic alternatives when capacity unavailable
+- **EFS lifecycle policies** - Auto-archive after 30 days
+- **Resource cleanup** - Automatic cleanup on deployment failure
+
+## 🔒 Security Features
+
+- **Least privilege IAM** - Minimal required permissions
+- **Encrypted storage** - EFS encryption at rest
+- **Secrets management** - AWS Parameter Store integration
+- **Network security** - Private subnets, security groups
+- **Input sanitization** - Prevents injection attacks
+
+## 🧪 Testing & Validation
+
+### Comprehensive Test Suite
+
+```bash
+# Run all tests (no AWS charges)
+make test
+
+# Test categories:
+# - unit: Individual module testing
+# - integration: Component interactions
+# - security: Security validation
+# - performance: Benchmarking
+# - deployment: Script validation
+```
+
+### Local Development
+
+```bash
+# Test deployment logic without AWS
+./scripts/simple-demo.sh
+
+# Validate specific modules
+bash -n lib/modules/core/variables.sh
+```
+
+## 🆘 Support & Troubleshooting
+
+### Quick Fixes
+
+| Issue | Solution |
+|-------|----------|
+| Disk space full | `./scripts/fix-deployment-issues.sh STACK REGION` |
+| Services not starting | `docker compose down && docker compose up -d` |
+| Spot capacity issues | Use `ec2-provisioning-specialist` Claude agent |
+| Variable export errors | Use modular deployment scripts |
+
+### Comprehensive Support
+
+- [**Troubleshooting Guide**](docs/guides/troubleshooting.md) - Detailed solutions
+- [**Architecture Guide**](docs/guides/architecture.md) - System understanding
+- [**Testing Guide**](docs/guides/testing.md) - Validation procedures
+
+## 🤝 Contributing
+
+1. **Follow modular patterns** - Use existing module structure
+2. **Test thoroughly** - Run `make test` before commits
+3. **Document changes** - Update CLAUDE.md for AI assistance
+4. **Security first** - Run `make security-check`
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🔗 Quick Navigation
-
-| Category | Links |
-|----------|--------|
-| **Start Here** | [Quick Start](docs/getting-started/quick-start.md) • [Prerequisites](docs/getting-started/prerequisites.md) • [Security Guide](docs/security-guide.md) |
-| **Deploy** | [Deployment Guide](docs/reference/cli/deployment.md) • [Terraform](terraform/main.tf) • [CLI Reference](docs/reference/cli/) |
-| **Use** | [API Reference](docs/reference/api/) • [Examples](docs/examples/) • [CLI Tools](docs/reference/cli/) |
-| **Operate** | [Monitoring](docs/reference/api/monitoring.md) • [Troubleshooting](docs/setup/troubleshooting.md) • [ALB CloudFront](docs/alb-cloudfront-setup.md) |
-| **Learn** | [Docker Management](docs/docker-image-management.md) • [Security Guide](docs/security-guide.md) • [API Reference](docs/reference/api/) |
-
-**[📚 Complete Documentation Index](docs/README.md)**
+**GeuseMaker** - Transforming AI infrastructure deployment with intelligence, modularity, and cost optimization. 🚀

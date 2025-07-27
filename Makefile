@@ -1,25 +1,120 @@
 # GeuseMaker Makefile
-# Build automation and development tools
+# Modular deployment automation and development tools
 
 .PHONY: help setup clean test lint deploy destroy validate docs
 
+# Color definitions
+BLUE := \033[0;34m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+RED := \033[0;31m
+NC := \033[0m
+
 # Default target
 help: ## Show this help message
-	@echo "GeuseMaker - Available Commands:"
+	@echo "GeuseMaker - Modular AI Infrastructure Platform"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  1. make setup                              # Initial setup"
+	@echo "  2. make deploy-simple STACK_NAME=dev      # Deploy development stack"
+	@echo "  3. make status STACK_NAME=dev              # Check deployment status"
+	@echo "  4. make destroy STACK_NAME=dev             # Clean up resources"
 
 # =============================================================================
 # SETUP AND DEPENDENCIES
 # =============================================================================
 
-## Security targets
-.PHONY: setup-secrets security-check security-validate
+setup: check-deps setup-secrets ## Complete initial setup with security
+	@echo "$(GREEN)✓ Setup complete with security configurations$(NC)"
+
+check-deps: ## Check if all dependencies are available
+	@echo "$(BLUE)Checking dependencies...$(NC)"
+	@chmod +x scripts/security-validation.sh
+	@scripts/security-validation.sh
+	@echo "$(GREEN)✓ Dependencies check complete$(NC)"
+
+install-deps: ## Install required dependencies
+	@echo "$(BLUE)Installing dependencies...$(NC)"
+	@chmod +x tools/install-deps.sh
+	@tools/install-deps.sh
+	@echo "$(GREEN)✓ Dependencies installed$(NC)"
 
 setup-secrets: ## Setup secrets for secure deployment
 	@echo "$(BLUE)Setting up secrets...$(NC)"
 	@chmod +x scripts/setup-secrets.sh
 	@scripts/setup-secrets.sh setup
+	@echo "$(GREEN)✓ Secrets setup complete$(NC)"
+
+setup-parameter-store: ## Setup AWS Parameter Store
+	@echo "$(BLUE)Setting up Parameter Store...$(NC)"
+	@chmod +x scripts/setup-parameter-store.sh
+	@scripts/setup-parameter-store.sh
+	@echo "$(GREEN)✓ Parameter Store setup complete$(NC)"
+
+dev-setup: setup install-deps ## Full development environment setup
+	@echo "$(GREEN)🚀 Development environment ready!$(NC)"
+
+# =============================================================================
+# TESTING AND VALIDATION
+# =============================================================================
+
+test: ## Run comprehensive test suite
+	@echo "$(BLUE)Running comprehensive test suite...$(NC)"
+	@chmod +x tools/test-runner.sh
+	@tools/test-runner.sh
+	@echo "$(GREEN)✓ All tests complete$(NC)"
+
+test-unit: ## Run unit tests only
+	@echo "$(BLUE)Running unit tests...$(NC)"
+	@chmod +x tools/test-runner.sh
+	@tools/test-runner.sh unit
+	@echo "$(GREEN)✓ Unit tests complete$(NC)"
+
+test-integration: ## Run integration tests only
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	@chmod +x tools/test-runner.sh
+	@tools/test-runner.sh integration
+	@echo "$(GREEN)✓ Integration tests complete$(NC)"
+
+test-security: ## Run security tests
+	@echo "$(BLUE)Running security tests...$(NC)"
+	@chmod +x tools/test-runner.sh
+	@tools/test-runner.sh security
+	@echo "$(GREEN)✓ Security tests complete$(NC)"
+
+test-modular: ## Test modular system components
+	@echo "$(BLUE)Testing modular system...$(NC)"
+	@chmod +x tests/test-modular-v2.sh
+	@tests/test-modular-v2.sh
+	@echo "$(GREEN)✓ Modular system tests complete$(NC)"
+
+test-infrastructure: ## Test infrastructure modules
+	@echo "$(BLUE)Testing infrastructure modules...$(NC)"
+	@chmod +x tests/test-infrastructure-modules.sh
+	@tests/test-infrastructure-modules.sh
+	@echo "$(GREEN)✓ Infrastructure tests complete$(NC)"
+
+test-local: ## Test deployment logic without AWS (no costs)
+	@echo "$(BLUE)Testing deployment logic locally...$(NC)"
+	@chmod +x scripts/simple-demo.sh
+	@scripts/simple-demo.sh
+	@chmod +x scripts/test-intelligent-selection.sh
+	@scripts/test-intelligent-selection.sh
+	@echo "$(GREEN)✓ Local tests complete$(NC)"
+
+final-validation: ## Run comprehensive system validation
+	@echo "$(BLUE)Running final system validation...$(NC)"
+	@chmod +x tests/final-validation.sh
+	@tests/final-validation.sh
+	@echo "$(GREEN)✓ Final validation complete$(NC)"
+
+lint: ## Run linting and code quality checks
+	@echo "$(BLUE)Running linting...$(NC)"
+	@chmod +x scripts/security-validation.sh
+	@scripts/security-validation.sh
+	@echo "$(GREEN)✓ Linting complete$(NC)"
 
 security-check: ## Run comprehensive security validation
 	@echo "$(BLUE)Running security validation...$(NC)"
@@ -27,286 +122,255 @@ security-check: ## Run comprehensive security validation
 	@scripts/security-validation.sh || (echo "$(RED)Security validation failed$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Security validation passed$(NC)"
 
-security-validate: setup-secrets security-check ## Complete security setup and validation
-	@echo "$(GREEN)✓ Security setup complete$(NC)"
-
-rotate-secrets: ## Rotate all secrets
-	@echo "$(YELLOW)Rotating secrets...$(NC)"
-	@scripts/setup-secrets.sh backup
-	@scripts/setup-secrets.sh regenerate
-	@echo "$(GREEN)✓ Secrets rotated successfully$(NC)"
-
-# Update setup target to include security
-setup: check-deps setup-secrets ## Complete initial setup with security
-	@echo "$(GREEN)✓ Setup complete with security configurations$(NC)"
-
-install-deps: ## Install required dependencies
-	@echo "Installing dependencies..."
-	@./tools/install-deps.sh
-	@echo "✅ Dependencies installed"
-
-check-deps: ## Check if all dependencies are available
-	@echo "Checking dependencies..."
-	@./scripts/security-validation.sh
-	@echo "✅ Dependencies check complete"
+validate: security-check ## Validate all configurations and security
+	@echo "$(GREEN)✓ Validation complete$(NC)"
 
 # =============================================================================
-# DEVELOPMENT
+# DEPLOYMENT (MODULAR ARCHITECTURE)
 # =============================================================================
 
-dev-setup: setup install-deps ## Full development setup
-	@echo "🚀 Development environment ready!"
+deploy-simple: validate ## Deploy simple development stack (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required. Use: make deploy-simple STACK_NAME=my-stack$(NC)"; exit 1; fi
+	@echo "$(BLUE)Deploying simple development stack: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-v2-simple.sh
+	@scripts/aws-deployment-v2-simple.sh $(STACK_NAME)
+	@echo "$(GREEN)✓ Simple deployment complete$(NC)"
 
-validate: ## Validate all configurations
-	@echo "Validating configurations..."
-	@./tools/validate-config.sh
-	@echo "✅ Configuration validation complete"
+deploy-spot: validate ## Deploy with cost-optimized spot instances (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)💰 Deploying cost-optimized spot instance: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-modular.sh
+	@scripts/aws-deployment-modular.sh --spot $(STACK_NAME)
+	@echo "$(GREEN)✓ Spot deployment complete$(NC)"
 
-# =============================================================================
-# CONFIGURATION MANAGEMENT
-# =============================================================================
+deploy-enterprise: validate ## Deploy enterprise multi-AZ with ALB (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🏢 Deploying enterprise multi-AZ stack: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-modular.sh
+	@scripts/aws-deployment-modular.sh --multi-az --alb --spot $(STACK_NAME)
+	@echo "$(GREEN)✓ Enterprise deployment complete$(NC)"
 
-config-generate: ## Generate all configuration files (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-generate ENV=development"; exit 1; fi
-	@echo "Generating configuration files for environment: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh generate $(ENV)
-	@echo "✅ Configuration files generated"
+deploy-full: validate ## Deploy with all enterprise features (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🚀 Deploying full enterprise stack with CDN: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-modular.sh
+	@scripts/aws-deployment-modular.sh --multi-az --private-subnets --nat-gateway --alb --spot $(STACK_NAME)
+	@echo "$(GREEN)✓ Full enterprise deployment complete$(NC)"
 
-config-validate: ## Validate configuration for environment (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-validate ENV=development"; exit 1; fi
-	@echo "Validating configuration for environment: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh validate $(ENV)
-	@echo "✅ Configuration validation complete"
-
-config-show: ## Show configuration summary (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-show ENV=development"; exit 1; fi
-	@echo "Showing configuration summary for environment: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh show $(ENV)
-
-config-env: ## Generate environment file only (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-env ENV=development"; exit 1; fi
-	@echo "Generating environment file for: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh env $(ENV)
-	@echo "✅ Environment file generated"
-
-config-override: ## Generate Docker Compose override only (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-override ENV=development"; exit 1; fi
-	@echo "Generating Docker Compose override for: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh override $(ENV)
-	@echo "✅ Docker Compose override generated"
-
-config-terraform: ## Generate Terraform variables only (requires ENV)
-	@if [ -z "$(ENV)" ]; then echo "❌ Error: ENV is required. Use: make config-terraform ENV=development"; exit 1; fi
-	@echo "Generating Terraform variables for: $(ENV)"
-	@chmod +x scripts/config-manager.sh
-	@./scripts/config-manager.sh terraform $(ENV)
-	@echo "✅ Terraform variables generated"
-
-config-test: ## Run configuration management tests
-	@echo "Running configuration management tests..."
-	@chmod +x tests/test-config-management.sh
-	@./tests/test-config-management.sh
-	@echo "✅ Configuration management tests complete"
-
-config-test-quick: ## Run quick configuration tests
-	@echo "Running quick configuration tests..."
-	@chmod +x tests/test-config-management.sh
-	@./tests/test-config-management.sh --quick
-	@echo "✅ Quick configuration tests complete"
-
-lint: ## Run linting on all code
-	@echo "Running linters..."
-	@./scripts/security-validation.sh
-	@echo "✅ Linting complete"
-
-format: ## Format all code
-	@echo "Code formatting not needed for shell scripts..."
-	@echo "✅ Code formatting complete"
-
-# =============================================================================
-# TESTING
-# =============================================================================
-
-test: ## Run all tests
-	@echo "Running tests..."
-	@./tools/test-runner.sh
-	@echo "✅ Tests complete"
-
-test-unit: ## Run unit tests only
-	@echo "Running unit tests..."
-	@./tests/test-security-validation.sh
-
-test-integration: ## Run integration tests only
-	@echo "Running integration tests..."
-	@./tests/test-deployment-workflow.sh
-
-test-security: ## Run security tests
-	@echo "Running security tests..."
-	@./scripts/security-check.sh
-
-# =============================================================================
-# DEPLOYMENT
-# =============================================================================
-
-plan: ## Show deployment plan
-	@echo "Showing deployment plan..."
-	@./scripts/aws-deployment-unified.sh --validate-only $(STACK_NAME)
-
-deploy: validate ## Deploy infrastructure (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required. Use: make deploy STACK_NAME=my-stack"; exit 1; fi
-	@echo "Deploying stack: $(STACK_NAME)"
-	@FORCE_YES=true ./scripts/aws-deployment-unified.sh $(STACK_NAME)
-
-deploy-spot: ## Deploy with spot instances (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "Deploying spot instance with stack name: $(STACK_NAME)"
-	@echo "📋 Real-time provisioning logs will be shown during deployment"
-	@FORCE_YES=true FOLLOW_LOGS=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
-
-deploy-spot-alb: ## Deploy spot instance with ALB load balancer (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "🚀 Deploying spot instance with ALB load balancer: $(STACK_NAME)"
-	@echo "📋 Real-time provisioning logs will be shown during deployment"
-	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
-
-deploy-spot-cdn: ## Deploy spot instance with ALB and CloudFront CDN (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "🌐 Deploying spot instance with full CDN setup: $(STACK_NAME)"
-	@echo "📋 Real-time provisioning logs will be shown during deployment"
-	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true SETUP_CLOUDFRONT=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
-
-deploy-spot-production: ## Deploy production-ready spot instance with CDN (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "🏭 Deploying production-ready spot instance with CDN: $(STACK_NAME)"
-	@echo "📋 Real-time provisioning logs will be shown during deployment"
-	@FORCE_YES=true FOLLOW_LOGS=true SETUP_ALB=true SETUP_CLOUDFRONT=true USE_PINNED_IMAGES=true ./scripts/aws-deployment-unified.sh -t spot $(STACK_NAME)
+# Legacy deployment aliases for backward compatibility
+deploy: deploy-simple ## Deploy infrastructure (legacy alias, requires STACK_NAME)
 
 deploy-ondemand: validate ## Deploy with on-demand instances (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@FORCE_YES=true ./scripts/aws-deployment-unified.sh -t ondemand $(STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)Deploying on-demand instance: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-modular.sh
+	@scripts/aws-deployment-modular.sh --on-demand $(STACK_NAME)
+	@echo "$(GREEN)✓ On-demand deployment complete$(NC)"
 
-deploy-simple: validate ## Deploy simple development instance (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@FORCE_YES=true ./scripts/aws-deployment-unified.sh -t simple $(STACK_NAME)
+deploy-spot-cdn: validate ## Deploy spot with CloudFront CDN (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🌐 Deploying spot instance with CDN: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/aws-deployment-modular.sh
+	@scripts/aws-deployment-modular.sh --spot --alb --cloudfront $(STACK_NAME)
+	@echo "$(GREEN)✓ Spot CDN deployment complete$(NC)"
 
 destroy: ## Destroy infrastructure (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "⚠️  WARNING: This will destroy all resources for $(STACK_NAME)"
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(YELLOW)⚠️  WARNING: This will destroy all resources for $(STACK_NAME)$(NC)"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
-	@./scripts/aws-deployment-unified.sh --cleanup $(STACK_NAME)
+	@chmod +x scripts/aws-deployment-v2-simple.sh
+	@scripts/aws-deployment-v2-simple.sh --cleanup-only $(STACK_NAME)
+	@echo "$(GREEN)✓ Resources destroyed$(NC)"
 
-# =============================================================================
-# TERRAFORM (ALTERNATIVE DEPLOYMENT)
-# =============================================================================
-
-tf-init: ## Initialize Terraform
-	@cd terraform && terraform init
-
-tf-plan: ## Show Terraform plan (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@cd terraform && terraform plan -var="stack_name=$(STACK_NAME)"
-
-tf-apply: ## Apply Terraform configuration (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@cd terraform && terraform apply -var="stack_name=$(STACK_NAME)"
-
-tf-destroy: ## Destroy Terraform resources (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@cd terraform && terraform destroy -var="stack_name=$(STACK_NAME)"
+cleanup: ## Cleanup failed deployments and orphaned resources
+	@echo "$(BLUE)Cleaning up failed deployments...$(NC)"
+	@chmod +x scripts/cleanup-consolidated.sh
+	@scripts/cleanup-consolidated.sh --mode failed-deployments
+	@echo "$(GREEN)✓ Cleanup complete$(NC)"
 
 # =============================================================================
 # MONITORING AND OPERATIONS
 # =============================================================================
 
 status: ## Check deployment status (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./scripts/check-instance-status.sh $(STACK_NAME)
-
-logs: ## View application logs (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./tools/view-logs.sh $(STACK_NAME)
-
-monitor: ## Open monitoring dashboard
-	@./tools/open-monitoring.sh
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)Checking status for: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/check-instance-status.sh
+	@scripts/check-instance-status.sh $(STACK_NAME)
 
 health-check: ## Basic health check of services (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "🏥 Checking service health..."
-	@./scripts/validate-deployment.sh $(STACK_NAME) || echo "⚠️  Some services may be unhealthy"
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🏥 Running basic health check for: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/validate-environment.sh
+	@scripts/validate-environment.sh $(STACK_NAME) || echo "$(YELLOW)⚠️  Some services may be unhealthy$(NC)"
+	@echo "$(GREEN)✓ Health check complete$(NC)"
 
-health-check-advanced: ## Comprehensive health diagnostics (requires deployed instance)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "🏥 Running advanced health diagnostics..."
-	@./scripts/health-check-advanced.sh
+health-check-advanced: ## Comprehensive health diagnostics (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🏥 Running advanced health diagnostics for: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/health-check-advanced.sh
+	@scripts/health-check-advanced.sh $(STACK_NAME)
+	@echo "$(GREEN)✓ Advanced health check complete$(NC)"
+
+logs: ## View application logs (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)Viewing logs for: $(STACK_NAME)$(NC)"
+	@chmod +x tools/view-logs.sh
+	@tools/view-logs.sh $(STACK_NAME)
+
+monitor: ## Open monitoring dashboard
+	@echo "$(BLUE)Opening monitoring dashboard...$(NC)"
+	@chmod +x tools/open-monitoring.sh
+	@tools/open-monitoring.sh
 
 backup: ## Create backup (requires STACK_NAME)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@./tools/backup.sh $(STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)Creating backup for: $(STACK_NAME)$(NC)"
+	@chmod +x tools/backup.sh
+	@tools/backup.sh $(STACK_NAME)
+	@echo "$(GREEN)✓ Backup complete$(NC)"
+
+check-quotas: ## Check AWS service quotas
+	@echo "$(BLUE)Checking AWS service quotas...$(NC)"
+	@chmod +x scripts/check-quotas.sh
+	@scripts/check-quotas.sh
+	@echo "$(GREEN)✓ Quota check complete$(NC)"
 
 # =============================================================================
-# DOCUMENTATION
+# CONFIGURATION MANAGEMENT
 # =============================================================================
 
-docs: ## Generate documentation
-	@echo "Generating documentation..."
-	@./tools/generate-docs.sh
-	@echo "✅ Documentation generated in docs/"
+config-generate: ## Generate configuration files (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "$(RED)❌ Error: ENV is required. Use: make config-generate ENV=development$(NC)"; exit 1; fi
+	@echo "$(BLUE)Generating configuration for environment: $(ENV)$(NC)"
+	@chmod +x scripts/config-manager.sh
+	@scripts/config-manager.sh generate $(ENV)
+	@echo "$(GREEN)✓ Configuration files generated$(NC)"
 
-docs-serve: ## Serve documentation locally
-	@echo "Starting documentation server..."
-	@cd docs && python -m http.server 8080
+config-validate: ## Validate configuration (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "$(RED)❌ Error: ENV is required. Use: make config-validate ENV=development$(NC)"; exit 1; fi
+	@echo "$(BLUE)Validating configuration for: $(ENV)$(NC)"
+	@chmod +x scripts/config-manager.sh
+	@scripts/config-manager.sh validate $(ENV)
+	@echo "$(GREEN)✓ Configuration validation complete$(NC)"
+
+config-show: ## Show configuration summary (requires ENV)
+	@if [ -z "$(ENV)" ]; then echo "$(RED)❌ Error: ENV is required. Use: make config-show ENV=development$(NC)"; exit 1; fi
+	@echo "$(BLUE)Configuration summary for: $(ENV)$(NC)"
+	@chmod +x scripts/config-manager.sh
+	@scripts/config-manager.sh show $(ENV)
+
+config-test: ## Test configuration management
+	@echo "$(BLUE)Testing configuration management...$(NC)"
+	@chmod +x tests/test-config-management.sh
+	@tests/test-config-management.sh
+	@echo "$(GREEN)✓ Configuration tests complete$(NC)"
 
 # =============================================================================
 # UTILITIES
 # =============================================================================
 
 clean: ## Clean up temporary files and caches
-	@echo "Cleaning up..."
+	@echo "$(BLUE)Cleaning up temporary files...$(NC)"
 	@rm -rf test-reports/
-	@rm -f *.log
-	@rm -f *.tmp
-	@rm -f *.temp
+	@rm -f *.log *.tmp *.temp
 	@find . -name "*.backup.*" -delete 2>/dev/null || true
-	@echo "✅ Cleanup complete"
+	@echo "$(GREEN)✓ Cleanup complete$(NC)"
 
-cost-estimate: ## Estimate deployment costs (requires STACK_NAME and HOURS)
-	@if [ -z "$(STACK_NAME)" ]; then echo "❌ Error: STACK_NAME is required"; exit 1; fi
-	@echo "⚠️  Cost estimation feature removed - Python dependency eliminated"
-	@echo "💡 Use AWS Cost Explorer or CloudWatch for cost monitoring"
+update-deps: ## Update Docker images and dependencies
+	@echo "$(BLUE)Updating dependencies...$(NC)"
+	@chmod +x scripts/simple-update-images.sh
+	@scripts/simple-update-images.sh
+	@echo "$(GREEN)✓ Dependencies updated$(NC)"
 
 security-scan: ## Run comprehensive security scan
-	@echo "Running security scan..."
-	@./scripts/security-check.sh
-	@echo "✅ Security scan complete"
+	@echo "$(BLUE)Running security scan...$(NC)"
+	@chmod +x scripts/security-check.sh
+	@scripts/security-check.sh
+	@echo "$(GREEN)✓ Security scan complete$(NC)"
 
-update-deps: ## Update dependencies
-	@echo "Updating dependencies..."
-	@./scripts/simple-update-images.sh
-	@echo "✅ Dependencies updated"
+rotate-secrets: ## Rotate all secrets
+	@echo "$(YELLOW)Rotating secrets...$(NC)"
+	@chmod +x scripts/setup-secrets.sh
+	@scripts/setup-secrets.sh backup
+	@scripts/setup-secrets.sh regenerate
+	@echo "$(GREEN)✓ Secrets rotated successfully$(NC)"
+
+fix-deployment: ## Fix common deployment issues (requires STACK_NAME and REGION)
+	@if [ -z "$(STACK_NAME)" ] || [ -z "$(REGION)" ]; then echo "$(RED)❌ Error: Both STACK_NAME and REGION are required$(NC)"; exit 1; fi
+	@echo "$(BLUE)Fixing deployment issues for $(STACK_NAME) in $(REGION)...$(NC)"
+	@chmod +x scripts/fix-deployment-issues.sh
+	@scripts/fix-deployment-issues.sh $(STACK_NAME) $(REGION)
+	@echo "$(GREEN)✓ Deployment fixes applied$(NC)"
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+
+docs: ## Generate documentation
+	@echo "$(BLUE)Generating documentation...$(NC)"
+	@chmod +x tools/generate-docs.sh
+	@tools/generate-docs.sh
+	@echo "$(GREEN)✓ Documentation generated in docs/$(NC)"
+
+docs-serve: ## Serve documentation locally
+	@echo "$(BLUE)Starting documentation server at http://localhost:8080$(NC)"
+	@cd docs && python3 -m http.server 8080 || python -m http.server 8080
 
 # =============================================================================
 # EXAMPLES AND QUICK START
 # =============================================================================
 
+quick-start: ## Show quick start guide
+	@echo "$(GREEN)🚀 GeuseMaker Quick Start Guide$(NC)"
+	@echo ""
+	@echo "$(BLUE)Development Deployment:$(NC)"
+	@echo "  1. make setup                              # Initial setup"
+	@echo "  2. make deploy-simple STACK_NAME=dev      # Deploy development"
+	@echo "  3. make status STACK_NAME=dev              # Check status"
+	@echo "  4. make health-check STACK_NAME=dev        # Verify services"
+	@echo ""
+	@echo "$(BLUE)Production Deployment:$(NC)"
+	@echo "  1. make deploy-spot STACK_NAME=prod        # Cost-optimized production"
+	@echo "  2. make deploy-enterprise STACK_NAME=prod  # High-availability production"
+	@echo ""
+	@echo "$(BLUE)Testing (No AWS Costs):$(NC)"
+	@echo "  1. make test-local                         # Test logic locally"
+	@echo "  2. make test                               # Run all tests"
+	@echo "  3. make final-validation                   # Comprehensive validation"
+	@echo ""
+	@echo "$(BLUE)Cleanup:$(NC)"
+	@echo "  1. make destroy STACK_NAME=stack-name      # Destroy resources"
+	@echo ""
+	@echo "$(BLUE)For all commands:$(NC) make help"
+
 example-dev: ## Deploy example development environment
-	@$(MAKE) deploy-simple STACK_NAME=GeuseMaker-dev-$(shell whoami)
+	@$(MAKE) deploy-simple STACK_NAME=example-dev-$(shell whoami)
 
-example-prod: ## Deploy example production environment
-	@$(MAKE) deploy-ondemand STACK_NAME=GeuseMaker-prod-$(shell date +%Y%m%d)
+example-prod: ## Deploy example production environment  
+	@$(MAKE) deploy-spot STACK_NAME=example-prod-$(shell date +%Y%m%d)
 
-quick-start: ## Quick start guide
-	@echo "🚀 GeuseMaker Quick Start"
+# =============================================================================
+# TROUBLESHOOTING
+# =============================================================================
+
+troubleshoot: ## Show troubleshooting information
+	@echo "$(BLUE)GeuseMaker Troubleshooting$(NC)"
 	@echo ""
-	@echo "1. Setup:           make setup"
-	@echo "2. Install deps:    make install-deps"  
-	@echo "3. Deploy dev:      make deploy-simple STACK_NAME=my-dev-stack"
-	@echo "4. Check status:    make status STACK_NAME=my-dev-stack"
-	@echo "5. View logs:       make logs STACK_NAME=my-dev-stack"
-	@echo "6. Cleanup:         make destroy STACK_NAME=my-dev-stack"
+	@echo "$(YELLOW)Common Issues:$(NC)"
+	@echo "  • Disk space full:     make fix-deployment STACK_NAME=X REGION=Y"
+	@echo "  • Services not starting: make health-check-advanced STACK_NAME=X"
+	@echo "  • Spot capacity issues: Scripts automatically try fallback regions"
+	@echo "  • Variable errors:     Use modular deployment scripts"
 	@echo ""
-	@echo "For more commands:  make help"
+	@echo "$(YELLOW)Debug Commands:$(NC)"
+	@echo "  • make status STACK_NAME=X                 # Check deployment"
+	@echo "  • make logs STACK_NAME=X                   # View logs"
+	@echo "  • make test-local                          # Test without AWS"
+	@echo ""
+	@echo "$(YELLOW)Documentation:$(NC)"
+	@echo "  • docs/guides/troubleshooting.md           # Detailed solutions"
+	@echo "  • docs/guides/deployment.md                # Deployment guide"
+	@echo "  • docs/guides/architecture.md              # System architecture"
+
+.DEFAULT_GOAL := help

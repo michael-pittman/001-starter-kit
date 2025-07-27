@@ -103,7 +103,7 @@ test_function_availability() {
         source "$PROJECT_ROOT/lib/modules/config/variables.sh"
         
         # Check if functions exist
-        type -t setup_error_handling >/dev/null || return 1
+        type -t initialize_error_handling >/dev/null || return 1
         type -t register_resource >/dev/null || return 1
         type -t set_variable >/dev/null || return 1
         

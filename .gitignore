@@ -48,6 +48,11 @@ logs/
 **/COMPREHENSIVE_*.md
 **/AMI_SELECTION_*.md
 **/INTELLIGENT_DEPLOYMENT_*.md
+*CLEANUP_SUMMARY*.md
+*DEPLOYMENT_FIXES_COMPLETE*.md
+*MAKEFILE_UPDATE_SUMMARY*.md
+*VARIABLE_MANAGEMENT_SOLUTION*.md
+cleanup-plan.md
 docs/archive/
 
 # Docker and build artifacts

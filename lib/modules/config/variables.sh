@@ -49,13 +49,23 @@ get_variable() {
     echo "$current_value"
 }
 
+# Sanitize variable name for bash compatibility
+sanitize_var_name() {
+    local name="$1"
+    # Replace hyphens with underscores and remove invalid characters
+    echo "$name" | sed 's/-/_/g; s/[^a-zA-Z0-9_]/_/g'
+}
+
 # Set variable with validation
 set_variable() {
     local var_name="$1"
     local value="$2"
     
+    # Sanitize variable name for bash export
+    local safe_var_name=$(sanitize_var_name "$var_name")
+    
     # Check if validator exists
-    local validator_var="_VARIABLE_VALIDATOR_${var_name}"
+    local validator_var="_VARIABLE_VALIDATOR_${safe_var_name}"
     local validator="${!validator_var:-}"
     
     if [ -n "$validator" ]; then
@@ -65,8 +75,8 @@ set_variable() {
         fi
     fi
     
-    # Set the variable
-    eval "export ${var_name}='${value}'"
+    # Set the variable using sanitized name
+    eval "export ${safe_var_name}='${value}'"
     return 0
 }
 

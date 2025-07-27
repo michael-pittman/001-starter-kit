@@ -9,11 +9,58 @@
 _REGISTRY_SH_LOADED=1
 
 # =============================================================================
-# RESOURCE TRACKING
+# RESOURCE TRACKING WITH DEPENDENCIES
 # =============================================================================
 
 # Resource registry file
 RESOURCE_REGISTRY_FILE="${RESOURCE_REGISTRY_FILE:-/tmp/deployment-registry-$$.json}"
+
+# Resource status tracking (bash 3.x compatible)
+# Use function-based approach instead of associative arrays
+RESOURCE_STATUS_KEYS=""
+RESOURCE_DEPENDENCIES_KEYS=""
+RESOURCE_CLEANUP_COMMANDS_KEYS=""
+
+# Function-based registry for resource tracking
+get_resource_data() {
+    local key="$1"
+    local type="$2"
+    local varname="RESOURCE_${type}_${key}"
+    echo "${!varname:-}"
+}
+
+set_resource_data() {
+    local key="$1"
+    local type="$2"
+    local value="$3"
+    local varname="RESOURCE_${type}_${key}"
+    local keys_var="RESOURCE_${type}_KEYS"
+    
+    # Export the value
+    export "${varname}=${value}"
+    
+    # Add to keys list if not already present
+    local current_keys="${!keys_var}"
+    if [[ " $current_keys " != *" $key "* ]]; then
+        export "${keys_var}=${current_keys} ${key}"
+    fi
+}
+
+get_resource_keys() {
+    local type="$1"
+    local keys_var="RESOURCE_${type}_KEYS"
+    echo "${!keys_var}"
+}
+
+# Status constants (avoid readonly redeclaration)
+if [[ -z "${STATUS_PENDING:-}" ]]; then
+    readonly STATUS_PENDING="pending"
+    readonly STATUS_CREATING="creating"
+    readonly STATUS_CREATED="created"
+    readonly STATUS_FAILED="failed"
+    readonly STATUS_DELETING="deleting"
+    readonly STATUS_DELETED="deleted"
+fi
 
 # Initialize registry
 initialize_registry() {
@@ -54,9 +101,15 @@ register_resource() {
     local resource_type="$1"
     local resource_id="$2"
     local metadata="${3:-{}}"
+    local cleanup_command="${4:-}"
     
     # Ensure registry exists
     initialize_registry
+    
+    # Store cleanup command if provided
+    if [[ -n "$cleanup_command" ]]; then
+        set_resource_data "${resource_id}" "CLEANUP_COMMANDS" "$cleanup_command"
+    fi
     
     # Add resource to registry
     local temp_file=$(mktemp)
@@ -69,6 +122,13 @@ register_resource() {
            "metadata": $metadata
        }]' "$RESOURCE_REGISTRY_FILE" > "$temp_file" && \
     mv "$temp_file" "$RESOURCE_REGISTRY_FILE"
+}
+
+# Update resource status (new function for compatibility)
+update_resource_status() {
+    local resource_id="$1"
+    local status="$2"
+    set_resource_data "${resource_id}" "STATUS" "$status"
 }
 
 # Get resources by type
@@ -278,4 +338,25 @@ restore_registry() {
     fi
     
     echo "Registry restored from: $backup_file"
+}
+
+# =============================================================================
+# COMPATIBILITY ALIASES AND FUNCTIONS
+# =============================================================================
+
+# Initialize registry for a specific stack (compatibility alias)
+init_registry() {
+    local stack_name="${1:-$STACK_NAME}"
+    export STACK_NAME="$stack_name"
+    initialize_registry
+}
+
+# Cleanup registry (remove registry file)
+cleanup_registry() {
+    local stack_name="${1:-$STACK_NAME}"
+    
+    if [ -f "$RESOURCE_REGISTRY_FILE" ]; then
+        echo "Cleaning up resource registry for: $stack_name" >&2
+        rm -f "$RESOURCE_REGISTRY_FILE"
+    fi
 }
