@@ -15,12 +15,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Check git status with: `git status` to see current modified files
 
 ### Claude Code Agent Integration
-The project includes specialized Claude Code agents in `.claude/agents/` for automated assistance:
-- **bash-script-validator**: Validates shell scripts for cross-platform compatibility (macOS bash 3.x + Linux 4.x+)
-- **test-runner-specialist**: Orchestrates comprehensive testing workflows before deployments
+The project includes specialized Claude Code agents for automated assistance:
+- **ec2-provisioning-specialist**: Handles EC2 launch failures, spot instance capacity issues, AMI availability problems, and service quota limits
 - **aws-deployment-debugger**: Debugs deployment failures, spot instance issues, and infrastructure problems
+- **spot-instance-optimizer**: Optimizes AWS spot instance deployments for cost savings and handles spot instance interruptions
 - **security-validator**: Performs security validation and compliance checking before production
-- **aws-cost-optimizer**: Analyzes and optimizes AWS costs during infrastructure deployment
+- **test-runner-specialist**: Orchestrates comprehensive testing workflows before deployments
 
 ## Quick Reference
 
@@ -365,6 +365,11 @@ The deployment system automatically selects optimal configurations based on:
 - 70-75% cost savings with intelligent spot instance management
 - Auto-scaling based on GPU utilization
 - Cross-region analysis for optimal pricing
+- **Spot Instance Optimization**: Use the `spot-instance-optimizer` agent for:
+  - Analyzing real-time spot pricing across regions and availability zones
+  - Implementing cost-effective GPU instance strategies
+  - Handling spot instance interruptions with resilient architectures
+  - Calculating optimal bid prices and deployment strategies
 
 ## Development Guidelines & Rules
 
@@ -484,8 +489,10 @@ aws ssm put-parameter --name '/aibuildkit/OPENAI_API_KEY' \
 ```
 
 ### Common Issues
-- **Spot instance not launching**: Check spot price limits and availability
-- **InvalidAMIID.Malformed errors**: Use `--cross-region` for better region selection
+- **Spot instance not launching**: Check spot price limits and availability - use `ec2-provisioning-specialist` agent for capacity issues
+- **InvalidAMIID.Malformed errors**: Use `--cross-region` for better region selection or `ec2-provisioning-specialist` for AMI availability problems
+- **InsufficientInstanceCapacity errors**: Use `ec2-provisioning-specialist` agent to analyze capacity across regions and implement fallback strategies
+- **Service quota limits**: Use `ec2-provisioning-specialist` agent to check quotas and recommend solutions for GPU instances
 - **GPU not detected**: Verify NVIDIA drivers and Docker GPU runtime
 - **Services failing to start**: Check disk space and environment variables first
 
@@ -586,11 +593,11 @@ make test                                    # Run all tests via test-runner.sh
 
 ### Specialized Agent Usage Patterns
 **When to Use Each Agent Proactively:**
-- **bash-script-validator**: ANY shell script modifications (use before testing deployment scripts)
+- **ec2-provisioning-specialist**: When encountering EC2 launch failures, spot instance capacity issues, AMI availability problems, or service quota limits during AWS deployments
+- **aws-deployment-debugger**: When encountering AWS deployment failures, CloudFormation stack errors, or infrastructure provisioning issues
+- **spot-instance-optimizer**: When deploying spot instances for cost optimization, analyzing real-time spot pricing, or handling spot instance interruptions
+- **security-validator**: Before production deployment, after security configuration changes, or when performing compliance audits
 - **test-runner-specialist**: Before any deployment or code changes (validates comprehensive test suite)
-- **aws-deployment-debugger**: When encountering AWS deployment failures, spot instance capacity issues
-- **security-validator**: Before production deployment, after security configuration changes
-- **aws-cost-optimizer**: When deploying infrastructure requiring cost efficiency analysis
 
 ### Key Requirements & Constraints  
 - AWS credentials and appropriate permissions required for deployments
