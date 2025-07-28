@@ -1,7 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# Legacy Compatibility Wrapper
-# Provides backward compatibility for existing deployment scripts
+# Enhanced Compatibility Wrapper
+# Provides intelligent compatibility layer for both legacy and modern bash
+# Automatically detects bash version and loads appropriate modules
 # =============================================================================
 
 # Prevent multiple sourcing
@@ -9,33 +10,437 @@
 _LEGACY_WRAPPER_SH_LOADED=1
 
 # =============================================================================
-# MODULE LOADING
+# BASH VERSION DETECTION AND ADAPTIVE LOADING
 # =============================================================================
 
-# Source the modular components
+# Detect bash version and capabilities
+BASH_MAJOR=${BASH_VERSINFO[0]}
+BASH_MINOR=${BASH_VERSINFO[1]}
+BASH_HAS_ASSOCIATIVE_ARRAYS=false
+BASH_HAS_NAME_REFERENCES=false
+BASH_IS_MODERN=false
+
+# Check for modern bash features
+if (( BASH_MAJOR > 4 || (BASH_MAJOR == 4 && BASH_MINOR >= 0) )); then
+    BASH_HAS_ASSOCIATIVE_ARRAYS=true
+fi
+
+if (( BASH_MAJOR > 4 || (BASH_MAJOR == 4 && BASH_MINOR >= 3) )); then
+    BASH_HAS_NAME_REFERENCES=true
+fi
+
+if (( BASH_MAJOR > 5 || (BASH_MAJOR == 5 && BASH_MINOR >= 3) )); then
+    BASH_IS_MODERN=true
+fi
+
+echo "Bash compatibility layer: v${BASH_VERSION} (modern: $BASH_IS_MODERN, assoc: $BASH_HAS_ASSOCIATIVE_ARRAYS, nameref: $BASH_HAS_NAME_REFERENCES)" >&2
+
+# =============================================================================
+# ADAPTIVE MODULE LOADING
+# =============================================================================
+
+# Load appropriate modules based on bash capabilities
+if [[ "$BASH_IS_MODERN" == "true" ]]; then
+    echo "Loading modern variable management system..." >&2
+    MODULE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    
+    # Try to load modern modules first
+    if [[ -f "$MODULE_ROOT/modules/config/variables.sh" ]]; then
+        source "$MODULE_ROOT/modules/config/variables.sh" 2>/dev/null || {
+            echo "WARNING: Failed to load modern variables, falling back to legacy mode" >&2
+            BASH_IS_MODERN=false
+        }
+    fi
+    
+    if [[ -f "$MODULE_ROOT/modules/core/registry.sh" ]]; then
+        source "$MODULE_ROOT/modules/core/registry.sh" 2>/dev/null || {
+            echo "WARNING: Failed to load modern registry, falling back to legacy mode" >&2
+            BASH_IS_MODERN=false
+        }
+    fi
+fi
+
+# Fallback to legacy/compatibility mode if modern loading failed
+if [[ "$BASH_IS_MODERN" != "true" ]]; then
+    echo "Using legacy compatibility mode for bash ${BASH_VERSION}" >&2
+    # Initialize legacy compatibility functions (defined below)
+fi
+
+# =============================================================================
+# LEGACY VARIABLE MANAGEMENT (BASH 3.x+ COMPATIBLE)
+# =============================================================================
+
+if [[ "$BASH_IS_MODERN" != "true" ]]; then
+    # Legacy variable registry using simple string concatenation
+    _LEGACY_VARIABLE_REGISTRY=""
+    _LEGACY_VARIABLE_DEFAULTS=""
+    _LEGACY_VARIABLE_VALIDATORS=""
+    
+    # Legacy variable registration
+    register_variable() {
+        local var_name="$1"
+        local default_value="$2"
+        local validator="${3:-}"
+        local var_type="${4:-string}"  # Ignored in legacy mode
+        local description="${5:-}"  # Ignored in legacy mode
+        
+        # Add to registry
+        _LEGACY_VARIABLE_REGISTRY="${_LEGACY_VARIABLE_REGISTRY}${var_name}:"
+        
+        # Store default value using eval (bash 3.x compatible)
+        eval "_LEGACY_DEFAULT_${var_name}='${default_value}'"
+        
+        # Store validator if provided
+        if [ -n "$validator" ]; then
+            eval "_LEGACY_VALIDATOR_${var_name}='${validator}'"
+        fi
+        
+        # Set initial value
+        export "${var_name}=${default_value}"
+    }
+    
+    # Legacy variable getter
+    get_variable() {
+        local var_name="$1"
+        local use_cache="${2:-true}"  # Ignored in legacy mode
+        
+        # Direct variable reference (bash 3.x compatible)
+        local current_value
+        eval "current_value=\${${var_name}:-}"
+        
+        if [ -z "$current_value" ]; then
+            # Get default value
+            local default_var="_LEGACY_DEFAULT_${var_name}"
+            eval "current_value=\${${default_var}:-}"
+        fi
+        
+        echo "$current_value"
+    }
+    
+    # Legacy variable setter with validation
+    set_variable() {
+        local var_name="$1"
+        local value="$2"
+        local force_type="${3:-}"  # Ignored in legacy mode
+        
+        # Check if validator exists
+        local validator_var="_LEGACY_VALIDATOR_${var_name}"
+        local validator
+        eval "validator=\${${validator_var}:-}"
+        
+        if [ -n "$validator" ]; then
+            if ! $validator "$value"; then
+                echo "ERROR: Invalid value '$value' for variable '$var_name'" >&2
+                return 1
+            fi
+        fi
+        
+        # Set the variable
+        export "${var_name}=${value}"
+        return 0
+    }
+    
+    # Legacy bulk operations (simplified)
+    set_variables_bulk() {
+        echo "WARNING: Bulk variable operations not optimized in legacy mode" >&2
+        return 1
+    }
+    
+    list_variables() {
+        local filter="${1:-}"
+        local format="${2:-simple}"
+        
+        echo "=== Legacy Variable Registry ===" >&2
+        for var in $(echo "$_LEGACY_VARIABLE_REGISTRY" | tr ':' ' '); do
+            [ -n "$var" ] || continue
+            [[ -n "$filter" && ! "$var" =~ $filter ]] && continue
+            
+            local value
+            eval "value=\${${var}:-}"
+            echo "$var=$value"
+        done
+    }
+    
+    clear_variable_cache() {
+        echo "INFO: Variable caching not available in legacy mode" >&2
+    }
+fi
+
+# =============================================================================
+# LEGACY RESOURCE REGISTRY (BASH 3.x+ COMPATIBLE)
+# =============================================================================
+
+if [[ "$BASH_IS_MODERN" != "true" ]]; then
+    # Legacy resource tracking using files
+    LEGACY_RESOURCE_REGISTRY_FILE="${RESOURCE_REGISTRY_FILE:-/tmp/legacy-registry-$$.txt}"
+    
+    # Legacy resource registration
+    register_resource() {
+        local resource_type="$1"
+        local resource_id="$2"
+        local metadata="${3:-{}}"
+        local cleanup_command="${4:-}"
+        local dependencies="${5:-}"  # Simplified in legacy mode
+        local tags="${6:-{}}"  # Ignored in legacy mode
+        
+        # Create registry file if it doesn't exist
+        [ -f "$LEGACY_RESOURCE_REGISTRY_FILE" ] || touch "$LEGACY_RESOURCE_REGISTRY_FILE"
+        
+        # Simple format: type|id|metadata|cleanup|timestamp
+        local timestamp
+        timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        local record="${resource_type}|${resource_id}|${metadata}|${cleanup_command}|${timestamp}"
+        echo "$record" >> "$LEGACY_RESOURCE_REGISTRY_FILE"
+        
+        echo "Resource registered: $resource_type/$resource_id" >&2
+    }
+    
+    # Legacy resource data getter
+    get_resource_data() {
+        local resource_id="$1"
+        local data_type="${2:-metadata}"
+        
+        if [ ! -f "$LEGACY_RESOURCE_REGISTRY_FILE" ]; then
+            case "$data_type" in
+                "metadata"|"tags") echo "{}" ;;
+                *) echo "" ;;
+            esac
+            return 1
+        fi
+        
+        # Find resource record
+        local record
+        record=$(grep "|${resource_id}|" "$LEGACY_RESOURCE_REGISTRY_FILE" | head -1)
+        
+        if [ -z "$record" ]; then
+            case "$data_type" in
+                "metadata"|"tags") echo "{}" ;;
+                *) echo "" ;;
+            esac
+            return 1
+        fi
+        
+        # Parse record fields: type|id|metadata|cleanup|timestamp
+        local type id metadata cleanup timestamp
+        IFS='|' read -r type id metadata cleanup timestamp <<< "$record"
+        
+        case "$data_type" in
+            "metadata") echo "$metadata" ;;
+            "type") echo "$type" ;;
+            "cleanup") echo "$cleanup" ;;
+            "timestamp") echo "$timestamp" ;;
+            "status") echo "created" ;;  # Simplified status
+            "dependencies") echo "" ;;  # Not tracked in legacy mode
+            "tags") echo "{}" ;;  # Not supported in legacy mode
+            *) echo "" ;;
+        esac
+    }
+    
+    # Other legacy resource functions
+    get_resources_by_type() {
+        local resource_type="$1"
+        
+        if [ ! -f "$LEGACY_RESOURCE_REGISTRY_FILE" ]; then
+            return 1
+        fi
+        
+        grep "^${resource_type}|" "$LEGACY_RESOURCE_REGISTRY_FILE" | cut -d'|' -f2
+    }
+    
+    resource_exists() {
+        local resource_id="$1"
+        local expected_status="${2:-}"  # Ignored in legacy mode
+        
+        if [ ! -f "$LEGACY_RESOURCE_REGISTRY_FILE" ]; then
+            return 1
+        fi
+        
+        grep -q "|${resource_id}|" "$LEGACY_RESOURCE_REGISTRY_FILE"
+    }
+    
+    unregister_resource() {
+        local resource_id="$1"
+        local force="${2:-false}"  # Ignored in legacy mode
+        
+        if [ ! -f "$LEGACY_RESOURCE_REGISTRY_FILE" ]; then
+            return 0
+        fi
+        
+        # Create temporary file without the resource
+        local temp_file="/tmp/legacy-registry-temp-$$"
+        grep -v "|${resource_id}|" "$LEGACY_RESOURCE_REGISTRY_FILE" > "$temp_file"
+        mv "$temp_file" "$LEGACY_RESOURCE_REGISTRY_FILE"
+        
+        echo "Resource unregistered: $resource_id" >&2
+    }
+    
+    update_resource_status() {
+        local resource_id="$1"
+        local status="$2"
+        
+        echo "INFO: Resource $resource_id status: $status (tracking simplified in legacy mode)" >&2
+    }
+    
+    # Initialize registry function
+    initialize_registry() {
+        local stack_name="${1:-default}"
+        echo "Initialized legacy resource registry for: $stack_name" >&2
+        touch "$LEGACY_RESOURCE_REGISTRY_FILE"
+    }
+    
+    # Status constants for compatibility
+    if [[ -z "${STATUS_PENDING:-}" ]]; then
+        readonly STATUS_PENDING="pending"
+        readonly STATUS_CREATING="creating"
+        readonly STATUS_CREATED="created"
+        readonly STATUS_UPDATING="updating"
+        readonly STATUS_FAILED="failed"
+        readonly STATUS_DELETING="deleting"
+        readonly STATUS_DELETED="deleted"
+        readonly STATUS_UNKNOWN="unknown"
+    fi
+fi
+
+# =============================================================================
+# CONDITIONAL MODULE LOADING
+# =============================================================================
+
+# Source the modular components (with error handling)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Core modules
-source "${MODULE_ROOT}/core/registry.sh"
-source "${MODULE_ROOT}/core/errors.sh"
+# Function to safely source modules
+safe_source() {
+    local module_path="$1"
+    local module_name="$(basename "$module_path")"
+    
+    if [[ -f "$module_path" ]]; then
+        if source "$module_path" 2>/dev/null; then
+            echo "Loaded module: $module_name" >&2
+        else
+            echo "WARNING: Failed to load module: $module_name" >&2
+        fi
+    else
+        echo "WARNING: Module not found: $module_path" >&2
+    fi
+}
 
-# Infrastructure modules
-source "${MODULE_ROOT}/infrastructure/vpc.sh"
-source "${MODULE_ROOT}/infrastructure/security.sh"
-source "${MODULE_ROOT}/infrastructure/iam.sh"
-source "${MODULE_ROOT}/infrastructure/efs_legacy.sh"
+# Load core modules
+safe_source "${MODULE_ROOT}/core/errors.sh"
 
-# Compute modules
-source "${MODULE_ROOT}/compute/spot_optimizer.sh"
-source "${MODULE_ROOT}/compute/provisioner.sh"
+# Load infrastructure modules
+safe_source "${MODULE_ROOT}/infrastructure/vpc.sh"
+safe_source "${MODULE_ROOT}/infrastructure/security.sh"
+safe_source "${MODULE_ROOT}/infrastructure/iam.sh"
+safe_source "${MODULE_ROOT}/infrastructure/efs_legacy.sh"
 
-# Application modules
-source "${MODULE_ROOT}/application/docker_manager.sh"
-source "${MODULE_ROOT}/application/health_monitor.sh"
+# Load compute modules
+safe_source "${MODULE_ROOT}/compute/spot_optimizer.sh"
+safe_source "${MODULE_ROOT}/compute/provisioner.sh"
+
+# Load application modules
+safe_source "${MODULE_ROOT}/application/docker_manager.sh"
+safe_source "${MODULE_ROOT}/application/health_monitor.sh"
 
 # =============================================================================
-# LEGACY FUNCTION COMPATIBILITY WRAPPERS
+# ENHANCED VALIDATION AND INITIALIZATION
+# =============================================================================
+
+# Enhanced validation with legacy fallback
+validate_required_variables() {
+    local context="${1:-deployment}"
+    local strict_mode="${2:-true}"
+    
+    if [[ "$BASH_IS_MODERN" == "true" ]] && declare -f validate_required_variables >/dev/null 2>&1; then
+        # Use modern validation if available
+        command validate_required_variables "$context" "$strict_mode"
+    else
+        # Legacy validation
+        local required_vars=("AWS_REGION" "STACK_NAME" "DEPLOYMENT_TYPE" "INSTANCE_TYPE")
+        local missing=()
+        
+        for var in "${required_vars[@]}"; do
+            local value
+            eval "value=\${${var}:-}"
+            if [ -z "$value" ]; then
+                missing+=("$var")
+            fi
+        done
+        
+        if [ ${#missing[@]} -gt 0 ]; then
+            echo "ERROR: Missing required variables: ${missing[*]}" >&2
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Enhanced configuration printing
+print_configuration() {
+    local format="${1:-detailed}"
+    
+    if [[ "$BASH_IS_MODERN" == "true" ]] && declare -f print_configuration >/dev/null 2>&1; then
+        # Use modern configuration display
+        command print_configuration "$format"
+    else
+        # Legacy configuration display
+        echo "=== Configuration (Legacy Mode) ===" >&2
+        echo "AWS_REGION: $(get_variable AWS_REGION)" >&2
+        echo "STACK_NAME: $(get_variable STACK_NAME)" >&2
+        echo "DEPLOYMENT_TYPE: $(get_variable DEPLOYMENT_TYPE)" >&2
+        echo "INSTANCE_TYPE: $(get_variable INSTANCE_TYPE)" >&2
+        echo "Environment: $(get_variable ENVIRONMENT)" >&2
+        echo "===================================" >&2
+    fi
+}
+
+# Enhanced initialization
+initialize_variables() {
+    local load_parameter_store="${1:-true}"
+    local load_env_files="${2:-true}"
+    local load_environment="${3:-true}"
+    
+    if [[ "$BASH_IS_MODERN" == "true" ]] && declare -f initialize_variables >/dev/null 2>&1; then
+        # Use modern initialization
+        command initialize_variables "$load_parameter_store" "$load_env_files" "$load_environment"
+    else
+        # Legacy initialization
+        echo "Initializing variables (legacy mode)..." >&2
+        
+        # Register core variables with legacy system
+        register_variable "AWS_REGION" "us-east-1" "validate_aws_region"
+        register_variable "STACK_NAME" "" "validate_stack_name"
+        register_variable "DEPLOYMENT_TYPE" "spot" "validate_deployment_type"
+        register_variable "INSTANCE_TYPE" "g4dn.xlarge" "validate_instance_type"
+        register_variable "ENVIRONMENT" "production"
+        
+        # Load from .env file if exists and enabled
+        if [ "$load_env_files" = "true" ] && [ -f ".env" ]; then
+            echo "Loading from .env file..." >&2
+            set -a  # Export all variables
+            source ".env" 2>/dev/null || true
+            set +a
+        fi
+        
+        # Apply environment overrides if enabled
+        if [ "$load_environment" = "true" ]; then
+            echo "Applying environment variable overrides..." >&2
+            for var in AWS_REGION STACK_NAME DEPLOYMENT_TYPE INSTANCE_TYPE ENVIRONMENT; do
+                local env_value
+                eval "env_value=\${${var}:-}"
+                if [ -n "$env_value" ]; then
+                    set_variable "$var" "$env_value" || true
+                fi
+            done
+        fi
+        
+        echo "Legacy variable initialization completed" >&2
+    fi
+}
+
+# =============================================================================
+# COMPATIBILITY FUNCTION WRAPPERS
 # =============================================================================
 
 # Legacy AWS deployment common functions that now use modular architecture
@@ -447,6 +852,57 @@ display_enhanced_deployment_summary() {
 }
 
 # =============================================================================
+# COMPATIBILITY LAYER SUMMARY AND RECOMMENDATIONS
+# =============================================================================
+
+# Show compatibility status and recommendations
+show_compatibility_status() {
+    cat >&2 <<EOF
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 BASH COMPATIBILITY LAYER STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bash Version: ${BASH_VERSION}
+Modern Features: $BASH_IS_MODERN
+Associative Arrays: $BASH_HAS_ASSOCIATIVE_ARRAYS
+Name References: $BASH_HAS_NAME_REFERENCES
+
+EOF
+
+    if [[ "$BASH_IS_MODERN" == "true" ]]; then
+        cat >&2 <<EOF
+✅ MODERN MODE ACTIVE
+  • Enhanced performance with associative arrays
+  • Advanced variable management and caching
+  • Comprehensive resource dependency tracking
+  • Structured logging and monitoring
+  • Full feature set available
+
+EOF
+    else
+        cat >&2 <<EOF
+⚠️  LEGACY COMPATIBILITY MODE
+  • Basic functionality maintained
+  • Reduced performance (no caching/optimization)
+  • Simplified resource tracking
+  • Limited validation and error handling
+  • Some advanced features unavailable
+
+📈 UPGRADE RECOMMENDATIONS:
+  • macOS: brew install bash (get 5.2+)
+  • Ubuntu 22.04+: bash 5.1+ available
+  • Compile from source for latest features
+  
+🔗 See: docs/BASH_MODERNIZATION_GUIDE.md
+
+EOF
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+}
+
+# =============================================================================
 # CLEANUP FUNCTIONS
 # =============================================================================
 
@@ -457,14 +913,50 @@ cleanup_enhanced_deployment() {
     echo "Starting enhanced cleanup for: $stack_name" >&2
     
     # Cleanup in reverse order
-    cleanup_docker_comprehensive "$stack_name"
-    cleanup_spot_resources "$stack_name"
-    cleanup_efs_resources "$stack_name"
-    cleanup_security_resources "$stack_name"
-    cleanup_iam_resources_comprehensive "$stack_name"
+    if declare -f cleanup_docker_comprehensive >/dev/null 2>&1; then
+        cleanup_docker_comprehensive "$stack_name"
+    fi
     
-    # Cleanup registry
-    cleanup_registry "$stack_name"
+    if declare -f cleanup_spot_resources >/dev/null 2>&1; then
+        cleanup_spot_resources "$stack_name"
+    fi
+    
+    if declare -f cleanup_efs_resources >/dev/null 2>&1; then
+        cleanup_efs_resources "$stack_name"
+    fi
+    
+    if declare -f cleanup_security_resources >/dev/null 2>&1; then
+        cleanup_security_resources "$stack_name"
+    fi
+    
+    if declare -f cleanup_iam_resources_comprehensive >/dev/null 2>&1; then
+        cleanup_iam_resources_comprehensive "$stack_name"
+    fi
+    
+    # Cleanup registry (both modern and legacy)
+    if [[ "$BASH_IS_MODERN" == "true" ]] && declare -f cleanup_registry >/dev/null 2>&1; then
+        cleanup_registry "$stack_name"
+    elif [[ -f "$LEGACY_RESOURCE_REGISTRY_FILE" ]]; then
+        rm -f "$LEGACY_RESOURCE_REGISTRY_FILE"
+        echo "Legacy registry cleaned up" >&2
+    fi
     
     echo "Enhanced cleanup completed" >&2
 }
+
+# =============================================================================
+# INITIALIZATION
+# =============================================================================
+
+# Auto-initialize the compatibility layer
+if ! initialize_variables; then
+    echo "WARNING: Variable initialization encountered errors" >&2
+fi
+
+# Show compatibility status if requested
+if [[ "${SHOW_COMPATIBILITY_STATUS:-true}" == "true" ]]; then
+    show_compatibility_status
+    export SHOW_COMPATIBILITY_STATUS=false
+fi
+
+echo "Enhanced compatibility wrapper loaded successfully (modern: $BASH_IS_MODERN)" >&2

@@ -1,10 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =============================================================================
 # GeuseMaker - Simple Intelligent Selection Demo  
 # =============================================================================
-# Compatible with older bash versions (works on macOS default bash 3.2)
+# Requires: bash 5.3.3+ (updated from previous bash 3.2 compatibility)
 # =============================================================================
+
+# Get script directory for bash version validation
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Validate bash version before proceeding
+source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
+require_bash_533 "simple-demo.sh"
 
 set -euo pipefail
 

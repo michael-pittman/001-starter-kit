@@ -1,22 +1,47 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Modular AWS Deployment Orchestrator
 # Minimal orchestrator that leverages modular components
+# Requires: bash 5.3.3+
 # =============================================================================
 
-set -euo pipefail
-
-# =============================================================================
-# SCRIPT SETUP
-# =============================================================================
-
+# Bash version validation - critical for deployment safety
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Validate bash version before proceeding with deployment
+source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
+require_bash_533 "aws-deployment-modular.sh"
+
+set -euo pipefail
 
 # Source core modules
 source "$PROJECT_ROOT/lib/modules/config/variables.sh"
 source "$PROJECT_ROOT/lib/modules/core/registry.sh"
 source "$PROJECT_ROOT/lib/modules/core/errors.sh"
+
+# Load AWS CLI v2 enhancements
+source "$PROJECT_ROOT/lib/aws-cli-v2.sh"
+
+# Source enhanced validation and recovery libraries
+source "$PROJECT_ROOT/lib/deployment-validation.sh"
+source "$PROJECT_ROOT/lib/error-recovery.sh"
+source "$PROJECT_ROOT/lib/aws-quota-checker.sh"
+source "$PROJECT_ROOT/lib/deployment-health.sh"
+source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+source "$PROJECT_ROOT/lib/error-handling.sh"
+
+# Initialize enhanced error handling with modern features
+if declare -f init_enhanced_error_handling >/dev/null 2>&1; then
+    init_enhanced_error_handling "auto" "true" "true"
+    echo "🚀 Enhanced error handling initialized with modern features"
+else
+    init_error_handling "strict"
+    echo "⚙️  Basic error handling initialized"
+fi
+
+# Source AWS error handling for intelligent retries
+source "$PROJECT_ROOT/lib/aws-api-error-handling.sh" 2>/dev/null || echo "⚠️  AWS error handling module not available"
 
 # =============================================================================
 # USAGE
@@ -42,6 +67,7 @@ Options:
     --nat-gateway             Create NAT Gateway for private subnet internet access
     --no-efs                  Disable EFS persistent storage (enabled by default)
     --alb                     Create Application Load Balancer for high availability
+    --cloudfront, --cdn       Create CloudFront CDN distribution (requires --alb)
     
     Deployment Options:
     --validate-only           Validate configuration without deploying
@@ -137,6 +163,10 @@ parse_arguments() {
                 set_variable "DRY_RUN" "true"
                 shift
                 ;;
+            --cloudfront|--cdn)
+                ENABLE_CLOUDFRONT="true"
+                shift
+                ;;
             -h|--help)
                 usage 0
                 ;;
@@ -170,25 +200,67 @@ run_deployment() {
     # Initialize registry
     initialize_registry "$stack_name"
     
-    # Stage 1: Infrastructure
+    # Stage 1: Infrastructure with retry
     echo -e "\n🔧 Stage 1: Infrastructure Setup"
-    setup_infrastructure || return 1
+    if declare -f retry_with_backoff >/dev/null 2>&1; then
+        retry_with_backoff "setup_infrastructure" "Infrastructure setup" 2 || {
+            echo "ERROR: Infrastructure setup failed after retries" >&2
+            return 1
+        }
+    else
+        setup_infrastructure || return 1
+    fi
     
-    # Stage 2: Instance Launch
+    # Stage 2: Instance Launch with intelligent recovery
     echo -e "\n🚀 Stage 2: Instance Launch"
-    launch_deployment_instance || return 1
+    if ! launch_deployment_instance; then
+        echo "Instance launch failed, attempting recovery..." >&2
+        
+        # Try recovery if available
+        if declare -f orchestrate_recovery >/dev/null 2>&1; then
+            if orchestrate_recovery "EC2_INSUFFICIENT_CAPACITY" "$stack_name"; then
+                echo "Recovery successful, retrying instance launch..."
+                launch_deployment_instance || return 1
+            else
+                echo "ERROR: Recovery failed" >&2
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
     
     # Stage 3: Application Deployment
     echo -e "\n📦 Stage 3: Application Deployment"
-    deploy_application || return 1
+    if declare -f retry_with_backoff >/dev/null 2>&1; then
+        retry_with_backoff "deploy_application" "Application deployment" 2 || return 1
+    else
+        deploy_application || return 1
+    fi
     
     # Stage 4: Validation
     echo -e "\n✅ Stage 4: Validation"
     validate_deployment || return 1
     
+    # Stage 5: Health Check
+    echo -e "\n🏥 Stage 5: Post-Deployment Health Check"
+    if declare -f perform_health_check >/dev/null 2>&1; then
+        if ! perform_health_check "$stack_name" "$(get_variable AWS_REGION)"; then
+            echo "WARNING: Health check detected issues" >&2
+            echo "Please run 'make health-check STACK_NAME=$stack_name' for details" >&2
+        fi
+    fi
+    
     # Success
     echo -e "\n🎉 Deployment completed successfully!"
     print_deployment_summary
+    
+    # Provide next steps
+    echo -e "\n💡 Next Steps:"
+    echo "  1. Run health check: make health-check STACK_NAME=$stack_name"
+    echo "  2. Monitor deployment: make health-monitor STACK_NAME=$stack_name"
+    echo "  3. View logs: make logs STACK_NAME=$stack_name"
+    echo "  4. Check quotas: make check-quotas REGION=$(get_variable AWS_REGION)"
 }
 
 # =============================================================================
@@ -204,6 +276,7 @@ setup_infrastructure() {
     source "$PROJECT_ROOT/lib/modules/infrastructure/iam.sh"
     source "$PROJECT_ROOT/lib/modules/infrastructure/efs.sh"
     source "$PROJECT_ROOT/lib/modules/infrastructure/alb.sh"
+    source "$PROJECT_ROOT/lib/modules/infrastructure/cloudfront.sh"
     
     # Get configuration variables
     local stack_name="$(get_variable STACK_NAME)"
@@ -214,6 +287,7 @@ setup_infrastructure() {
     local enable_private_subnets="false"
     local enable_nat_gateway="false"
     local enable_alb="false"
+    local enable_cloudfront="false"
     
     # Set from environment if available
     [ "${ENABLE_MULTI_AZ:-}" = "true" ] && enable_multi_az="true"
@@ -221,6 +295,7 @@ setup_infrastructure() {
     [ "${ENABLE_PRIVATE_SUBNETS:-}" = "true" ] && enable_private_subnets="true"
     [ "${ENABLE_NAT_GATEWAY:-}" = "true" ] && enable_nat_gateway="true"
     [ "${ENABLE_ALB:-}" = "true" ] && enable_alb="true"
+    [ "${ENABLE_CLOUDFRONT:-}" = "true" ] && enable_cloudfront="true"
     
     echo "Configuration: Multi-AZ=$enable_multi_az, EFS=$enable_efs, Private Subnets=$enable_private_subnets, ALB=$enable_alb" >&2
     
@@ -303,23 +378,71 @@ setup_infrastructure() {
     # Setup ALB if enabled
     ALB_DNS_NAME=""
     ALB_TARGET_GROUP_ARN=""
+    ALB_SETUP_FAILED="false"
     if [ "$enable_alb" = "true" ]; then
         echo "Setting up Application Load Balancer..." >&2
         local alb_info
-        alb_info=$(setup_alb_infrastructure "$stack_name" "$PUBLIC_SUBNETS_JSON" "$ALB_SECURITY_GROUP_ID" "$VPC_ID") || {
-            echo "WARNING: Failed to setup ALB, continuing without load balancer" >&2
-            ALB_DNS_NAME=""
-            ALB_TARGET_GROUP_ARN=""
+        
+        # Check if we have enough subnets for ALB
+        local subnet_count
+        subnet_count=$(echo "$PUBLIC_SUBNETS_JSON" | jq 'length')
+        if [ "$subnet_count" -lt 2 ]; then
+            echo "WARNING: ALB requires at least 2 subnets in different AZs (found: $subnet_count)" >&2
+            echo "WARNING: Continuing without ALB - use multi-AZ deployment for ALB support" >&2
+            ALB_SETUP_FAILED="true"
+            enable_alb="false"
+        else
+            # Try to setup ALB with retries
+            alb_info=$(setup_alb_infrastructure_with_retries "$stack_name" "$PUBLIC_SUBNETS_JSON" "$ALB_SECURITY_GROUP_ID" "$VPC_ID" 3 10) || {
+                echo "WARNING: Failed to setup ALB after retries, continuing without load balancer" >&2
+                ALB_SETUP_FAILED="true"
+                enable_alb="false"
+                ALB_DNS_NAME=""
+                ALB_TARGET_GROUP_ARN=""
+            }
+            
+            if [ -n "$alb_info" ] && [ "$alb_info" != "{}" ]; then
+                ALB_DNS_NAME=$(echo "$alb_info" | jq -r '.alb_dns // empty')
+                if [ -n "$ALB_DNS_NAME" ]; then
+                    # Get the first target group ARN (for n8n by default)
+                    ALB_TARGET_GROUP_ARN=$(echo "$alb_info" | jq -r '.target_groups[0].target_group_arn // empty')
+                    # Store all target groups for instance registration
+                    ALB_TARGET_GROUPS_JSON=$(echo "$alb_info" | jq -c '.target_groups // []')
+                    echo "ALB: $ALB_DNS_NAME (Primary Target Group: $ALB_TARGET_GROUP_ARN)" >&2
+                else
+                    echo "WARNING: ALB created but DNS name not available" >&2
+                    ALB_SETUP_FAILED="true"
+                    enable_alb="false"
+                fi
+            else
+                ALB_SETUP_FAILED="true"
+                enable_alb="false"
+            fi
+        fi
+    fi
+    
+    # Setup CloudFront if enabled and ALB was successful
+    CLOUDFRONT_DOMAIN=""
+    CLOUDFRONT_DIST_ID=""
+    if [ "$enable_cloudfront" = "true" ] && [ "$enable_alb" = "true" ] && [ -n "$ALB_DNS_NAME" ]; then
+        echo "Setting up CloudFront CDN distribution..." >&2
+        local cf_info
+        cf_info=$(setup_cloudfront_for_alb "$stack_name" "$ALB_DNS_NAME") || {
+            echo "WARNING: Failed to setup CloudFront, continuing without CDN" >&2
+            CLOUDFRONT_DOMAIN=""
+            CLOUDFRONT_DIST_ID=""
         }
         
-        if [ -n "$alb_info" ]; then
-            ALB_DNS_NAME=$(echo "$alb_info" | jq -r '.alb_dns')
-            # Get the first target group ARN (for n8n by default)
-            ALB_TARGET_GROUP_ARN=$(echo "$alb_info" | jq -r '.target_groups[0].target_group_arn')
-            # Store all target groups for instance registration
-            ALB_TARGET_GROUPS_JSON=$(echo "$alb_info" | jq -c '.target_groups')
-            echo "ALB: $ALB_DNS_NAME (Primary Target Group: $ALB_TARGET_GROUP_ARN)" >&2
+        if [ -n "$cf_info" ]; then
+            CLOUDFRONT_DIST_ID=$(echo "$cf_info" | jq -r '.distribution_id // empty')
+            CLOUDFRONT_DOMAIN=$(echo "$cf_info" | jq -r '.domain_name // empty')
+            if [ -n "$CLOUDFRONT_DOMAIN" ]; then
+                echo "CloudFront: https://$CLOUDFRONT_DOMAIN (Distribution: $CLOUDFRONT_DIST_ID)" >&2
+            fi
         fi
+    elif [ "$enable_cloudfront" = "true" ] && [ "$ALB_SETUP_FAILED" = "true" ]; then
+        echo "WARNING: CloudFront requires ALB, but ALB setup failed. Skipping CloudFront." >&2
+        echo "TIP: Use --multi-az flag to ensure ALB can be created (requires 2+ AZs)" >&2
     fi
     
     # Ensure key pair
@@ -341,6 +464,7 @@ setup_infrastructure() {
     export SECURITY_GROUP_ID ALB_SECURITY_GROUP_ID EFS_SECURITY_GROUP_ID
     export IAM_ROLE_NAME IAM_INSTANCE_PROFILE KEY_NAME
     export EFS_ID EFS_DNS ALB_DNS_NAME ALB_TARGET_GROUP_ARN ALB_TARGET_GROUPS_JSON
+    export CLOUDFRONT_DOMAIN CLOUDFRONT_DIST_ID ALB_SETUP_FAILED
     
     echo "Comprehensive infrastructure setup complete" >&2
     return 0
@@ -500,12 +624,41 @@ Load Balancing:
 - ALB DNS:      ${ALB_DNS_NAME:-Not configured}
 - Target Group: ${ALB_TARGET_GROUP_ARN:-Not configured}
 
+CDN (CloudFront):
+- Domain:       ${CLOUDFRONT_DOMAIN:-Not configured}
+- Distribution: ${CLOUDFRONT_DIST_ID:-Not configured}
+
 Service URLs:
-- n8n Workflow UI:    http://${ALB_DNS_NAME:-$public_ip}:5678
-- Qdrant Vector DB:   http://${ALB_DNS_NAME:-$public_ip}:6333
-- Ollama LLM API:     http://${ALB_DNS_NAME:-$public_ip}:11434
-- Crawl4AI Scraper:   http://${ALB_DNS_NAME:-$public_ip}:11235
-- Health Check:       http://${ALB_DNS_NAME:-$public_ip}:8080/health
+EOF
+    
+    # Display appropriate URLs based on what's configured
+    if [ -n "$CLOUDFRONT_DOMAIN" ]; then
+        cat <<EOF
+- n8n Workflow UI:    https://${CLOUDFRONT_DOMAIN}/n8n/
+- Qdrant Vector DB:   https://${CLOUDFRONT_DOMAIN}/api/qdrant/
+- Ollama LLM API:     https://${CLOUDFRONT_DOMAIN}/api/ollama/
+- Crawl4AI Scraper:   https://${CLOUDFRONT_DOMAIN}/api/crawl4ai/
+- Health Check:       https://${CLOUDFRONT_DOMAIN}/health
+EOF
+    elif [ -n "$ALB_DNS_NAME" ]; then
+        cat <<EOF
+- n8n Workflow UI:    http://${ALB_DNS_NAME}:5678
+- Qdrant Vector DB:   http://${ALB_DNS_NAME}:6333
+- Ollama LLM API:     http://${ALB_DNS_NAME}:11434
+- Crawl4AI Scraper:   http://${ALB_DNS_NAME}:11235
+- Health Check:       http://${ALB_DNS_NAME}:8080/health
+EOF
+    else
+        cat <<EOF
+- n8n Workflow UI:    http://${public_ip}:5678
+- Qdrant Vector DB:   http://${public_ip}:6333
+- Ollama LLM API:     http://${public_ip}:11434
+- Crawl4AI Scraper:   http://${public_ip}:11235
+- Health Check:       http://${public_ip}:8080/health
+EOF
+    fi
+    
+    cat <<EOF
 
 SSH Access:
 ssh -i ~/.ssh/${KEY_NAME}.pem ubuntu@${public_ip}
@@ -546,6 +699,30 @@ main() {
         echo "ERROR: Missing required variables" >&2
         usage 1
     }
+    
+    # Run comprehensive deployment validation
+    echo -e "\n🔍 Running comprehensive deployment validation..."
+    if declare -f validate_deployment_prerequisites >/dev/null 2>&1; then
+        if ! validate_deployment_prerequisites "$(get_variable STACK_NAME)" "$(get_variable AWS_REGION)"; then
+            echo "ERROR: Deployment validation failed" >&2
+            echo "Please resolve the issues above before proceeding" >&2
+            exit 1
+        fi
+    fi
+    
+    # Check AWS quotas for the deployment type
+    echo -e "\n📋 Checking AWS service quotas..."
+    if declare -f check_all_quotas >/dev/null 2>&1; then
+        local deployment_type="standard"
+        [ "$(get_variable MULTI_AZ)" = "true" ] && deployment_type="multi-az"
+        [ "$(get_variable ALB_ENABLED)" = "true" ] && deployment_type="enterprise"
+        
+        if ! check_all_quotas "$(get_variable AWS_REGION)" "$deployment_type"; then
+            echo "WARNING: AWS quota issues detected" >&2
+            echo "Deployment may fail due to insufficient quotas" >&2
+            # Continue with warning rather than failing
+        fi
+    fi
     
     # Print configuration
     print_configuration

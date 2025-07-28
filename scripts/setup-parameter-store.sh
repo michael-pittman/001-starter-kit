@@ -1,11 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =============================================================================
 # Parameter Store Setup Script
 # Creates required parameters in AWS Systems Manager Parameter Store
+# Requires: bash 5.3.3+
 # =============================================================================
 
+# Get script directory for bash version validation
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Validate bash version before proceeding
+source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
+require_bash_533 "setup-parameter-store.sh"
+
 set -euo pipefail
+
+# Load AWS CLI v2 enhancements
+source "$PROJECT_ROOT/lib/aws-cli-v2.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -30,14 +42,14 @@ create_parameter() {
     local description="$4"
     local aws_region="${5:-us-east-1}"
     
-    # Check if parameter already exists
-    if aws ssm get-parameter --name "$name" --region "$aws_region" &>/dev/null; then
+    # Check if parameter already exists using AWS CLI v2
+    if aws_cli_with_retry ssm get-parameter --name "$name" --region "$aws_region" &>/dev/null; then
         warning "Parameter $name already exists. Skipping creation."
         return 0
     fi
     
-    # Create parameter
-    aws ssm put-parameter \
+    # Create parameter using AWS CLI v2 with retry logic
+    aws_cli_with_retry ssm put-parameter \
         --name "$name" \
         --value "$value" \
         --type "$type" \
@@ -187,7 +199,7 @@ list_parameters() {
     
     log "Listing all GeuseMaker parameters..."
     
-    aws ssm get-parameters-by-path \
+    aws_paginate ssm get-parameters-by-path \
         --path "/aibuildkit" \
         --recursive \
         --query 'Parameters[].{Name:Name,Type:Type,LastModified:LastModifiedDate}' \
@@ -210,7 +222,7 @@ validate_parameters() {
     local missing_params=()
     
     for param in "${required_params[@]}"; do
-        if ! aws ssm get-parameter --name "$param" --region "$aws_region" &>/dev/null; then
+        if ! aws_cli_with_retry ssm get-parameter --name "$param" --region "$aws_region" &>/dev/null; then
             missing_params+=("$param")
         fi
     done
@@ -242,7 +254,7 @@ cleanup_parameters() {
     
     # Get all parameter names (bash 3.x compatible)
     local param_names_raw
-    param_names_raw=$(aws ssm get-parameters-by-path \
+    param_names_raw=$(aws_paginate ssm get-parameters-by-path \
         --path "/aibuildkit" \
         --recursive \
         --query 'Parameters[].Name' \
@@ -255,7 +267,7 @@ cleanup_parameters() {
     # Delete each parameter
     for param_name in "${param_names[@]}"; do
         if [ -n "$param_name" ]; then
-            aws ssm delete-parameter --name "$param_name" --region "$aws_region"
+            aws_cli_with_retry ssm delete-parameter --name "$param_name" --region "$aws_region"
             log "Deleted parameter: $param_name"
         fi
     done
@@ -273,7 +285,7 @@ check_iam_permissions() {
     log "Checking IAM permissions for Parameter Store..."
     
     # Test basic SSM permissions
-    if ! aws ssm describe-parameters --region "$aws_region" &>/dev/null; then
+    if ! aws_cli_with_retry ssm describe-parameters --region "$aws_region" --max-items 1 &>/dev/null; then
         error "Missing SSM permissions. Ensure your AWS credentials have the following policies:"
         echo "  - AmazonSSMFullAccess (or custom policy with ssm:* permissions)"
         return 1

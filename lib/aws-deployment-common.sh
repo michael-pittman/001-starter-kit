@@ -1,8 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # AWS Deployment Common Library
 # Shared functions for all AWS deployment scripts
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation - critical for deployment safety
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    # Get the directory of this script for sourcing bash_version module
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "aws-deployment-common.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
 
 # =============================================================================
 # UNIFIED LOGGING AND OUTPUT FUNCTIONS
@@ -63,31 +73,132 @@ get_timestamp() {
     date +'%Y-%m-%d %H:%M:%S'
 }
 
-# Core logging functions with unified formatting
+# Enhanced logging functions with modern features and structured output
 # Use parameter expansion with defaults to prevent unbound variable errors
+
+# Check if modern error handling is available
+check_modern_logging() {
+    if declare -f log_structured >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Enhanced log function with structured logging support
 log() { 
-    local context=$(get_log_context)
-    echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}📋 [LOG]${NC:-} $1" >&2
+    local message="$1"
+    local level="${2:-INFO}"
+    shift 2>/dev/null || true
+    local attributes=("$@")
+    
+    local context
+    context=$(get_log_context)
+    
+    if check_modern_logging; then
+        log_structured "$level" "$message" "context=$context" "${attributes[@]}"
+    else
+        # Fallback to traditional logging
+        echo -e "${BLUE:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${BLUE:-}📋 [LOG]${NC:-} $message" >&2
+    fi
 }
 
+# Enhanced error function with recovery suggestions
 error() { 
-    local context=$(get_log_context)
-    echo -e "${RED:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}❌ [ERROR]${NC:-} $1" >&2
+    local message="$1"
+    local error_type="${2:-SYSTEM}"
+    local recovery_suggestion="${3:-}"
+    
+    local context
+    context=$(get_log_context)
+    
+    if check_modern_logging; then
+        log_structured "ERROR" "$message" \
+            "context=$context" \
+            "error_type=$error_type" \
+            "recovery_suggestion=$recovery_suggestion"
+    else
+        # Fallback to traditional error logging
+        echo -e "${RED:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${RED:-}❌ [ERROR]${NC:-} $message" >&2
+        if [[ -n "$recovery_suggestion" ]]; then
+            echo -e "${YELLOW:-}        💡 Suggestion: $recovery_suggestion${NC:-}" >&2
+        fi
+    fi
 }
 
+# Enhanced success function with metrics
 success() { 
-    local context=$(get_log_context)
-    echo -e "${GREEN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}✅ [SUCCESS]${NC:-} $1" >&2
+    local message="$1"
+    local duration="${2:-}"
+    local metrics="${3:-}"
+    
+    local context
+    context=$(get_log_context)
+    
+    if check_modern_logging; then
+        log_structured "INFO" "$message" \
+            "context=$context" \
+            "level=success" \
+            "duration=$duration" \
+            "metrics=$metrics"
+    else
+        # Fallback to traditional success logging
+        local duration_text=""
+        if [[ -n "$duration" ]]; then
+            duration_text=" (${duration}s)"
+        fi
+        echo -e "${GREEN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${GREEN:-}✅ [SUCCESS]${NC:-} $message$duration_text" >&2
+    fi
 }
 
+# Enhanced warning function with categorization
 warning() { 
-    local context=$(get_log_context)
-    echo -e "${YELLOW:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${YELLOW:-}⚠️  [WARNING]${NC:-} $1" >&2
+    local message="$1"
+    local warning_type="${2:-GENERAL}"
+    local action_required="${3:-false}"
+    
+    local context
+    context=$(get_log_context)
+    
+    if check_modern_logging; then
+        log_structured "WARN" "$message" \
+            "context=$context" \
+            "warning_type=$warning_type" \
+            "action_required=$action_required"
+    else
+        # Fallback to traditional warning logging
+        local action_text=""
+        if [[ "$action_required" == "true" ]]; then
+            action_text=" [ACTION REQUIRED]"
+        fi
+        echo -e "${YELLOW:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${YELLOW:-}⚠️  [WARNING]${NC:-} $message$action_text" >&2
+    fi
 }
 
+# Enhanced info function with categorization
 info() { 
-    local context=$(get_log_context)
-    echo -e "${CYAN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${CYAN:-}ℹ️  [INFO]${NC:-} $1" >&2
+    local message="$1"
+    local info_type="${2:-GENERAL}"
+    local importance="${3:-normal}"
+    
+    local context
+    context=$(get_log_context)
+    
+    if check_modern_logging; then
+        log_structured "INFO" "$message" \
+            "context=$context" \
+            "info_type=$info_type" \
+            "importance=$importance"
+    else
+        # Fallback to traditional info logging
+        local importance_prefix=""
+        case "$importance" in
+            high) importance_prefix="🔥 " ;;
+            low) importance_prefix="💭 " ;;
+            *) importance_prefix="ℹ️  " ;;
+        esac
+        echo -e "${CYAN:-}${BOLD:-}[$(get_timestamp)]${NC:-} ${CYAN:-}${context}${NC:-} ${CYAN:-}${importance_prefix}[INFO]${NC:-} $message" >&2
+    fi
 }
 
 # Deployment progress functions

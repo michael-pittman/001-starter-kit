@@ -1,8 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Configuration Management Library 
 # Centralized configuration system for GeuseMaker project
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "config-management.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
+
+# Load associative array utilities
+source "$SCRIPT_DIR/associative-arrays.sh"
 # This library provides centralized configuration management for the GeuseMaker
 # project, supporting multiple environments, deployment types, and integrating
 # with the existing shared library system.
@@ -45,16 +57,29 @@ if [[ -z "${DEFAULT_DEPLOYMENT_TYPE:-}" ]]; then
     readonly DEFAULT_DEPLOYMENT_TYPE="simple"
 fi
 
-# Valid options arrays (bash 3.x/4.x compatible)
-readonly VALID_ENVIRONMENTS="development staging production"
-readonly VALID_DEPLOYMENT_TYPES="simple spot ondemand"
-readonly VALID_REGIONS="us-east-1 us-west-2 eu-west-1 ap-southeast-1"
+# =============================================================================
+# GLOBAL ASSOCIATIVE ARRAYS FOR CONFIGURATION
+# =============================================================================
 
-# Configuration cache
-CONFIG_CACHE_LOADED=false
-CURRENT_ENVIRONMENT=""
-CURRENT_DEPLOYMENT_TYPE=""
-CONFIG_FILE_PATH=""
+# Global configuration storage using associative arrays
+declare -gA CONFIG_CACHE
+declare -gA ENVIRONMENT_CONFIGS
+declare -gA DEPLOYMENT_OVERRIDES
+declare -gA VALIDATION_RULES
+declare -gA CONFIG_METADATA
+
+# Valid options stored in associative arrays for enhanced validation
+declare -gA VALID_OPTIONS
+aa_set VALID_OPTIONS "environments" "development staging production"
+aa_set VALID_OPTIONS "deployment_types" "simple spot ondemand"
+aa_set VALID_OPTIONS "regions" "us-east-1 us-west-2 eu-west-1 ap-southeast-1"
+
+# Configuration state management
+declare -gA CONFIG_STATE
+aa_set CONFIG_STATE "cache_loaded" "false"
+aa_set CONFIG_STATE "current_environment" ""
+aa_set CONFIG_STATE "current_deployment_type" ""
+aa_set CONFIG_STATE "config_file_path" ""
 
 # =============================================================================
 # DEPENDENCY MANAGEMENT
@@ -157,7 +182,7 @@ check_config_dependencies() {
 # VALIDATION FUNCTIONS
 # =============================================================================
 
-# Validate environment name (bash 3.x compatible)
+# Enhanced validation using associative arrays
 validate_environment() {
     local env="$1"
     
@@ -170,9 +195,11 @@ validate_environment() {
         return 1
     fi
     
-    # Check against valid environments (bash 3.x compatible)
+    # Use associative array for validation
+    local valid_environments=$(aa_get VALID_OPTIONS "environments" "")
     local valid=false
-    for valid_env in $VALID_ENVIRONMENTS; do
+    
+    for valid_env in $valid_environments; do
         if [[ "$env" == "$valid_env" ]]; then
             valid=true
             break
@@ -181,17 +208,21 @@ validate_environment() {
     
     if [[ "$valid" != "true" ]]; then
         if declare -f error >/dev/null 2>&1; then
-            error "Invalid environment: $env. Valid options: $VALID_ENVIRONMENTS"
+            error "Invalid environment: $env. Valid options: $valid_environments"
         else
-            echo "ERROR: Invalid environment: $env. Valid options: $VALID_ENVIRONMENTS" >&2
+            echo "ERROR: Invalid environment: $env. Valid options: $valid_environments" >&2
         fi
         return 1
     fi
     
+    # Store validation result in cache
+    aa_set CONFIG_METADATA "last_validated_environment" "$env"
+    aa_set CONFIG_METADATA "last_validation_time" "$(date +%s)"
+    
     return 0
 }
 
-# Validate deployment type (bash 3.x compatible)
+# Enhanced deployment type validation using associative arrays
 validate_deployment_type() {
     local type="$1"
     
@@ -199,9 +230,11 @@ validate_deployment_type() {
         type="$DEFAULT_DEPLOYMENT_TYPE"
     fi
     
-    # Check against valid deployment types (bash 3.x compatible)
+    # Use associative array for validation
+    local valid_deployment_types=$(aa_get VALID_OPTIONS "deployment_types" "")
     local valid=false
-    for valid_type in $VALID_DEPLOYMENT_TYPES; do
+    
+    for valid_type in $valid_deployment_types; do
         if [[ "$type" == "$valid_type" ]]; then
             valid=true
             break
@@ -210,12 +243,41 @@ validate_deployment_type() {
     
     if [[ "$valid" != "true" ]]; then
         if declare -f error >/dev/null 2>&1; then
-            error "Invalid deployment type: $type. Valid options: $VALID_DEPLOYMENT_TYPES"
+            error "Invalid deployment type: $type. Valid options: $valid_deployment_types"
         else
-            echo "ERROR: Invalid deployment type: $type. Valid options: $VALID_DEPLOYMENT_TYPES" >&2
+            echo "ERROR: Invalid deployment type: $type. Valid options: $valid_deployment_types" >&2
         fi
         return 1
     fi
+    
+    # Store validation result and get deployment metadata
+    aa_set CONFIG_METADATA "last_validated_deployment_type" "$type"
+    
+    # Load deployment type metadata if available
+    declare -A deployment_metadata
+    case "$type" in
+        "spot")
+            aa_set deployment_metadata "cost_optimization" "high"
+            aa_set deployment_metadata "availability_guarantee" "low"
+            aa_set deployment_metadata "recommended_for" "development,testing,batch_processing"
+            ;;
+        "ondemand")
+            aa_set deployment_metadata "cost_optimization" "low"
+            aa_set deployment_metadata "availability_guarantee" "high"
+            aa_set deployment_metadata "recommended_for" "production,critical_workloads"
+            ;;
+        "simple")
+            aa_set deployment_metadata "cost_optimization" "medium"
+            aa_set deployment_metadata "availability_guarantee" "medium"
+            aa_set deployment_metadata "recommended_for" "development,prototyping"
+            ;;
+    esac
+    
+    # Store deployment metadata in config cache
+    local metadata_key
+    for metadata_key in $(aa_keys deployment_metadata); do
+        aa_set CONFIG_CACHE "deployment_metadata:${type}:${metadata_key}" "$(aa_get deployment_metadata "$metadata_key")"
+    done
     
     return 0
 }
@@ -388,7 +450,7 @@ config_file_exists() {
     [[ -f "$config_file" ]]
 }
 
-# Load configuration for environment with caching
+# Enhanced configuration loading with associative array caching
 load_config() {
     local env="${1:-$DEFAULT_ENVIRONMENT}"
     local deployment_type="${2:-$DEFAULT_DEPLOYMENT_TYPE}"
@@ -398,8 +460,17 @@ load_config() {
     validate_environment "$env" || return 1
     validate_deployment_type "$deployment_type" || return 1
     
+    # Create cache key for this configuration
+    local cache_key="${env}:${deployment_type}"
+    local cache_loaded=$(aa_get CONFIG_STATE "cache_loaded")
+    local current_env=$(aa_get CONFIG_STATE "current_environment")
+    local current_type=$(aa_get CONFIG_STATE "current_deployment_type")
+    
     # Check cache
-    if [[ "$CONFIG_CACHE_LOADED" == "true" && "$CURRENT_ENVIRONMENT" == "$env" && "$CURRENT_DEPLOYMENT_TYPE" == "$deployment_type" && "$force_reload" != "true" ]]; then
+    if [[ "$cache_loaded" == "true" && "$current_env" == "$env" && "$current_type" == "$deployment_type" && "$force_reload" != "true" ]]; then
+        if declare -f log >/dev/null 2>&1; then
+            log "Using cached configuration for $env:$deployment_type"
+        fi
         return 0
     fi
     
@@ -415,76 +486,347 @@ load_config() {
         return 1
     fi
     
-    # Load configuration
+    # Load configuration using associative arrays
     if declare -f log >/dev/null 2>&1; then
-        log "Loading configuration: environment=$env, type=$deployment_type"
+        log "Loading configuration with associative arrays: environment=$env, type=$deployment_type"
     fi
     
-    # Set global variables
+    # Store configuration in associative arrays
+    declare -A config_data
+    aa_set config_data "environment" "$env"
+    aa_set config_data "deployment_type" "$deployment_type"
+    aa_set config_data "config_file" "$config_file"
+    aa_set config_data "load_time" "$(date +%s)"
+    aa_set config_data "aws_region" "${AWS_REGION:-us-east-1}"
+    aa_set config_data "stack_name" "${STACK_NAME:-GeuseMaker-${env}}"
+    
+    # Cache configuration data with structured keys
+    local config_key
+    for config_key in $(aa_keys config_data); do
+        aa_set CONFIG_CACHE "${cache_key}:${config_key}" "$(aa_get config_data "$config_key")"
+    done
+    
+    # Load environment-specific configuration if available
+    if [[ -f "$config_file" ]]; then
+        load_yaml_config_to_array "$config_file" "$env" "$deployment_type"
+    fi
+    
+    # Set global variables for backward compatibility
     export ENVIRONMENT="$env"
     export CONFIG_ENVIRONMENT="$env"
     export CONFIG_REGION="${AWS_REGION:-us-east-1}"
-    export CONFIG_STACK_NAME="${STACK_NAME:-}"
+    export CONFIG_STACK_NAME="${STACK_NAME:-GeuseMaker-${env}}"
     export DEPLOYMENT_TYPE="$deployment_type"
     export CONFIG_FILE="$config_file"
     export CONFIG_FILE_PATH="$config_file"
     
-    # Cache configuration data
-    CURRENT_ENVIRONMENT="$env"
-    CURRENT_DEPLOYMENT_TYPE="$deployment_type"
-    CONFIG_CACHE_LOADED=true
+    # Update state management
+    aa_set CONFIG_STATE "cache_loaded" "true"
+    aa_set CONFIG_STATE "current_environment" "$env"
+    aa_set CONFIG_STATE "current_deployment_type" "$deployment_type"
+    aa_set CONFIG_STATE "config_file_path" "$config_file"
+    aa_set CONFIG_STATE "last_load_time" "$(date +%s)"
     
     return 0
 }
 
-# Clear configuration cache
+# Load YAML configuration into associative arrays
+load_yaml_config_to_array() {
+    local config_file="$1"
+    local env="$2"
+    local deployment_type="$3"
+    local cache_key="${env}:${deployment_type}"
+    
+    # Use yq to extract configuration sections if available
+    if command -v yq >/dev/null 2>&1; then
+        # Load global configuration
+        local global_keys
+        global_keys=$(yq eval '.global | keys | .[]' "$config_file" 2>/dev/null || echo "")
+        
+        for key in $global_keys; do
+            local value
+            value=$(yq eval ".global.$key" "$config_file" 2>/dev/null || echo "")
+            if [[ "$value" != "null" && -n "$value" ]]; then
+                aa_set CONFIG_CACHE "${cache_key}:global:${key}" "$value"
+            fi
+        done
+        
+        # Load infrastructure configuration
+        local infra_keys
+        infra_keys=$(yq eval '.infrastructure | keys | .[]' "$config_file" 2>/dev/null || echo "")
+        
+        for key in $infra_keys; do
+            local value
+            value=$(yq eval ".infrastructure.$key" "$config_file" 2>/dev/null || echo "")
+            if [[ "$value" != "null" && -n "$value" ]]; then
+                aa_set CONFIG_CACHE "${cache_key}:infrastructure:${key}" "$value"
+            fi
+        done
+        
+        # Load application configurations
+        local app_names
+        app_names=$(yq eval '.applications | keys | .[]' "$config_file" 2>/dev/null || echo "")
+        
+        for app in $app_names; do
+            local app_keys
+            app_keys=$(yq eval ".applications.$app | keys | .[]" "$config_file" 2>/dev/null || echo "")
+            
+            for key in $app_keys; do
+                local value
+                value=$(yq eval ".applications.$app.$key" "$config_file" 2>/dev/null || echo "")
+                if [[ "$value" != "null" && -n "$value" ]]; then
+                    aa_set CONFIG_CACHE "${cache_key}:applications:${app}:${key}" "$value"
+                fi
+            done
+        done
+        
+        if declare -f log >/dev/null 2>&1; then
+            log "Configuration loaded from YAML into associative arrays"
+        fi
+    else
+        if declare -f warning >/dev/null 2>&1; then
+            warning "yq not available, skipping YAML configuration loading"
+        fi
+    fi
+}
+
+# Clear configuration cache using associative arrays
 clear_config_cache() {
-    CONFIG_CACHE_LOADED=false
-    CURRENT_ENVIRONMENT=""
-    CURRENT_DEPLOYMENT_TYPE=""
-    CONFIG_FILE_PATH=""
+    aa_clear CONFIG_CACHE
+    aa_clear ENVIRONMENT_CONFIGS
+    aa_clear DEPLOYMENT_OVERRIDES
+    
+    # Reset state
+    aa_set CONFIG_STATE "cache_loaded" "false"
+    aa_set CONFIG_STATE "current_environment" ""
+    aa_set CONFIG_STATE "current_deployment_type" ""
+    aa_set CONFIG_STATE "config_file_path" ""
+}
+
+# =============================================================================
+# CONFIGURATION INHERITANCE AND OVERRIDES
+# =============================================================================
+
+# Apply environment-specific overrides using associative arrays
+apply_environment_overrides() {
+    local base_env="${1:-development}"
+    local target_env="${2:-$DEFAULT_ENVIRONMENT}"
+    local deployment_type="${3:-$DEFAULT_DEPLOYMENT_TYPE}"
+    
+    if [[ "$base_env" == "$target_env" ]]; then
+        return 0  # No overrides needed
+    fi
+    
+    declare -A base_config
+    declare -A target_config
+    declare -A merged_config
+    
+    # Extract base configuration
+    local base_cache_key="${base_env}:${deployment_type}"
+    local target_cache_key="${target_env}:${deployment_type}"
+    
+    # Copy base configuration
+    local config_key value
+    for config_key in $(aa_keys CONFIG_CACHE); do
+        if [[ "$config_key" =~ ^${base_cache_key}: ]]; then
+            value=$(aa_get CONFIG_CACHE "$config_key")
+            local new_key="${config_key#${base_cache_key}:}"
+            aa_set base_config "$new_key" "$value"
+        fi
+    done
+    
+    # Copy target configuration
+    for config_key in $(aa_keys CONFIG_CACHE); do
+        if [[ "$config_key" =~ ^${target_cache_key}: ]]; then
+            value=$(aa_get CONFIG_CACHE "$config_key")
+            local new_key="${config_key#${target_cache_key}:}"
+            aa_set target_config "$new_key" "$value"
+        fi
+    done
+    
+    # Merge configurations (target overrides base)
+    aa_copy base_config merged_config
+    aa_merge merged_config target_config true
+    
+    # Store merged configuration back
+    for config_key in $(aa_keys merged_config); do
+        value=$(aa_get merged_config "$config_key")
+        aa_set CONFIG_CACHE "${target_cache_key}:${config_key}" "$value"
+    done
+    
+    if declare -f log >/dev/null 2>&1; then
+        log "Applied environment overrides: $base_env -> $target_env"
+    fi
+}
+
+# Apply deployment type specific overrides
+apply_deployment_overrides() {
+    local env="$1"
+    local deployment_type="$2"
+    
+    declare -A overrides
+    local cache_key="${env}:${deployment_type}"
+    
+    # Define deployment-specific overrides
+    case "$deployment_type" in
+        "spot")
+            aa_set overrides "infrastructure:auto_scaling:min_capacity" "2"
+            aa_set overrides "infrastructure:auto_scaling:max_capacity" "10"
+            aa_set overrides "cost_optimization:spot_instances:enabled" "true"
+            aa_set overrides "cost_optimization:spot_instances:max_price" "2.00"
+            aa_set overrides "infrastructure:instance_type" "g4dn.xlarge"
+            ;;
+        "ondemand")
+            aa_set overrides "infrastructure:auto_scaling:min_capacity" "2"
+            aa_set overrides "infrastructure:auto_scaling:max_capacity" "8"
+            aa_set overrides "cost_optimization:spot_instances:enabled" "false"
+            aa_set overrides "infrastructure:availability_guarantee" "high"
+            ;;
+        "simple")
+            aa_set overrides "infrastructure:auto_scaling:min_capacity" "1"
+            aa_set overrides "infrastructure:auto_scaling:max_capacity" "1"
+            aa_set overrides "cost_optimization:spot_instances:enabled" "false"
+            aa_set overrides "infrastructure:auto_scaling:enabled" "false"
+            ;;
+    esac
+    
+    # Apply overrides to cache
+    local override_key value
+    for override_key in $(aa_keys overrides); do
+        value=$(aa_get overrides "$override_key")
+        aa_set CONFIG_CACHE "${cache_key}:${override_key}" "$value"
+        
+        # Also store in deployment overrides for reference
+        aa_set DEPLOYMENT_OVERRIDES "${deployment_type}:${override_key}" "$value"
+    done
+    
+    if declare -f log >/dev/null 2>&1; then
+        log "Applied deployment overrides for type: $deployment_type"
+    fi
+}
+
+# Create configuration profile for specific use case
+create_configuration_profile() {
+    local profile_name="$1"
+    local base_env="${2:-development}"
+    local deployment_type="${3:-simple}"
+    
+    declare -A profile_config
+    
+    # Load base configuration first
+    load_config "$base_env" "$deployment_type"
+    
+    # Define profiles with specific configurations
+    case "$profile_name" in
+        "ml_development")
+            aa_set profile_config "infrastructure:instance_type" "g4dn.xlarge"
+            aa_set profile_config "applications:ollama:resources:gpu_memory_fraction" "0.9"
+            aa_set profile_config "applications:ollama:config:max_loaded_models" "1"
+            aa_set profile_config "cost_optimization:spot_instances:enabled" "true"
+            aa_set profile_config "cost_optimization:spot_instances:max_price" "1.50"
+            ;;
+        "ml_production")
+            aa_set profile_config "infrastructure:instance_type" "g5.xlarge"
+            aa_set profile_config "applications:ollama:resources:gpu_memory_fraction" "0.85"
+            aa_set profile_config "applications:ollama:config:max_loaded_models" "2"
+            aa_set profile_config "cost_optimization:spot_instances:enabled" "false"
+            aa_set profile_config "infrastructure:auto_scaling:enabled" "true"
+            ;;
+        "cost_optimized")
+            aa_set profile_config "infrastructure:instance_type" "g4dn.large"
+            aa_set profile_config "cost_optimization:spot_instances:enabled" "true"
+            aa_set profile_config "cost_optimization:spot_instances:max_price" "0.50"
+            aa_set profile_config "infrastructure:auto_scaling:target_utilization" "85"
+            ;;
+        "high_availability")
+            aa_set profile_config "infrastructure:auto_scaling:min_capacity" "3"
+            aa_set profile_config "infrastructure:auto_scaling:max_capacity" "12"
+            aa_set profile_config "cost_optimization:spot_instances:enabled" "false"
+            aa_set profile_config "infrastructure:availability_guarantee" "high"
+            ;;
+    esac
+    
+    # Apply profile overrides
+    local cache_key="${base_env}:${deployment_type}"
+    local profile_key value
+    for profile_key in $(aa_keys profile_config); do
+        value=$(aa_get profile_config "$profile_key")
+        aa_set CONFIG_CACHE "${cache_key}:${profile_key}" "$value"
+    done
+    
+    # Store profile metadata
+    aa_set CONFIG_METADATA "active_profile" "$profile_name"
+    aa_set CONFIG_METADATA "profile_created_time" "$(date +%s)"
+    aa_set CONFIG_METADATA "profile_base_env" "$base_env"
+    aa_set CONFIG_METADATA "profile_deployment_type" "$deployment_type"
+    
+    if declare -f success >/dev/null 2>&1; then
+        success "Created configuration profile: $profile_name"
+    fi
 }
 
 # =============================================================================
 # CONFIGURATION VALUE RETRIEVAL
 # =============================================================================
 
-# Get configuration value with fallback (improved with multiple parsers)
+# Enhanced configuration value retrieval using associative arrays
 get_config_value() {
     local path="$1"
     local fallback="${2:-}"
-    local config_file="${CONFIG_FILE:-$(get_config_file_path "$CURRENT_ENVIRONMENT")}"
+    local env="${3:-$(aa_get CONFIG_STATE "current_environment")}"
+    local deployment_type="${4:-$(aa_get CONFIG_STATE "current_deployment_type")}"
     
-    if [[ ! -f "$config_file" ]]; then
-        echo "$fallback"
-        return 1
+    # Construct cache key
+    local cache_key="${env}:${deployment_type}"
+    local config_key="${cache_key}:${path}"
+    
+    # First, try to get from cache
+    local cached_value=$(aa_get CONFIG_CACHE "$config_key" "")
+    if [[ -n "$cached_value" ]]; then
+        echo "$cached_value"
+        return 0
     fi
     
-    local value
-    
-    # Try yq first (preferred)
-    if command -v yq >/dev/null 2>&1; then
-        if value=$(yq eval "$path" "$config_file" 2>/dev/null); then
-            if [[ "$value" == "null" || "$value" == "" || "$value" == "~" ]]; then
-                echo "$fallback"
-            else
-                echo "$value"
-            fi
+    # Try alternative key formats (handle legacy path formats)
+    if [[ "$path" =~ ^\. ]]; then
+        # Remove leading dot for cache lookup
+        local clean_path="${path#.}"
+        config_key="${cache_key}:${clean_path}"
+        cached_value=$(aa_get CONFIG_CACHE "$config_key" "")
+        if [[ -n "$cached_value" ]]; then
+            echo "$cached_value"
             return 0
         fi
     fi
     
-    # Fallback to python3 if yq is not available
-    if command -v python3 >/dev/null 2>&1; then
-        if python3 -c "import yaml" 2>/dev/null; then
-            # Convert yq path to python dict access with improved parsing
+    # If not in cache, try to load from file directly
+    local config_file=$(aa_get CONFIG_STATE "config_file_path")
+    if [[ -z "$config_file" ]]; then
+        config_file=$(get_config_file_path "${env:-$DEFAULT_ENVIRONMENT}")
+    fi
+    
+    if [[ -f "$config_file" ]]; then
+        local value=""
+        
+        # Try yq first (preferred)
+        if command -v yq >/dev/null 2>&1; then
+            value=$(yq eval "$path" "$config_file" 2>/dev/null || echo "")
+            if [[ "$value" != "null" && "$value" != "" && "$value" != "~" ]]; then
+                # Cache the result for future use
+                aa_set CONFIG_CACHE "$config_key" "$value"
+                echo "$value"
+                return 0
+            fi
+        fi
+        
+        # Fallback to Python YAML parsing
+        if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
             local python_script="
 import yaml
 import sys
 
 def get_nested_value(data, path_str):
     try:
-        # Remove leading dot and split by dots
         path_parts = path_str.lstrip('.').split('.')
         current = data
         for part in path_parts:
@@ -502,69 +844,70 @@ try:
     result = get_nested_value(data, '$path')
     if result is not None:
         print(result)
+        sys.exit(0)
     else:
-        print('$fallback')
-except Exception as e:
-    print('$fallback')
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
 "
             if value=$(python3 -c "$python_script" 2>/dev/null); then
+                # Cache the result
+                aa_set CONFIG_CACHE "$config_key" "$value"
                 echo "$value"
                 return 0
             fi
         fi
     fi
     
-    # Fallback to python (Python 2) if available
-    if command -v python >/dev/null 2>&1; then
-        if python -c "import yaml" 2>/dev/null; then
-            local python2_script="
-import yaml
-
-def get_nested_value(data, path_str):
-    try:
-        path_parts = path_str.lstrip('.').split('.')
-        current = data
-        for part in path_parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            else:
-                return None
-        return current
-    except:
-        return None
-
-try:
-    with open('$config_file', 'r') as f:
-        data = yaml.safe_load(f)
-    result = get_nested_value(data, '$path')
-    if result is not None:
-        print result
-    else:
-        print '$fallback'
-except:
-    print '$fallback'
-"
-            if value=$(python -c "$python2_script" 2>/dev/null); then
-                echo "$value"
-                return 0
-            fi
-        fi
-    fi
-    
-    # Last resort: simple grep-based extraction for basic paths
-    if echo "$path" | grep -q '^\.[a-zA-Z_][a-zA-Z0-9_]*$'; then
-        local key=$(echo "$path" | sed 's/^\.//g')
-        local grep_value
-        grep_value=$(grep -E "^${key}:" "$config_file" | head -n1 | sed 's/^[^:]*:[[:space:]]*//' | sed 's/["'\'']*//g' 2>/dev/null)
-        if [ -n "$grep_value" ]; then
-            echo "$grep_value"
-            return 0
-        fi
-    fi
-    
-    # If all fails, return fallback
+    # If all else fails, return fallback
     echo "$fallback"
     return 1
+}
+
+# Enhanced configuration retrieval with path validation
+get_config_value_safe() {
+    local path="$1"
+    local fallback="${2:-}"
+    local validate_type="${3:-}"  # string, number, boolean, array
+    
+    local value
+    value=$(get_config_value "$path" "$fallback")
+    
+    # Validate type if specified
+    case "$validate_type" in
+        "number")
+            if ! [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                if declare -f warning >/dev/null 2>&1; then
+                    warning "Configuration value for '$path' is not a valid number, using fallback"
+                fi
+                echo "$fallback"
+                return 1
+            fi
+            ;;
+        "boolean")
+            if ! [[ "$value" =~ ^(true|false|yes|no|1|0)$ ]]; then
+                if declare -f warning >/dev/null 2>&1; then
+                    warning "Configuration value for '$path' is not a valid boolean, using fallback"
+                fi
+                echo "$fallback"
+                return 1
+            fi
+            # Normalize boolean values
+            case "$value" in
+                "yes"|"1") value="true" ;;
+                "no"|"0") value="false" ;;
+            esac
+            ;;
+        "string")
+            if [[ -z "$value" ]]; then
+                echo "$fallback"
+                return 1
+            fi
+            ;;
+    esac
+    
+    echo "$value"
+    return 0
 }
 
 # Get global configuration values

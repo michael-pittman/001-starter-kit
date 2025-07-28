@@ -1,8 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Variable Management Library 
 # Unified environment variable initialization and management system
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "variable-management.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
 # This library provides a robust, unified system for setting and managing
 # environment variables across all deployment scripts and instances.
 # 

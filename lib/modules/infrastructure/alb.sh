@@ -40,9 +40,9 @@ _create_application_load_balancer_impl() {
     local existing_alb
     existing_alb=$(aws elbv2 describe-load-balancers \
         --query "LoadBalancers[?LoadBalancerName=='${stack_name}-alb'].LoadBalancerArn | [0]" \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_alb" ]; then
+    if [ -n "$existing_alb" ] && [ "$existing_alb" != "None" ] && [ "$existing_alb" != "null" ]; then
         echo "ALB already exists: $existing_alb" >&2
         echo "$existing_alb"
         return 0
@@ -65,7 +65,7 @@ _create_application_load_balancer_impl() {
         --scheme "$scheme" \
         --type application \
         --ip-address-type ipv4 \
-        --tags "$(tags_to_cli_format "$(generate_tags "$stack_name" '{"Service": "ALB"}')")" \
+        --tags $(tags_to_cli_format "$(generate_tags "$stack_name" '{"Service": "ALB"}')") \
         --query 'LoadBalancers[0].LoadBalancerArn' \
         --output text) || {
         throw_error $ERROR_AWS_API "Failed to create Application Load Balancer"
@@ -119,6 +119,15 @@ _create_target_group_impl() {
     local health_check_path="$5"
     local protocol="$6"
     
+    # Validate required parameters
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for target group creation"
+    fi
+    
+    if [ -z "$port" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "Port is required for target group creation"
+    fi
+    
     local tg_name="${stack_name}-${service_name}-tg"
     
     echo "Creating target group: $tg_name" >&2
@@ -128,9 +137,9 @@ _create_target_group_impl() {
     existing_tg=$(aws elbv2 describe-target-groups \
         --names "$tg_name" \
         --query 'TargetGroups[0].TargetGroupArn' \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_tg" ]; then
+    if [ -n "$existing_tg" ] && [ "$existing_tg" != "None" ] && [ "$existing_tg" != "null" ]; then
         echo "Target group already exists: $existing_tg" >&2
         echo "$existing_tg"
         return 0
@@ -152,7 +161,7 @@ _create_target_group_impl() {
         --health-check-timeout-seconds 5 \
         --healthy-threshold-count 2 \
         --unhealthy-threshold-count 3 \
-        --tags "$(tags_to_cli_format "$(generate_tags "$stack_name" "{\"Service\": \"$service_name\"}")")" \
+        --tags $(tags_to_cli_format "$(generate_tags "$stack_name" "{\"Service\": \"$service_name\"}")") \
         --query 'TargetGroups[0].TargetGroupArn' \
         --output text) || {
         throw_error $ERROR_AWS_API "Failed to create target group"
@@ -369,7 +378,7 @@ create_listener_rules() {
 # MAIN ALB INFRASTRUCTURE SETUP
 # =============================================================================
 
-# Setup comprehensive ALB infrastructure
+# Setup comprehensive ALB infrastructure with graceful error handling
 setup_alb_infrastructure() {
     local stack_name="${1:-$STACK_NAME}"
     local subnets_json="$2"  # JSON array of subnet objects
@@ -377,32 +386,103 @@ setup_alb_infrastructure() {
     local vpc_id="$4"
     local enable_https="${5:-false}"
     local certificate_arn="${6:-}"
+    local allow_failure="${7:-false}"  # If true, returns empty result on failure instead of exiting
     
     echo "Setting up ALB infrastructure for: $stack_name" >&2
     
     # Validate inputs
     if [ -z "$subnets_json" ] || [ -z "$security_group_id" ] || [ -z "$vpc_id" ]; then
-        throw_error $ERROR_INVALID_ARGUMENT "setup_alb_infrastructure requires subnets_json, security_group_id, and vpc_id"
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: Missing required parameters for ALB setup" >&2
+            echo "{}"
+            return 0
+        else
+            throw_error $ERROR_INVALID_ARGUMENT "setup_alb_infrastructure requires subnets_json, security_group_id, and vpc_id"
+        fi
+    fi
+    
+    # Check subnet count for ALB requirement
+    local subnet_count
+    subnet_count=$(echo "$subnets_json" | jq 'length')
+    if [ "$subnet_count" -lt 2 ]; then
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: ALB requires at least 2 subnets in different AZs (found: $subnet_count)" >&2
+            echo "{}"
+            return 0
+        else
+            echo "ERROR: ALB requires at least 2 subnets in different AZs" >&2
+            return 1
+        fi
     fi
     
     # Create Application Load Balancer
     local alb_arn
-    alb_arn=$(create_application_load_balancer "$stack_name" "$subnets_json" "$security_group_id") || return 1
+    alb_arn=$(create_application_load_balancer "$stack_name" "$subnets_json" "$security_group_id" 2>&1) || {
+        local exit_code=$?
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: Failed to create ALB: $alb_arn" >&2
+            echo "{}"
+            return 0
+        else
+            echo "ERROR: Failed to create ALB: $alb_arn" >&2
+            return $exit_code
+        fi
+    }
     echo "ALB created: $alb_arn" >&2
     
     # Get ALB DNS name
     local alb_dns
-    alb_dns=$(get_alb_dns_name "$alb_arn")
+    alb_dns=$(get_alb_dns_name "$alb_arn" 2>&1) || {
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: Failed to get ALB DNS name" >&2
+            echo "{}"
+            return 0
+        else
+            return 1
+        fi
+    }
     echo "ALB DNS: $alb_dns" >&2
     
     # Create target groups for AI services
     local target_groups_json
-    target_groups_json=$(create_ai_service_target_groups "$stack_name" "$vpc_id") || return 1
+    target_groups_json=$(create_ai_service_target_groups "$stack_name" "$vpc_id" 2>&1) || {
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: Failed to create target groups" >&2
+            # Return partial result with ALB info only
+            cat <<EOF
+{
+    "alb_arn": "$alb_arn",
+    "alb_dns": "$alb_dns",
+    "target_groups": [],
+    "listeners": {}
+}
+EOF
+            return 0
+        else
+            return 1
+        fi
+    }
     echo "Target groups created" >&2
     
     # Create listeners
     local listeners_info
-    listeners_info=$(create_alb_listeners "$alb_arn" "$target_groups_json" "$enable_https" "$certificate_arn") || return 1
+    listeners_info=$(create_alb_listeners "$alb_arn" "$target_groups_json" "$enable_https" "$certificate_arn" 2>&1) || {
+        if [ "$allow_failure" = "true" ]; then
+            echo "WARNING: Failed to create listeners" >&2
+            # Return partial result without listeners
+            cat <<EOF
+{
+    "alb_arn": "$alb_arn",
+    "alb_dns": "$alb_dns",
+    "target_groups": $target_groups_json,
+    "listeners": {}
+}
+EOF
+            return 0
+        else
+            return 1
+        fi
+    }
     echo "Listeners created" >&2
     
     # Return ALB information
@@ -414,6 +494,47 @@ setup_alb_infrastructure() {
     "listeners": $listeners_info
 }
 EOF
+}
+
+# Setup ALB infrastructure with retries
+setup_alb_infrastructure_with_retries() {
+    local stack_name="${1:-$STACK_NAME}"
+    local subnets_json="$2"
+    local security_group_id="$3"
+    local vpc_id="$4"
+    local max_retries="${5:-3}"
+    local retry_delay="${6:-10}"
+    
+    echo "Setting up ALB infrastructure with retry capability" >&2
+    
+    local attempt=1
+    while [ $attempt -le $max_retries ]; do
+        echo "ALB setup attempt $attempt of $max_retries..." >&2
+        
+        local result
+        result=$(setup_alb_infrastructure "$stack_name" "$subnets_json" "$security_group_id" "$vpc_id" "false" "" "true")
+        
+        # Check if we got a valid result
+        if [ -n "$result" ] && [ "$result" != "{}" ]; then
+            local alb_arn
+            alb_arn=$(echo "$result" | jq -r '.alb_arn // empty')
+            if [ -n "$alb_arn" ]; then
+                echo "ALB setup succeeded on attempt $attempt" >&2
+                echo "$result"
+                return 0
+            fi
+        fi
+        
+        if [ $attempt -lt $max_retries ]; then
+            echo "Waiting ${retry_delay}s before retry..." >&2
+            sleep $retry_delay
+            ((attempt++))
+        else
+            echo "All ALB setup attempts failed" >&2
+            echo "{}"
+            return 1
+        fi
+    done
 }
 
 # =============================================================================
@@ -459,9 +580,9 @@ cleanup_alb_infrastructure() {
     local alb_arn
     alb_arn=$(aws elbv2 describe-load-balancers \
         --query "LoadBalancers[?LoadBalancerName=='${stack_name}-alb'].LoadBalancerArn | [0]" \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$alb_arn" ]; then
+    if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ] && [ "$alb_arn" != "null" ]; then
         # Delete listeners first
         local listeners
         listeners=$(aws elbv2 describe-listeners \

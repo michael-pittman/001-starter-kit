@@ -26,13 +26,23 @@ help: ## Show this help message
 # SETUP AND DEPENDENCIES
 # =============================================================================
 
-setup: check-deps setup-secrets ## Complete initial setup with security
+setup: check-bash-version check-deps setup-secrets ## Complete initial setup with security
 	@echo "$(GREEN)✓ Setup complete with security configurations$(NC)"
+
+setup-enhanced: setup validate-deployment ## Enhanced setup with full validation
+	@echo "$(BLUE)Running AWS quota check...$(NC)"
+	@$(MAKE) check-quotas REGION=$(AWS_DEFAULT_REGION)
+	@echo "$(GREEN)🚀 Enhanced setup complete - ready for deployment!$(NC)"
 
 check-deps: ## Check if all dependencies are available
 	@echo "$(BLUE)Checking dependencies...$(NC)"
 	@chmod +x scripts/security-validation.sh
-	@scripts/security-validation.sh
+	@chmod +x lib/deployment-validation.sh
+	@bash lib/deployment-validation.sh check_dependencies || { \
+		echo "$(RED)❌ Dependency check failed. Please install missing dependencies.$(NC)"; \
+		echo "$(YELLOW)Run 'make install-deps' to install dependencies automatically$(NC)"; \
+		exit 1; \
+	}
 	@echo "$(GREEN)✓ Dependencies check complete$(NC)"
 
 install-deps: ## Install required dependencies
@@ -122,8 +132,46 @@ security-check: ## Run comprehensive security validation
 	@scripts/security-validation.sh || (echo "$(RED)Security validation failed$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Security validation passed$(NC)"
 
-validate: security-check ## Validate all configurations and security
+validate: check-bash-version security-check aws-cli-check validate-deployment ## Validate all configurations and security
 	@echo "$(GREEN)✓ Validation complete$(NC)"
+
+check-bash-version: ## Check bash version requirement
+	@echo "$(BLUE)Checking bash version...$(NC)"
+	@bash -c 'source lib/modules/core/bash_version.sh && check_bash_version_enhanced' || { \
+		echo "$(RED)❌ Bash version check failed$(NC)"; \
+		echo "$(YELLOW)Please upgrade to bash 5.3+ - see instructions above$(NC)"; \
+		exit 1; \
+	}
+	@echo "$(GREEN)✓ Bash version check passed$(NC)"
+
+validate-deployment: ## Validate deployment prerequisites
+	@echo "$(BLUE)Validating deployment prerequisites...$(NC)"
+	@chmod +x lib/deployment-validation.sh
+	@bash -c 'source lib/deployment-validation.sh && validate_deployment_prerequisites "$(STACK_NAME)" "$(REGION)"' || { \
+		echo "$(RED)❌ Deployment validation failed$(NC)"; \
+		echo "$(YELLOW)Please resolve the issues above before deploying$(NC)"; \
+		exit 1; \
+	}
+	@echo "$(GREEN)✓ Deployment validation passed$(NC)"
+
+aws-cli-check: ## Validate AWS CLI v2 setup and test integrations
+	@echo "$(BLUE)Validating AWS CLI v2 setup...$(NC)"
+	@chmod +x scripts/aws-cli-v2-demo.sh
+	@scripts/aws-cli-v2-demo.sh --mode basic
+	@echo "$(GREEN)✓ AWS CLI v2 validation complete$(NC)"
+
+aws-cli-demo: ## Run comprehensive AWS CLI v2 demo
+	@echo "$(BLUE)Running AWS CLI v2 demo suite...$(NC)"
+	@chmod +x scripts/aws-cli-v2-demo.sh
+	@scripts/aws-cli-v2-demo.sh --mode full
+	@echo "$(GREEN)✓ AWS CLI v2 demo complete$(NC)"
+
+aws-cli-test: ## Run AWS CLI v2 integration tests
+	@echo "$(BLUE)Running AWS CLI v2 integration tests...$(NC)"
+	@chmod +x tests/test-aws-cli-v2.sh
+	@tests/test-aws-cli-v2.sh
+	@echo "$(GREEN)✓ AWS CLI v2 tests complete$(NC)"
+
 
 # =============================================================================
 # DEPLOYMENT (MODULAR ARCHITECTURE)
@@ -133,15 +181,27 @@ deploy-simple: validate ## Deploy simple development stack (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required. Use: make deploy-simple STACK_NAME=my-stack$(NC)"; exit 1; fi
 	@echo "$(BLUE)Deploying simple development stack: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-v2-simple.sh
-	@scripts/aws-deployment-v2-simple.sh $(STACK_NAME)
+	@chmod +x lib/error-recovery.sh
+	@bash -c 'source lib/error-recovery.sh && retry_with_backoff "scripts/aws-deployment-v2-simple.sh $(STACK_NAME)" "Deploy $(STACK_NAME)" 3' || { \
+		echo "$(RED)❌ Deployment failed after retries$(NC)"; \
+		echo "$(YELLOW)Run 'make troubleshoot' for help$(NC)"; \
+		exit 1; \
+	}
 	@echo "$(GREEN)✓ Simple deployment complete$(NC)"
+	@echo "$(YELLOW)Run 'make health-check STACK_NAME=$(STACK_NAME)' to verify deployment$(NC)"
 
 deploy-spot: validate ## Deploy with cost-optimized spot instances (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)💰 Deploying cost-optimized spot instance: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --type spot $(STACK_NAME)
+	@chmod +x lib/error-recovery.sh
+	@bash -c 'source lib/error-recovery.sh && retry_with_backoff "scripts/aws-deployment-modular.sh --type spot $(STACK_NAME)" "Deploy spot $(STACK_NAME)" 3' || { \
+		echo "$(RED)❌ Spot deployment failed$(NC)"; \
+		echo "$(YELLOW)Spot capacity may be limited - try 'make deploy-ondemand STACK_NAME=$(STACK_NAME)'$(NC)"; \
+		exit 1; \
+	}
 	@echo "$(GREEN)✓ Spot deployment complete$(NC)"
+	@echo "$(YELLOW)Run 'make health-check STACK_NAME=$(STACK_NAME)' to verify deployment$(NC)"
 
 deploy-enterprise: validate ## Deploy enterprise multi-AZ with ALB (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
@@ -167,12 +227,29 @@ deploy-ondemand: validate ## Deploy with on-demand instances (requires STACK_NAM
 	@scripts/aws-deployment-modular.sh --type ondemand $(STACK_NAME)
 	@echo "$(GREEN)✓ On-demand deployment complete$(NC)"
 
-deploy-spot-cdn: validate ## Deploy spot with ALB (requires STACK_NAME)
+deploy-spot-cdn: validate ## Deploy spot with ALB and optional CDN (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
-	@echo "$(BLUE)🌐 Deploying spot instance with ALB: $(STACK_NAME)$(NC)"
+	@echo "$(BLUE)🌐 Deploying spot instance with ALB/CDN: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/deploy-spot-cdn-enhanced.sh
+	@scripts/deploy-spot-cdn-enhanced.sh $(STACK_NAME) || { \
+		echo "$(YELLOW)⚠️  Deployment encountered issues - check logs for details$(NC)"; \
+		echo "$(YELLOW)💡 TIP: If ALB creation failed, try: make deploy-spot-cdn-multi-az STACK_NAME=$(STACK_NAME)$(NC)"; \
+	}
+	@echo "$(GREEN)✓ Deployment complete (check summary above for access details)$(NC)"
+
+deploy-spot-cdn-multi-az: validate ## Deploy spot with ALB/CDN in multi-AZ configuration (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🌐 Deploying multi-AZ spot instance with ALB/CDN: $(STACK_NAME)$(NC)"
 	@chmod +x scripts/aws-deployment-modular.sh
-	@scripts/aws-deployment-modular.sh --type spot --alb $(STACK_NAME)
-	@echo "$(GREEN)✓ Spot ALB deployment complete$(NC)"
+	@scripts/aws-deployment-modular.sh --type spot --multi-az --alb --cloudfront $(STACK_NAME)
+	@echo "$(GREEN)✓ Multi-AZ spot CDN deployment complete$(NC)"
+
+deploy-spot-cdn-full: validate ## Deploy spot with ALB and CloudFront CDN enabled (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🌐 Deploying spot instance with ALB and CloudFront CDN: $(STACK_NAME)$(NC)"
+	@chmod +x scripts/deploy-spot-cdn-enhanced.sh
+	@scripts/deploy-spot-cdn-enhanced.sh --enable-cloudfront $(STACK_NAME)
+	@echo "$(GREEN)✓ Spot ALB + CloudFront deployment complete$(NC)"
 
 destroy: ## Destroy infrastructure (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
@@ -201,16 +278,27 @@ status: ## Check deployment status (requires STACK_NAME)
 health-check: ## Basic health check of services (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)🏥 Running basic health check for: $(STACK_NAME)$(NC)"
-	@chmod +x scripts/validate-environment.sh
-	@scripts/validate-environment.sh $(STACK_NAME) || echo "$(YELLOW)⚠️  Some services may be unhealthy$(NC)"
+	@chmod +x lib/deployment-health.sh
+	@bash -c 'source lib/deployment-health.sh && perform_health_check "$(STACK_NAME)" "$(REGION)"' || { \
+		echo "$(YELLOW)⚠️  Health check detected issues - see report above$(NC)"; \
+	}
 	@echo "$(GREEN)✓ Health check complete$(NC)"
 
 health-check-advanced: ## Comprehensive health diagnostics (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
 	@echo "$(BLUE)🏥 Running advanced health diagnostics for: $(STACK_NAME)$(NC)"
-	@chmod +x scripts/health-check-advanced.sh
-	@scripts/health-check-advanced.sh $(STACK_NAME)
+	@chmod +x lib/deployment-health.sh
+	@bash -c 'source lib/deployment-health.sh && monitor_deployment_health "$(STACK_NAME)" "$(REGION)" 300' || { \
+		echo "$(YELLOW)⚠️  Advanced health check detected issues$(NC)"; \
+	}
 	@echo "$(GREEN)✓ Advanced health check complete$(NC)"
+
+health-monitor: ## Continuous health monitoring (requires STACK_NAME)
+	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
+	@echo "$(BLUE)🏥 Starting continuous health monitoring for: $(STACK_NAME)$(NC)"
+	@echo "$(YELLOW)Press Ctrl+C to stop monitoring$(NC)"
+	@chmod +x lib/deployment-health.sh
+	@bash -c 'source lib/deployment-health.sh && monitor_deployment_health "$(STACK_NAME)" "$(REGION)" 3600'
 
 logs: ## View application logs (requires STACK_NAME)
 	@if [ -z "$(STACK_NAME)" ]; then echo "$(RED)❌ Error: STACK_NAME is required$(NC)"; exit 1; fi
@@ -232,8 +320,10 @@ backup: ## Create backup (requires STACK_NAME)
 
 check-quotas: ## Check AWS service quotas
 	@echo "$(BLUE)Checking AWS service quotas...$(NC)"
-	@chmod +x scripts/check-quotas.sh
-	@scripts/check-quotas.sh
+	@chmod +x lib/aws-quota-checker.sh
+	@bash -c 'source lib/aws-quota-checker.sh && check_all_quotas "$(REGION)" "$(DEPLOYMENT_TYPE)"' || { \
+		echo "$(YELLOW)⚠️  Quota issues detected - see report above$(NC)"; \
+	}
 	@echo "$(GREEN)✓ Quota check complete$(NC)"
 
 # =============================================================================
@@ -299,9 +389,11 @@ rotate-secrets: ## Rotate all secrets
 fix-deployment: ## Fix common deployment issues (requires STACK_NAME and REGION)
 	@if [ -z "$(STACK_NAME)" ] || [ -z "$(REGION)" ]; then echo "$(RED)❌ Error: Both STACK_NAME and REGION are required$(NC)"; exit 1; fi
 	@echo "$(BLUE)Fixing deployment issues for $(STACK_NAME) in $(REGION)...$(NC)"
-	@chmod +x scripts/fix-deployment-issues.sh
-	@scripts/fix-deployment-issues.sh $(STACK_NAME) $(REGION)
-	@echo "$(GREEN)✓ Deployment fixes applied$(NC)"
+	@chmod +x lib/error-recovery.sh
+	@bash -c 'source lib/error-recovery.sh && orchestrate_recovery "DEPLOYMENT_FAILURE" "$(STACK_NAME)"' || { \
+		echo "$(YELLOW)⚠️  Some issues may require manual intervention$(NC)"; \
+	}
+	@echo "$(GREEN)✓ Recovery attempts complete$(NC)"
 
 # =============================================================================
 # DOCUMENTATION
@@ -333,6 +425,8 @@ quick-start: ## Show quick start guide
 	@echo "$(BLUE)Production Deployment:$(NC)"
 	@echo "  1. make deploy-spot STACK_NAME=prod        # Cost-optimized production"
 	@echo "  2. make deploy-enterprise STACK_NAME=prod  # High-availability production"
+	@echo "  3. make deploy-spot-cdn STACK_NAME=prod    # With ALB (auto-fallback)"
+	@echo "  4. make deploy-spot-cdn-full STACK_NAME=prod # With ALB + CloudFront"
 	@echo ""
 	@echo "$(BLUE)Testing (No AWS Costs):$(NC)"
 	@echo "  1. make test-local                         # Test logic locally"
@@ -358,10 +452,18 @@ troubleshoot: ## Show troubleshooting information
 	@echo "$(BLUE)GeuseMaker Troubleshooting$(NC)"
 	@echo ""
 	@echo "$(YELLOW)Common Issues:$(NC)"
-	@echo "  • Disk space full:     make fix-deployment STACK_NAME=X REGION=Y"
+	@echo "  • Bash version too old:  make check-bash-version"
+	@echo "  • Missing dependencies:  make check-deps"
+	@echo "  • AWS quota exceeded:    make check-quotas"
+	@echo "  • Disk space full:       make fix-deployment STACK_NAME=X REGION=Y"
 	@echo "  • Services not starting: make health-check-advanced STACK_NAME=X"
-	@echo "  • Spot capacity issues: Scripts automatically try fallback regions"
-	@echo "  • Variable errors:     Use modular deployment scripts"
+	@echo "  • Spot capacity issues:  Scripts automatically try fallback regions"
+	@echo "  • Variable errors:       Use modular deployment scripts"
+	@echo ""
+	@echo "$(YELLOW)Validation Commands:$(NC)"
+	@echo "  • make validate-deployment STACK_NAME=X    # Pre-deployment checks"
+	@echo "  • make health-check STACK_NAME=X           # Post-deployment health"
+	@echo "  • make health-monitor STACK_NAME=X         # Continuous monitoring"
 	@echo ""
 	@echo "$(YELLOW)Debug Commands:$(NC)"
 	@echo "  • make status STACK_NAME=X                 # Check deployment"

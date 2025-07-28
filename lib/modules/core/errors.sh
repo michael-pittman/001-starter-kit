@@ -1,12 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Enhanced Error Handling System
 # Provides context-aware error handling and recovery
+# Requires: bash 5.3.3+
 # =============================================================================
 
 # Prevent multiple sourcing
 [ -n "${_ERRORS_SH_LOADED:-}" ] && return 0
 _ERRORS_SH_LOADED=1
+
+# Bash version validation for modules (non-exiting)
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/bash_version.sh"
+    if ! bash_533_available; then
+        echo "WARNING: core/errors.sh requires bash 5.3.3+ but found $(get_current_bash_version)" >&2
+        echo "Error handling features may not work correctly with older bash versions" >&2
+    fi
+fi
 
 # =============================================================================
 # ERROR CONTEXT MANAGEMENT

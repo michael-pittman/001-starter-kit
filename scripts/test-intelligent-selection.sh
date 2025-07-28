@@ -1,11 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =============================================================================
 # Test Script for Intelligent AWS GPU Selection
 # =============================================================================
 # This script tests the enhanced intelligent selection and cross-region analysis
 # without actually deploying resources - perfect for validation!
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Get script directory for bash version validation
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Validate bash version before proceeding
+source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
+require_bash_533 "test-intelligent-selection.sh"
 
 set -euo pipefail
 

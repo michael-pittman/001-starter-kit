@@ -59,6 +59,11 @@ build_launch_config() {
 EOF
 )
     
+    # Generate tags for both instance and volume
+    local tags_json=$(generate_tags "$stack_name")
+    local instance_tag_spec=$(tags_to_tag_spec "$tags_json" "instance")
+    local volume_tag_spec=$(tags_to_tag_spec "$tags_json" "volume")
+    
     # Build complete configuration
     cat <<EOF
 {
@@ -73,8 +78,8 @@ EOF
     "BlockDeviceMappings": $block_devices,
     "UserData": "$user_data",
     "TagSpecifications": [
-        $(tags_to_tag_spec "$(generate_tags "$stack_name")" "instance"),
-        $(tags_to_tag_spec "$(generate_tags "$stack_name")" "volume")
+        $instance_tag_spec,
+        $volume_tag_spec
     ],
     "MetadataOptions": {
         "HttpEndpoint": "enabled",
@@ -274,11 +279,19 @@ get_instance_details() {
 # Get instance public IP
 get_instance_public_ip() {
     local instance_id="$1"
+    local public_ip
     
-    aws ec2 describe-instances \
+    public_ip=$(aws ec2 describe-instances \
         --instance-ids "$instance_id" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' \
-        --output text 2>/dev/null | grep -v "None" || true
+        --output text 2>/dev/null || true)
+    
+    # Return empty if no IP found or if result is "None"
+    if [ -z "$public_ip" ] || [ "$public_ip" = "None" ] || [ "$public_ip" = "null" ]; then
+        return 0
+    fi
+    
+    echo "$public_ip"
 }
 
 # =============================================================================

@@ -40,7 +40,7 @@ _create_efs_file_system_impl() {
     local existing_efs
     existing_efs=$(aws efs describe-file-systems \
         --query "FileSystems[?Tags[?Key=='Stack' && Value=='$stack_name']].FileSystemId | [0]" \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
     if [ -n "$existing_efs" ]; then
         echo "EFS file system already exists: $existing_efs" >&2
@@ -64,12 +64,13 @@ _create_efs_file_system_impl() {
     creation_params="$creation_params --lifecycle-policy '$lifecycle_policy'"
     
     # Create EFS file system
+    local tags_output=$(tags_to_cli_format "$(generate_tags "$stack_name" '{"Service": "EFS"}')")
     local efs_id
-    efs_id=$(eval "aws efs create-file-system \
+    efs_id=$(aws efs create-file-system \
         $creation_params \
-        --tags $(tags_to_cli_format "$(generate_tags "$stack_name" '{"Service": "EFS"}')") \
+        --tags $tags_output \
         --query 'FileSystemId' \
-        --output text") || {
+        --output text) || {
         throw_error $ERROR_AWS_API "Failed to create EFS file system"
     }
     
@@ -209,9 +210,9 @@ create_efs_mount_target() {
     existing_target=$(aws efs describe-mount-targets \
         --file-system-id "$efs_id" \
         --query "MountTargets[?SubnetId=='$subnet_id'].MountTargetId | [0]" \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_target" ]; then
+    if [ -n "$existing_target" ] && [ "$existing_target" != "None" ] && [ "$existing_target" != "null" ]; then
         echo "Mount target already exists in subnet: $existing_target" >&2
         echo "$existing_target"
         return 0
@@ -273,9 +274,9 @@ _create_efs_access_point_impl() {
     existing_ap=$(aws efs describe-access-points \
         --file-system-id "$efs_id" \
         --query "AccessPoints[?RootDirectory.Path=='$path'].AccessPointId | [0]" \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_ap" ]; then
+    if [ -n "$existing_ap" ] && [ "$existing_ap" != "None" ] && [ "$existing_ap" != "null" ]; then
         echo "Access point already exists: $existing_ap" >&2
         echo "$existing_ap"
         return 0
@@ -303,12 +304,13 @@ EOF
 )
     
     # Create access point
+    local tags_output=$(tags_to_cli_format "$(generate_tags "$stack_name" "{\"Path\": \"$path\"}")")
     local access_point_id
     access_point_id=$(aws efs create-access-point \
         --file-system-id "$efs_id" \
         --root-directory "$access_point_config" \
         --posix-user "$posix_user_config" \
-        --tags "$(tags_to_cli_format "$(generate_tags "$stack_name" "{\"Path\": \"$path\"}")")" \
+        --tags $tags_output \
         --query 'AccessPointId' \
         --output text) || {
         throw_error $ERROR_AWS_API "Failed to create access point"

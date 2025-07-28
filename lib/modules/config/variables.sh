@@ -1,52 +1,123 @@
 #!/bin/bash
 # =============================================================================
 # Centralized Variable Management System
+# Modern bash 5.3+ implementation with enhanced type safety and performance
 # Provides consistent variable handling, validation, and defaults
 # =============================================================================
 
+# Require bash 5.3+ for modern features
+if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 3))); then
+    echo "ERROR: This module requires bash 5.3+ for modern variable handling" >&2
+    echo "Current version: ${BASH_VERSION}" >&2
+    echo "Consider using legacy wrapper: lib/modules/compatibility/legacy_wrapper.sh" >&2
+    return 1
+fi
+
 # Prevent multiple sourcing
 [ -n "${_VARIABLES_SH_LOADED:-}" ] && return 0
-_VARIABLES_SH_LOADED=1
+declare -gr _VARIABLES_SH_LOADED=1
 
 # =============================================================================
-# VARIABLE REGISTRY
+# MODERN VARIABLE REGISTRY WITH ASSOCIATIVE ARRAYS
 # =============================================================================
 
-# Initialize variable registry (bash 3.x compatible)
-_VARIABLE_REGISTRY=""
-_VARIABLE_DEFAULTS=""
-_VARIABLE_VALIDATORS=""
+# Variable registry using modern bash associative arrays
+declare -gA _VARIABLE_REGISTRY=()
+declare -gA _VARIABLE_DEFAULTS=()
+declare -gA _VARIABLE_VALIDATORS=()
+declare -gA _VARIABLE_TYPES=()
+declare -gA _VARIABLE_DESCRIPTIONS=()
 
-# Register a variable with default value and optional validator
+# Performance enhancement: cache for frequently accessed variables
+declare -gA _VARIABLE_CACHE=()
+declare -gi _CACHE_TTL=300  # 5 minutes cache TTL
+declare -gA _CACHE_TIMESTAMPS=()
+
+# Register a variable with enhanced metadata and type safety
 register_variable() {
+    local -n var_name_ref="$1"  # Use name reference for efficiency
     local var_name="$1"
     local default_value="$2"
     local validator="${3:-}"
+    local var_type="${4:-string}"  # string, integer, boolean, array
+    local description="${5:-}"
     
-    # Add to registry
-    _VARIABLE_REGISTRY="${_VARIABLE_REGISTRY}${var_name}:"
-    
-    # Store default value
-    eval "_VARIABLE_DEFAULT_${var_name}='${default_value}'"
-    
-    # Store validator if provided
-    if [ -n "$validator" ]; then
-        eval "_VARIABLE_VALIDATOR_${var_name}='${validator}'"
+    # Validate variable name format
+    if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "ERROR: Invalid variable name format: $var_name" >&2
+        return 1
     fi
+    
+    # Register in associative arrays with enhanced metadata
+    _VARIABLE_REGISTRY["$var_name"]=1
+    _VARIABLE_DEFAULTS["$var_name"]="$default_value"
+    _VARIABLE_TYPES["$var_name"]="$var_type"
+    
+    # Store validator and description if provided
+    [[ -n "$validator" ]] && _VARIABLE_VALIDATORS["$var_name"]="$validator"
+    [[ -n "$description" ]] && _VARIABLE_DESCRIPTIONS["$var_name"]="$description"
+    
+    # Initialize with default value using proper typing
+    case "$var_type" in
+        "integer")
+            declare -gi "$var_name"="$default_value"
+            ;;
+        "array")
+            declare -ga "$var_name"  # Global array
+            ;;
+        "boolean")
+            declare -g "$var_name"="$default_value"
+            ;;
+        "string")
+            declare -g "$var_name"="$default_value"
+            ;;
+        *)
+            echo "WARNING: Unknown variable type: $var_type for $var_name" >&2
+            declare -g "$var_name"="$default_value"
+            ;;
+    esac
 }
 
-# Get variable value with fallback to default
+# Get variable value with enhanced caching and type safety
 get_variable() {
     local var_name="$1"
+    local use_cache="${2:-true}"
     
-    # Bash 3.x compatible variable reference
-    local current_value
-    eval "current_value=\${${var_name}:-}"
+    # Validate variable name
+    if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "ERROR: Invalid variable name: $var_name" >&2
+        return 1
+    fi
     
-    if [ -z "$current_value" ]; then
-        # Get default value
-        local default_var="_VARIABLE_DEFAULT_${var_name}"
-        eval "current_value=\${${default_var}:-}"
+    # Check if variable is registered
+    if [[ ! -v _VARIABLE_REGISTRY["$var_name"] ]]; then
+        echo "WARNING: Variable $var_name not registered" >&2
+        return 1
+    fi
+    
+    # Check cache first for performance
+    if [[ "$use_cache" == "true" && -v _VARIABLE_CACHE["$var_name"] ]]; then
+        local cache_time="${_CACHE_TIMESTAMPS[$var_name]:-0}"
+        local current_time="$(date +%s)"
+        if (( current_time - cache_time < _CACHE_TTL )); then
+            echo "${_VARIABLE_CACHE[$var_name]}"
+            return 0
+        fi
+    fi
+    
+    # Use name reference for efficient variable access
+    local -n var_ref="$var_name"
+    local current_value="${var_ref:-}"
+    
+    # Fallback to default if empty
+    if [[ -z "$current_value" && -v _VARIABLE_DEFAULTS["$var_name"] ]]; then
+        current_value="${_VARIABLE_DEFAULTS[$var_name]}"
+    fi
+    
+    # Update cache
+    if [[ "$use_cache" == "true" ]]; then
+        _VARIABLE_CACHE["$var_name"]="$current_value"
+        _CACHE_TIMESTAMPS["$var_name"]="$(date +%s)"
     fi
     
     echo "$current_value"
@@ -80,134 +151,354 @@ sanitize_aws_value() {
     echo "$value"
 }
 
-# Set variable with validation
+# Set variable with enhanced validation and type checking
 set_variable() {
     local var_name="$1"
     local value="$2"
+    local force_type="${3:-}"  # Optional type override
     
-    # Sanitize variable name for bash export (but NOT the value initially)
-    local safe_var_name=$(sanitize_var_name "$var_name")
+    # Validate variable name
+    if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "ERROR: Invalid variable name format: $var_name" >&2
+        return 1
+    fi
+    
+    # Check if variable is registered
+    if [[ ! -v _VARIABLE_REGISTRY["$var_name"] ]]; then
+        echo "WARNING: Setting unregistered variable: $var_name" >&2
+    fi
+    
+    # Get variable type for validation
+    local var_type="${force_type:-${_VARIABLE_TYPES[$var_name]:-string}}"
     
     # Sanitize AWS-related values to prevent corruption
-    if [[ "$var_name" == *"VPC"* ]] || [[ "$var_name" == *"SUBNET"* ]] || [[ "$var_name" == *"_ID"* ]] || [[ "$var_name" == *"_ARN"* ]]; then
+    if [[ "$var_name" =~ (VPC|SUBNET|.*_ID|.*_ARN) ]]; then
         value=$(sanitize_aws_value "$value")
+        if [[ "${DEBUG:-false}" == "true" ]]; then
+            echo "DEBUG: AWS value sanitization for $var_name = '$value'" >&2
+        fi
     fi
     
-    # Debug output for problematic variables
-    if [[ "$var_name" == *"SUBNET"* ]] || [[ "$var_name" == *"VPC"* ]] || [[ "$var_name" == *"_ID"* ]]; then
-        echo "DEBUG: Setting $var_name (safe: $safe_var_name) = '$value'" >&2
-    fi
+    # Type-specific validation and conversion
+    case "$var_type" in
+        "integer")
+            if [[ ! "$value" =~ ^-?[0-9]+$ ]]; then
+                echo "ERROR: Invalid integer value '$value' for variable '$var_name'" >&2
+                return 1
+            fi
+            ;;
+        "boolean")
+            case "${value,,}" in  # Convert to lowercase
+                true|yes|1|on|enabled) value="true" ;;
+                false|no|0|off|disabled) value="false" ;;
+                *) 
+                    echo "ERROR: Invalid boolean value '$value' for variable '$var_name'" >&2
+                    return 1
+                    ;;
+            esac
+            ;;
+        "array")
+            # For arrays, value should be space-separated or JSON
+            if [[ "$value" =~ ^\[.*\]$ ]]; then
+                # JSON array format - would need jq for proper parsing
+                echo "WARNING: JSON array format detected, ensure proper handling" >&2
+            fi
+            ;;
+    esac
     
-    # Check if validator exists (use the safe variable name for lookup)
-    local validator_var="_VARIABLE_VALIDATOR_${safe_var_name}"
-    local validator
-    eval "validator=\${${validator_var}:-}"
-    
-    if [ -n "$validator" ]; then
-        if ! $validator "$value"; then
-            echo "ERROR: Invalid value '$value' for variable '$var_name'" >&2
+    # Run custom validator if present
+    if [[ -v _VARIABLE_VALIDATORS["$var_name"] ]]; then
+        local validator="${_VARIABLE_VALIDATORS[$var_name]}"
+        if ! "$validator" "$value"; then
+            echo "ERROR: Validation failed for variable '$var_name' with value '$value'" >&2
             return 1
         fi
     fi
     
-    # Set the variable using sanitized name and sanitized value
-    # Use printf to handle special characters safely
-    printf -v "${safe_var_name}" '%s' "$value"
-    export "${safe_var_name}"
+    # Set the variable using name reference for efficiency
+    local -n var_ref="$var_name"
+    var_ref="$value"
+    
+    # Clear cache for this variable
+    unset _VARIABLE_CACHE["$var_name"]
+    unset _CACHE_TIMESTAMPS["$var_name"]
+    
+    # Export if it's a global variable
+    export "$var_name"
     
     return 0
 }
 
 # =============================================================================
-# VARIABLE VALIDATORS
+# ENHANCED VARIABLE VALIDATORS WITH ASSOCIATIVE ARRAYS
 # =============================================================================
 
+# Cache valid AWS regions for performance
+declare -gA _VALID_AWS_REGIONS=(
+    ["us-east-1"]=1 ["us-east-2"]=1 ["us-west-1"]=1 ["us-west-2"]=1
+    ["eu-west-1"]=1 ["eu-west-2"]=1 ["eu-west-3"]=1 ["eu-central-1"]=1 ["eu-north-1"]=1
+    ["ap-south-1"]=1 ["ap-northeast-1"]=1 ["ap-northeast-2"]=1 ["ap-northeast-3"]=1
+    ["ap-southeast-1"]=1 ["ap-southeast-2"]=1 ["ap-southeast-3"]=1 ["ap-east-1"]=1
+    ["ca-central-1"]=1 ["sa-east-1"]=1 ["af-south-1"]=1 ["me-south-1"]=1
+)
+
+# Optimized AWS region validator using associative array lookup
 validate_aws_region() {
     local region="$1"
-    local valid_regions=(
-        "us-east-1" "us-east-2" "us-west-1" "us-west-2"
-        "eu-west-1" "eu-west-2" "eu-west-3" "eu-central-1"
-        "ap-south-1" "ap-northeast-1" "ap-northeast-2" "ap-southeast-1" "ap-southeast-2"
-        "ca-central-1" "sa-east-1"
-    )
     
-    for valid in "${valid_regions[@]}"; do
-        [ "$region" = "$valid" ] && return 0
-    done
-    return 1
+    # O(1) lookup instead of O(n) iteration
+    [[ -v _VALID_AWS_REGIONS["$region"] ]]
 }
 
+# Enhanced instance type validation with family-specific rules
 validate_instance_type() {
     local instance_type="$1"
-    # Basic validation - ensure it matches AWS naming pattern
-    if [[ "$instance_type" =~ ^[a-z][0-9]+[a-z]*\.[a-z0-9]+$ ]]; then
-        return 0
+    
+    # Enhanced pattern validation with detailed feedback
+    if [[ ! "$instance_type" =~ ^[a-z][0-9]+[a-z]*\.[a-z0-9]+$ ]]; then
+        echo "ERROR: Instance type '$instance_type' doesn't match AWS naming pattern" >&2
+        echo "Expected format: family[generation][attributes].size (e.g., m5.large, g4dn.xlarge)" >&2
+        return 1
     fi
-    return 1
-}
-
-validate_boolean() {
-    local value="$1"
-    case "$value" in
-        true|false|yes|no|1|0) return 0 ;;
-        *) return 1 ;;
+    
+    # Extract family for additional validation
+    local family="${instance_type%%.*}"
+    
+    # Validate known GPU families for GeuseMaker
+    case "$family" in
+        g4dn|g5|g5g|p3|p4d|inf1|inf2)
+            # GPU/ML optimized instances - good for GeuseMaker
+            return 0
+            ;;
+        m5|m5a|m5n|c5|c5n|r5|r5a|t3|t3a)
+            # General purpose instances - acceptable but warn
+            echo "WARNING: Instance type '$instance_type' is not GPU-optimized. Consider g4dn.xlarge for AI workloads" >&2
+            return 0
+            ;;
+        *)
+            # Unknown or deprecated families
+            echo "WARNING: Instance family '$family' may not be optimal for AI workloads" >&2
+            return 0
+            ;;
     esac
 }
 
+# Enhanced boolean validation with case-insensitive matching
+validate_boolean() {
+    local value="${1,,}"  # Convert to lowercase
+    
+    case "$value" in
+        true|yes|1|on|enabled|active) return 0 ;;
+        false|no|0|off|disabled|inactive) return 0 ;;
+        *) 
+            echo "ERROR: Invalid boolean value: '$1'. Valid: true/false, yes/no, 1/0, on/off, enabled/disabled" >&2
+            return 1 
+            ;;
+    esac
+}
+
+# Enhanced stack name validation with detailed feedback
 validate_stack_name() {
     local name="$1"
-    # AWS CloudFormation stack name rules
-    if [[ "$name" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]] && [ ${#name} -le 128 ]; then
-        return 0
+    
+    # Check length first
+    if (( ${#name} > 128 )); then
+        echo "ERROR: Stack name too long (${#name} chars). Maximum 128 characters" >&2
+        return 1
     fi
-    return 1
+    
+    if (( ${#name} < 1 )); then
+        echo "ERROR: Stack name cannot be empty" >&2
+        return 1
+    fi
+    
+    # Check format with detailed error messages
+    if [[ ! "$name" =~ ^[a-zA-Z] ]]; then
+        echo "ERROR: Stack name must start with a letter: '$name'" >&2
+        return 1
+    fi
+    
+    if [[ ! "$name" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
+        echo "ERROR: Stack name contains invalid characters. Only letters, numbers, and hyphens allowed: '$name'" >&2
+        return 1
+    fi
+    
+    # Check for consecutive hyphens or trailing hyphens
+    if [[ "$name" =~ -- ]] || [[ "$name" =~ -$ ]]; then
+        echo "ERROR: Stack name cannot have consecutive hyphens or end with hyphen: '$name'" >&2
+        return 1
+    fi
+    
+    return 0
 }
 
+# Enhanced deployment type validation with recommendations
 validate_deployment_type() {
     local type="$1"
+    
     case "$type" in
-        spot|ondemand|simple) return 0 ;;
-        *) return 1 ;;
+        spot)
+            echo "INFO: Spot deployment selected - up to 70% cost savings but may experience interruptions" >&2
+            return 0
+            ;;
+        ondemand|on-demand)
+            echo "INFO: On-demand deployment selected - guaranteed availability at standard pricing" >&2
+            return 0
+            ;;
+        simple)
+            echo "INFO: Simple deployment selected - basic configuration without advanced features" >&2
+            return 0
+            ;;
+        *) 
+            echo "ERROR: Invalid deployment type: '$type'. Valid options: spot, ondemand, simple" >&2
+            echo "  - spot: Cost-optimized with potential interruptions" >&2
+            echo "  - ondemand: Guaranteed availability at standard pricing" >&2
+            echo "  - simple: Basic deployment without advanced features" >&2
+            return 1
+            ;;
     esac
 }
 
 # =============================================================================
-# CORE DEPLOYMENT VARIABLES
+# MODERN VARIABLE UTILITIES
 # =============================================================================
 
-# Register AWS variables
-register_variable "AWS_REGION" "us-east-1" "validate_aws_region"
-register_variable "AWS_DEFAULT_REGION" "us-east-1" "validate_aws_region"
-register_variable "AWS_PROFILE" "default"
+# Get all registered variables with their metadata
+list_variables() {
+    local filter="${1:-}"  # Optional filter pattern
+    local format="${2:-table}"  # table, json, or simple
+    
+    case "$format" in
+        "json")
+            echo "{"
+            local first=true
+            for var_name in "${!_VARIABLE_REGISTRY[@]}"; do
+                [[ -n "$filter" && ! "$var_name" =~ $filter ]] && continue
+                
+                [[ "$first" == "false" ]] && echo ","
+                first=false
+                
+                echo -n "  \"$var_name\": {"
+                echo -n "\"value\": \"$(get_variable "$var_name")\","
+                echo -n "\"default\": \"${_VARIABLE_DEFAULTS[$var_name]:-}\","
+                echo -n "\"type\": \"${_VARIABLE_TYPES[$var_name]:-string}\","
+                echo -n "\"description\": \"${_VARIABLE_DESCRIPTIONS[$var_name]:-}\""
+                echo -n "}"
+            done
+            echo
+            echo "}"
+            ;;
+        "table")
+            printf "%-20s %-15s %-15s %-10s %s\n" "VARIABLE" "VALUE" "DEFAULT" "TYPE" "DESCRIPTION"
+            printf "%-20s %-15s %-15s %-10s %s\n" "--------" "-----" "-------" "----" "-----------"
+            for var_name in "${!_VARIABLE_REGISTRY[@]}"; do
+                [[ -n "$filter" && ! "$var_name" =~ $filter ]] && continue
+                
+                local value="$(get_variable "$var_name")"
+                local default="${_VARIABLE_DEFAULTS[$var_name]:-}"
+                local type="${_VARIABLE_TYPES[$var_name]:-string}"
+                local desc="${_VARIABLE_DESCRIPTIONS[$var_name]:-}"
+                
+                printf "%-20s %-15s %-15s %-10s %s\n" \
+                    "${var_name:0:19}" "${value:0:14}" "${default:0:14}" "$type" "${desc:0:40}"
+            done
+            ;;
+        "simple")
+            for var_name in "${!_VARIABLE_REGISTRY[@]}"; do
+                [[ -n "$filter" && ! "$var_name" =~ $filter ]] && continue
+                echo "$var_name=$(get_variable "$var_name")"
+            done
+            ;;
+    esac
+}
+
+# Bulk set variables from key=value pairs
+set_variables_bulk() {
+    local -n kvp_array="$1"  # Name reference to associative array
+    local validate="${2:-true}"
+    
+    local failed_vars=()
+    
+    for var_name in "${!kvp_array[@]}"; do
+        local value="${kvp_array[$var_name]}"
+        
+        if [[ "$validate" == "true" ]]; then
+            if ! set_variable "$var_name" "$value"; then
+                failed_vars+=("$var_name")
+                continue
+            fi
+        else
+            # Skip validation for bulk operations
+            local -n var_ref="$var_name"
+            var_ref="$value"
+            export "$var_name"
+        fi
+    done
+    
+    if (( ${#failed_vars[@]} > 0 )); then
+        echo "WARNING: Failed to set variables: ${failed_vars[*]}" >&2
+        return 1
+    fi
+    
+    return 0
+}
+
+# Clear variable cache for performance testing or updates
+clear_variable_cache() {
+    local var_pattern="${1:-}"  # Optional pattern to clear specific variables
+    
+    if [[ -n "$var_pattern" ]]; then
+        for var_name in "${!_VARIABLE_CACHE[@]}"; do
+            [[ "$var_name" =~ $var_pattern ]] && unset _VARIABLE_CACHE["$var_name"]
+        done
+        for var_name in "${!_CACHE_TIMESTAMPS[@]}"; do
+            [[ "$var_name" =~ $var_pattern ]] && unset _CACHE_TIMESTAMPS["$var_name"]
+        done
+    else
+        _VARIABLE_CACHE=()
+        _CACHE_TIMESTAMPS=()
+    fi
+}
+
+# =============================================================================
+# CORE DEPLOYMENT VARIABLES WITH ENHANCED METADATA
+# =============================================================================
+
+# Register AWS variables with enhanced metadata
+register_variable "AWS_REGION" "us-east-1" "validate_aws_region" "string" "AWS region for deployment"
+register_variable "AWS_DEFAULT_REGION" "us-east-1" "validate_aws_region" "string" "Default AWS region fallback"
+register_variable "AWS_PROFILE" "default" "" "string" "AWS CLI profile to use"
 
 # Register deployment variables
-register_variable "STACK_NAME" "" "validate_stack_name"
-register_variable "DEPLOYMENT_TYPE" "spot" "validate_deployment_type"
-register_variable "INSTANCE_TYPE" "g4dn.xlarge" "validate_instance_type"
-register_variable "KEY_NAME" ""
-register_variable "VOLUME_SIZE" "100"
-register_variable "ENVIRONMENT" "production"
+register_variable "STACK_NAME" "" "validate_stack_name" "string" "Unique stack identifier for AWS resources"
+register_variable "DEPLOYMENT_TYPE" "spot" "validate_deployment_type" "string" "Deployment strategy: spot, ondemand, or simple"
+register_variable "INSTANCE_TYPE" "g4dn.xlarge" "validate_instance_type" "string" "EC2 instance type for compute resources"
+register_variable "KEY_NAME" "" "" "string" "SSH key pair name for instance access"
+register_variable "VOLUME_SIZE" "100" "" "integer" "EBS volume size in GB"
+register_variable "ENVIRONMENT" "production" "" "string" "Deployment environment context"
 
-# Register feature flags
-register_variable "CLEANUP_ON_FAILURE" "true" "validate_boolean"
-register_variable "VALIDATE_ONLY" "false" "validate_boolean"
-register_variable "DRY_RUN" "false" "validate_boolean"
-register_variable "DEBUG" "false" "validate_boolean"
-register_variable "VERBOSE" "false" "validate_boolean"
+# Register feature flags with enhanced descriptions
+register_variable "CLEANUP_ON_FAILURE" "true" "validate_boolean" "boolean" "Clean up resources automatically on deployment failure"
+register_variable "VALIDATE_ONLY" "false" "validate_boolean" "boolean" "Validate configuration without deploying resources"
+register_variable "DRY_RUN" "false" "validate_boolean" "boolean" "Show deployment plan without creating resources"
+register_variable "DEBUG" "false" "validate_boolean" "boolean" "Enable verbose debug logging"
+register_variable "VERBOSE" "false" "validate_boolean" "boolean" "Enable detailed operational output"
 
-# Register application variables
-register_variable "N8N_ENABLE" "true" "validate_boolean"
-register_variable "QDRANT_ENABLE" "true" "validate_boolean"
-register_variable "OLLAMA_ENABLE" "true" "validate_boolean"
-register_variable "CRAWL4AI_ENABLE" "true" "validate_boolean"
+# Register application service toggles
+register_variable "N8N_ENABLE" "true" "validate_boolean" "boolean" "Enable n8n workflow automation service"
+register_variable "QDRANT_ENABLE" "true" "validate_boolean" "boolean" "Enable Qdrant vector database service"
+register_variable "OLLAMA_ENABLE" "true" "validate_boolean" "boolean" "Enable Ollama LLM inference service"
+register_variable "CRAWL4AI_ENABLE" "true" "validate_boolean" "boolean" "Enable Crawl4AI web scraping service"
 
 # =============================================================================
 # PARAMETER STORE INTEGRATION
 # =============================================================================
 
-# Load variables from Parameter Store
+# Enhanced Parameter Store integration with batch processing
 load_from_parameter_store() {
     local prefix="${1:-/aibuildkit}"
+    local batch_size="${2:-10}"  # Process in batches for large parameter sets
+    local max_retries="${3:-3}"
     
     if ! command -v aws &> /dev/null; then
         echo "WARNING: AWS CLI not available, skipping Parameter Store loading" >&2
@@ -216,31 +507,75 @@ load_from_parameter_store() {
     
     echo "Loading configuration from Parameter Store (prefix: $prefix)..." >&2
     
-    # Get all parameters with prefix
+    local attempt=1
     local params
-    params=$(aws ssm get-parameters-by-path \
-        --path "$prefix" \
-        --recursive \
-        --with-decryption \
-        --query 'Parameters[*].[Name,Value]' \
-        --output text 2>/dev/null) || {
-        echo "WARNING: Failed to load from Parameter Store" >&2
-        return 1
-    }
     
-    # Process each parameter
-    while IFS=$'\t' read -r name value; do
+    # Retry logic for Parameter Store access
+    while (( attempt <= max_retries )); do
+        if params=$(aws ssm get-parameters-by-path \
+            --path "$prefix" \
+            --recursive \
+            --with-decryption \
+            --max-items 50 \
+            --query 'Parameters[*].[Name,Value,Type]' \
+            --output text 2>/dev/null); then
+            break
+        else
+            echo "WARNING: Parameter Store access failed (attempt $attempt/$max_retries)" >&2
+            if (( attempt < max_retries )); then
+                sleep $((attempt * 2))  # Exponential backoff
+            fi
+            ((attempt++))
+        fi
+    done
+    
+    if (( attempt > max_retries )); then
+        echo "ERROR: Failed to load from Parameter Store after $max_retries attempts" >&2
+        return 1
+    fi
+    
+    # Process parameters in batches for better performance
+    local -A param_batch=()
+    local batch_count=0
+    local total_loaded=0
+    local failed_count=0
+    
+    while IFS=$'\t' read -r name value param_type; do
+        [[ -z "$name" ]] && continue
+        
         # Convert parameter name to environment variable
         # /aibuildkit/OPENAI_API_KEY -> OPENAI_API_KEY
         local var_name="${name#${prefix}/}"
         var_name="${var_name//\//_}"  # Replace / with _
         
-        # Set the variable
-        set_variable "$var_name" "$value" || {
-            echo "WARNING: Failed to set $var_name from Parameter Store" >&2
-        }
+        # Add to batch
+        param_batch["$var_name"]="$value"
+        ((batch_count++))
+        
+        # Process batch when it reaches batch_size
+        if (( batch_count >= batch_size )); then
+            if set_variables_bulk param_batch true; then
+                ((total_loaded += batch_count))
+            else
+                ((failed_count += batch_count))
+            fi
+            
+            # Clear batch
+            param_batch=()
+            batch_count=0
+        fi
     done <<< "$params"
     
+    # Process remaining parameters in final batch
+    if (( batch_count > 0 )); then
+        if set_variables_bulk param_batch true; then
+            ((total_loaded += batch_count))
+        else
+            ((failed_count += batch_count))
+        fi
+    fi
+    
+    echo "Parameter Store loading complete: $total_loaded loaded, $failed_count failed" >&2
     return 0
 }
 
@@ -284,66 +619,252 @@ load_env_file() {
 # VALIDATION FUNCTIONS
 # =============================================================================
 
-# Validate all required variables
+# Enhanced validation with dependency checking and context awareness
 validate_required_variables() {
-    local required_vars=(
-        "AWS_REGION"
-        "STACK_NAME"
-        "DEPLOYMENT_TYPE"
-        "INSTANCE_TYPE"
+    local context="${1:-deployment}"  # deployment, testing, development
+    local strict_mode="${2:-true}"
+    
+    # Define context-specific required variables
+    local -A required_by_context=(
+        ["deployment"]="AWS_REGION STACK_NAME DEPLOYMENT_TYPE INSTANCE_TYPE"
+        ["testing"]="AWS_REGION STACK_NAME"
+        ["development"]="AWS_REGION STACK_NAME DEPLOYMENT_TYPE"
     )
     
+    local required_vars_str="${required_by_context[$context]:-${required_by_context[deployment]}}"
+    read -ra required_vars <<< "$required_vars_str"
+    
     local missing=()
+    local invalid=()
+    
+    # Check each required variable
     for var in "${required_vars[@]}"; do
-        local value=$(get_variable "$var")
-        if [ -z "$value" ]; then
+        local value
+        value=$(get_variable "$var" false)  # Don't use cache for validation
+        
+        if [[ -z "$value" ]]; then
             missing+=("$var")
+            continue
+        fi
+        
+        # Run validator if exists
+        if [[ -v _VARIABLE_VALIDATORS["$var"] ]]; then
+            local validator="${_VARIABLE_VALIDATORS[$var]}"
+            if ! "$validator" "$value" >/dev/null 2>&1; then
+                invalid+=("$var")
+            fi
         fi
     done
     
-    if [ ${#missing[@]} -gt 0 ]; then
-        echo "ERROR: Missing required variables: ${missing[*]}" >&2
-        return 1
+    local has_errors=false
+    
+    # Report missing variables
+    if (( ${#missing[@]} > 0 )); then
+        echo "ERROR: Missing required variables for context '$context': ${missing[*]}" >&2
+        for var in "${missing[@]}"; do
+            local default="${_VARIABLE_DEFAULTS[$var]:-N/A}"
+            local desc="${_VARIABLE_DESCRIPTIONS[$var]:-No description}"
+            echo "  $var: $desc (default: $default)" >&2
+        done
+        has_errors=true
+    fi
+    
+    # Report invalid variables
+    if (( ${#invalid[@]} > 0 )); then
+        echo "ERROR: Invalid values for variables: ${invalid[*]}" >&2
+        for var in "${invalid[@]}"; do
+            local value
+            value=$(get_variable "$var" false)
+            echo "  $var='$value' failed validation" >&2
+        done
+        has_errors=true
+    fi
+    
+    # Check cross-variable dependencies
+    if [[ "$context" == "deployment" ]]; then
+        validate_variable_dependencies || has_errors=true
+    fi
+    
+    if [[ "$has_errors" == "true" ]]; then
+        if [[ "$strict_mode" == "true" ]]; then
+            return 1
+        else
+            echo "WARNING: Validation errors found but strict mode disabled" >&2
+        fi
     fi
     
     return 0
 }
 
-# Print current configuration
+# Validate cross-variable dependencies
+validate_variable_dependencies() {
+    local errors=()
+    
+    # Check deployment type vs instance type compatibility
+    local deployment_type
+    deployment_type=$(get_variable "DEPLOYMENT_TYPE")
+    local instance_type
+    instance_type=$(get_variable "INSTANCE_TYPE")
+    
+    if [[ "$deployment_type" == "simple" && "$instance_type" =~ ^(g4dn|g5|p3|p4d) ]]; then
+        errors+=("Simple deployment with GPU instance '$instance_type' may be over-provisioned")
+    fi
+    
+    # Check environment vs deployment type
+    local environment
+    environment=$(get_variable "ENVIRONMENT")
+    
+    if [[ "$environment" == "production" && "$deployment_type" == "spot" ]]; then
+        echo "WARNING: Production environment with spot instances may experience interruptions" >&2
+    fi
+    
+    # Check volume size vs instance type
+    local volume_size
+    volume_size=$(get_variable "VOLUME_SIZE")
+    
+    if [[ "$instance_type" =~ ^(g4dn|g5) ]] && (( volume_size < 50 )); then
+        errors+=("GPU instances typically need more storage. Consider increasing VOLUME_SIZE to 100GB+")
+    fi
+    
+    # Report dependency errors
+    if (( ${#errors[@]} > 0 )); then
+        echo "WARNING: Variable dependency issues:" >&2
+        for error in "${errors[@]}"; do
+            echo "  - $error" >&2
+        done
+        # Don't fail validation for warnings, just inform
+    fi
+    
+    return 0
+}
+
+# Enhanced configuration display with categorization and metadata
 print_configuration() {
-    echo "=== Current Configuration ==="
-    echo "AWS_REGION: $(get_variable AWS_REGION)"
-    echo "STACK_NAME: $(get_variable STACK_NAME)"
-    echo "DEPLOYMENT_TYPE: $(get_variable DEPLOYMENT_TYPE)"
-    echo "INSTANCE_TYPE: $(get_variable INSTANCE_TYPE)"
-    echo "KEY_NAME: $(get_variable KEY_NAME)"
-    echo "ENVIRONMENT: $(get_variable ENVIRONMENT)"
-    echo "CLEANUP_ON_FAILURE: $(get_variable CLEANUP_ON_FAILURE)"
-    echo "============================"
+    local format="${1:-detailed}"  # detailed, compact, json
+    local filter="${2:-}"  # Optional variable name pattern filter
+    
+    case "$format" in
+        "json")
+            list_variables "$filter" "json"
+            ;;
+        "compact")
+            echo "=== Configuration Summary ==="
+            echo "Stack: $(get_variable STACK_NAME) | Type: $(get_variable DEPLOYMENT_TYPE) | Region: $(get_variable AWS_REGION)"
+            echo "Instance: $(get_variable INSTANCE_TYPE) | Environment: $(get_variable ENVIRONMENT)"
+            echo "Debug: $(get_variable DEBUG) | Dry Run: $(get_variable DRY_RUN)"
+            echo "============================"
+            ;;
+        "detailed"|*)
+            echo "=== GeuseMaker Deployment Configuration ==="
+            echo
+            echo "📍 AWS Configuration:"
+            echo "   Region: $(get_variable AWS_REGION)"
+            echo "   Profile: $(get_variable AWS_PROFILE)"
+            echo
+            echo "🏗️  Deployment Configuration:"
+            echo "   Stack Name: $(get_variable STACK_NAME)"
+            echo "   Type: $(get_variable DEPLOYMENT_TYPE)"
+            echo "   Environment: $(get_variable ENVIRONMENT)"
+            echo
+            echo "💻 Compute Configuration:"
+            echo "   Instance Type: $(get_variable INSTANCE_TYPE)"
+            echo "   Volume Size: $(get_variable VOLUME_SIZE) GB"
+            echo "   Key Name: $(get_variable KEY_NAME)"
+            echo
+            echo "🔧 Service Configuration:"
+            echo "   n8n: $(get_variable N8N_ENABLE)"
+            echo "   Ollama: $(get_variable OLLAMA_ENABLE)"
+            echo "   Qdrant: $(get_variable QDRANT_ENABLE)"
+            echo "   Crawl4AI: $(get_variable CRAWL4AI_ENABLE)"
+            echo
+            echo "⚙️  Operational Flags:"
+            echo "   Debug Mode: $(get_variable DEBUG)"
+            echo "   Dry Run: $(get_variable DRY_RUN)"
+            echo "   Cleanup on Failure: $(get_variable CLEANUP_ON_FAILURE)"
+            echo "   Validate Only: $(get_variable VALIDATE_ONLY)"
+            echo "=========================================="
+            ;;
+    esac
 }
 
 # =============================================================================
 # INITIALIZATION
 # =============================================================================
 
-# Initialize variables from environment
+# Enhanced initialization with priority-based loading and performance optimization
 initialize_variables() {
-    # Load from Parameter Store if available
-    load_from_parameter_store "/aibuildkit" || true
+    local load_parameter_store="${1:-true}"
+    local load_env_files="${2:-true}"
+    local load_environment="${3:-true}"
+    local prefix="${4:-/aibuildkit}"
     
-    # Load from .env file if exists
-    [ -f ".env" ] && load_env_file ".env" || true
+    echo "Initializing GeuseMaker variable system..." >&2
     
-    # Apply any environment overrides
-    for var in $(echo "$_VARIABLE_REGISTRY" | tr ':' ' '); do
-        [ -n "$var" ] || continue
-        local env_value
-        eval "env_value=\${${var}:-}"
-        if [ -n "$env_value" ]; then
-            set_variable "$var" "$env_value" || true
-        fi
-    done
+    local start_time
+    start_time=$(date +%s)
+    
+    # Priority 1: Load from Parameter Store (if enabled)
+    if [[ "$load_parameter_store" == "true" ]]; then
+        echo "Loading from AWS Parameter Store..." >&2
+        load_from_parameter_store "$prefix" || {
+            echo "WARNING: Parameter Store loading failed, continuing with other sources" >&2
+        }
+    fi
+    
+    # Priority 2: Load from environment-specific files (if enabled)
+    if [[ "$load_env_files" == "true" ]]; then
+        local env_files=(
+            ".env.$(get_variable ENVIRONMENT)"
+            ".env.local"
+            ".env"
+        )
+        
+        for env_file in "${env_files[@]}"; do
+            if [[ -f "$env_file" ]]; then
+                echo "Loading from $env_file..." >&2
+                load_env_file "$env_file" || {
+                    echo "WARNING: Failed to load $env_file" >&2
+                }
+                break  # Only load the first available env file
+            fi
+        done
+    fi
+    
+    # Priority 3: Apply environment variable overrides (if enabled)
+    if [[ "$load_environment" == "true" ]]; then
+        echo "Applying environment variable overrides..." >&2
+        
+        # Use modern associative array iteration
+        for var_name in "${!_VARIABLE_REGISTRY[@]}"; do
+            # Use name reference for efficient access
+            local -n env_value_ref="$var_name"
+            local env_value="${env_value_ref:-}"
+            
+            if [[ -n "$env_value" ]]; then
+                # Override with environment value, but skip validation for performance
+                set_variable "$var_name" "$env_value" || {
+                    echo "WARNING: Failed to set $var_name from environment" >&2
+                }
+            fi
+        done
+    fi
+    
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    echo "Variable initialization completed in ${duration}s" >&2
+    
+    # Show initialization summary if debug enabled
+    if [[ "$(get_variable DEBUG)" == "true" ]]; then
+        echo "Variable initialization summary:" >&2
+        echo "  Registered variables: ${#_VARIABLE_REGISTRY[@]}" >&2
+        echo "  Cached values: ${#_VARIABLE_CACHE[@]}" >&2
+        echo "  Total duration: ${duration}s" >&2
+    fi
 }
 
-# Auto-initialize on source
-initialize_variables
+# Auto-initialize on source with error handling
+if ! initialize_variables; then
+    echo "WARNING: Variable initialization encountered errors" >&2
+fi

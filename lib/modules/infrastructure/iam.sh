@@ -71,7 +71,7 @@ EOF
         --role-name "$role_name" \
         --assume-role-policy-document "$trust_policy" \
         --description "Comprehensive IAM role for EC2 instances in $stack_name" \
-        --tags "$(tags_to_cli_format "$(generate_tags "$stack_name")")" || {
+        --tags $(tags_to_iam_format "$(generate_tags "$stack_name")") || {
         throw_error $ERROR_AWS_API "Failed to create IAM role"
     }
     
@@ -114,9 +114,9 @@ _create_service_linked_role_impl() {
     existing_role=$(aws iam get-role \
         --role-name "AWSServiceRoleFor${service_name}" \
         --query 'Role.RoleName' \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_role" ]; then
+    if [ -n "$existing_role" ] && [ "$existing_role" != "None" ] && [ "$existing_role" != "null" ]; then
         echo "Service-linked role already exists: $existing_role" >&2
         echo "$existing_role"
         return 0
@@ -160,7 +160,7 @@ create_instance_profile() {
     # Create instance profile
     aws iam create-instance-profile \
         --instance-profile-name "$profile_name" \
-        --tags "$(tags_to_cli_format "$(generate_tags "${STACK_NAME:-default}")")" || {
+        --tags $(tags_to_iam_format "$(generate_tags "${STACK_NAME:-default}")") || {
         throw_error $ERROR_AWS_API "Failed to create instance profile"
     }
     
@@ -524,7 +524,7 @@ create_and_attach_policy() {
         --policy-name "$policy_name" \
         --policy-document "$policy_document" \
         --description "Custom policy for $role_name" \
-        --tags "$(tags_to_cli_format "$(generate_tags "${STACK_NAME:-default}")")" \
+        --tags $(tags_to_iam_format "$(generate_tags "${STACK_NAME:-default}")") \
         --query 'Policy.Arn' \
         --output text 2>/dev/null) || {
         
@@ -606,7 +606,12 @@ validate_role_permissions() {
         attached_profile=$(aws ec2 describe-instances \
             --instance-ids "$instance_id" \
             --query 'Reservations[0].Instances[0].IamInstanceProfile.Arn' \
-            --output text 2>/dev/null | grep -v "None" || echo "")
+            --output text 2>/dev/null || echo "")
+        
+        # Handle None/null values
+        if [ "$attached_profile" = "None" ] || [ "$attached_profile" = "null" ]; then
+            attached_profile=""
+        fi
         
         if [ -z "$attached_profile" ]; then
             echo "WARNING: No IAM instance profile attached to instance: $instance_id" >&2

@@ -32,13 +32,22 @@ _create_security_group_impl() {
     local stack_name="$2"
     local description="$3"
     
+    # Validate required parameters
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for security group creation"
+    fi
+    
+    if [ -z "$stack_name" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "Stack name is required for security group creation"
+    fi
+    
     echo "Creating security group for stack: $stack_name" >&2
     
     # Check if security group already exists
     local existing_sg
     existing_sg=$(get_security_group_by_stack "$stack_name" "$vpc_id") || true
     
-    if [ -n "$existing_sg" ]; then
+    if [ -n "$existing_sg" ] && [ "$existing_sg" != "None" ] && [ "$existing_sg" != "null" ]; then
         echo "Security group already exists: $existing_sg" >&2
         echo "$existing_sg"
         return 0
@@ -82,6 +91,11 @@ _create_alb_security_group_impl() {
     local vpc_id="$1"
     local stack_name="$2"
     
+    # Validate required parameters
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for ALB security group creation"
+    fi
+    
     echo "Creating ALB security group" >&2
     
     # Check if ALB security group already exists
@@ -90,9 +104,9 @@ _create_alb_security_group_impl() {
         --filters "Name=group-name,Values=${stack_name}-alb-sg" \
                   "Name=vpc-id,Values=$vpc_id" \
         --query 'SecurityGroups[0].GroupId' \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_sg" ]; then
+    if [ -n "$existing_sg" ] && [ "$existing_sg" != "None" ] && [ "$existing_sg" != "null" ]; then
         echo "ALB security group already exists: $existing_sg" >&2
         echo "$existing_sg"
         return 0
@@ -134,6 +148,15 @@ _create_efs_security_group_impl() {
     local ec2_sg_id="$2"
     local stack_name="$3"
     
+    # Validate required parameters
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for EFS security group creation"
+    fi
+    
+    if [ -z "$ec2_sg_id" ] || [ "$ec2_sg_id" = "None" ] || [ "$ec2_sg_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "EC2 security group ID is required for EFS security group creation"
+    fi
+    
     echo "Creating EFS security group" >&2
     
     # Check if EFS security group already exists
@@ -142,9 +165,9 @@ _create_efs_security_group_impl() {
         --filters "Name=group-name,Values=${stack_name}-efs-sg" \
                   "Name=vpc-id,Values=$vpc_id" \
         --query 'SecurityGroups[0].GroupId' \
-        --output text 2>/dev/null | grep -v "None" || true)
+        --output text 2>/dev/null || true)
     
-    if [ -n "$existing_sg" ]; then
+    if [ -n "$existing_sg" ] && [ "$existing_sg" != "None" ] && [ "$existing_sg" != "null" ]; then
         echo "EFS security group already exists: $existing_sg" >&2
         echo "$existing_sg"
         return 0
@@ -338,14 +361,22 @@ add_outbound_rule() {
 get_security_group_by_stack() {
     local stack_name="$1"
     local vpc_id="${2:-}"
+    local sg_id
     
     local filters="Name=tag:Stack,Values=$stack_name"
-    [ -n "$vpc_id" ] && filters="$filters Name=vpc-id,Values=$vpc_id"
+    [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ] && [ "$vpc_id" != "null" ] && filters="$filters Name=vpc-id,Values=$vpc_id"
     
-    aws ec2 describe-security-groups \
+    sg_id=$(aws ec2 describe-security-groups \
         --filters $filters \
         --query 'SecurityGroups[0].GroupId' \
-        --output text 2>/dev/null | grep -v "None" || true
+        --output text 2>/dev/null || true)
+    
+    # Return empty if no security group found or if result is "None"
+    if [ -z "$sg_id" ] || [ "$sg_id" = "None" ] || [ "$sg_id" = "null" ]; then
+        return 0
+    fi
+    
+    echo "$sg_id"
 }
 
 # =============================================================================
@@ -495,7 +526,7 @@ EOF
     aws iam create-role \
         --role-name "$role_name" \
         --assume-role-policy-document "$trust_policy" \
-        --tags "$(tags_to_cli_format "$(generate_tags "$stack_name")")" || {
+        --tags $(tags_to_iam_format "$(generate_tags "$stack_name")") || {
         throw_error $ERROR_AWS_API "Failed to create IAM role"
     }
     
@@ -681,7 +712,7 @@ create_and_attach_policy() {
     aws iam create-policy \
         --policy-name "$policy_name" \
         --policy-document "$policy_document" \
-        --tags "$(tags_to_cli_format "$(generate_tags "${STACK_NAME:-default}")")" 2>/dev/null || {
+        --tags $(tags_to_iam_format "$(generate_tags "${STACK_NAME:-default}")") 2>/dev/null || {
         echo "Policy may already exist: $policy_name" >&2
     }
     

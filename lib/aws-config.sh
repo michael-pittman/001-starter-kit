@@ -1,8 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # AWS Configuration Management Library
 # Configuration defaults, validation, and management functions
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "aws-config.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
+
+# Load AWS CLI v2 enhancements
+source "$SCRIPT_DIR/aws-cli-v2.sh"
 
 # =============================================================================
 # CONFIGURATION DEFAULTS

@@ -1,8 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Error Handling Library
 # Comprehensive error handling patterns and utilities
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation - critical for error handling reliability
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    # Get the directory of this script for sourcing bash_version module
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "error-handling.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
 
 # =============================================================================
 # COLOR DEFINITIONS (fallback if not already defined)
@@ -30,57 +40,356 @@ if [[ -z "${ERROR_HANDLING_MODES_DEFINED:-}" ]]; then
     readonly ERROR_HANDLING_MODES_DEFINED=true
 fi
 
+# Enhanced error types using bash 5.3+ features
+if [[ -z "${ERROR_TYPES_DEFINED:-}" ]]; then
+    declare -A ERROR_TYPES=(
+        [SYSTEM]="System error"
+        [AWS]="AWS API error"
+        [DOCKER]="Docker error"
+        [NETWORK]="Network error"
+        [VALIDATION]="Validation error"
+        [SECURITY]="Security error"
+        [DEPENDENCY]="Dependency error"
+        [CONFIGURATION]="Configuration error"
+        [RESOURCE]="Resource error"
+        [TIMEOUT]="Timeout error"
+        [PERMISSION]="Permission error"
+        [QUOTA]="Quota/limit error"
+        [DATA]="Data error"
+        [USER]="User error"
+        [UNKNOWN]="Unknown error"
+    )
+    readonly ERROR_TYPES
+    export ERROR_TYPES_DEFINED=true
+fi
+
+# Logging levels with modern bash features
+if [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
+    declare -A LOG_LEVELS=(
+        [TRACE]=0
+        [DEBUG]=1
+        [INFO]=2
+        [WARN]=3
+        [ERROR]=4
+        [FATAL]=5
+    )
+    declare -A LOG_LEVEL_COLORS=(
+        [TRACE]="\033[0;37m"     # Light gray
+        [DEBUG]="\033[0;36m"     # Cyan
+        [INFO]="\033[0;32m"      # Green
+        [WARN]="\033[0;33m"      # Yellow
+        [ERROR]="\033[0;31m"     # Red
+        [FATAL]="\033[1;31m"     # Bold red
+    )
+    readonly LOG_LEVELS LOG_LEVEL_COLORS
+    export LOG_LEVELS_DEFINED=true
+fi
+
+# Performance monitoring variables
+if [[ -z "${PERF_MONITORING_INITIALIZED:-}" ]]; then
+    declare -A FUNCTION_TIMINGS
+    declare -A FUNCTION_CALL_COUNTS
+    declare -A CHECKPOINT_TIMES
+    readonly FUNCTION_TIMINGS FUNCTION_CALL_COUNTS CHECKPOINT_TIMES
+    export PERF_MONITORING_INITIALIZED=true
+fi
+
 # Default error handling configuration
 export ERROR_HANDLING_MODE="${ERROR_HANDLING_MODE:-$ERROR_MODE_STRICT}"
 export ERROR_LOG_FILE="${ERROR_LOG_FILE:-/tmp/GeuseMaker-errors.log}"
 export ERROR_NOTIFICATION_ENABLED="${ERROR_NOTIFICATION_ENABLED:-false}"
 export ERROR_CLEANUP_ENABLED="${ERROR_CLEANUP_ENABLED:-true}"
+export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+export STRUCTURED_LOGGING="${STRUCTURED_LOGGING:-true}"
+export PERFORMANCE_MONITORING="${PERFORMANCE_MONITORING:-false}"
+export ERROR_ANALYTICS="${ERROR_ANALYTICS:-true}"
 
 # =============================================================================
 # ERROR LOGGING AND TRACKING
 # =============================================================================
 
-# Initialize error tracking
+# Initialize error tracking with modern bash features
 ERROR_COUNT=0
 WARNING_COUNT=0
 LAST_ERROR=""
 ERROR_CONTEXT=""
 ERROR_STACK=()
+ERROR_HISTORY=()
+
+# Error metadata tracking
+if [[ -z "${ERROR_METADATA_INITIALIZED:-}" ]]; then
+    declare -A ERROR_METADATA
+    declare -A ERROR_TIMESTAMPS
+    declare -A ERROR_LOCATIONS
+    declare -A ERROR_RECOVERY_ATTEMPTS
+    readonly ERROR_METADATA ERROR_TIMESTAMPS ERROR_LOCATIONS ERROR_RECOVERY_ATTEMPTS
+    export ERROR_METADATA_INITIALIZED=true
+fi
+
+# Process and session tracking
+SESSION_ID="$(date +%Y%m%d_%H%M%S)_$$"
+START_TIME="$(date +%s.%N)"
+PROCESS_HIERARCHY=()
+CURRENT_OPERATION=""
+OPERATION_STACK=()
+
+# =============================================================================
+# MODERN BASH 5.3+ UTILITY FUNCTIONS
+# =============================================================================
+
+# Get caller information with enhanced stack trace
+get_caller_info() {
+    local caller_index=2  # Skip this function and the calling log function
+    local caller_func="${FUNCNAME[$caller_index]:-main}"
+    local caller_file="${BASH_SOURCE[$caller_index]:-unknown}"
+    local caller_line="${BASH_LINENO[$((caller_index-1))]:-0}"
+    
+    echo "${caller_func}@$(basename "$caller_file"):$caller_line"
+}
+
+# Initialize structured logging
+init_structured_logging() {
+    local log_file="$1"
+    local enable_rotation="${2:-true}"
+    
+    # Create log directory if it doesn't exist
+    local log_dir
+    log_dir=$(dirname "$log_file")
+    mkdir -p "$log_dir" 2>/dev/null || true
+    
+    # Rotate log if it exists and rotation is enabled
+    if [[ "$enable_rotation" == "true" && -f "$log_file" ]]; then
+        local log_size
+        log_size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
+        if (( log_size > 10485760 )); then  # 10MB
+            mv "$log_file" "${log_file}.$(date +%Y%m%d_%H%M%S).old"
+        fi
+    fi
+    
+    # Initialize log with session header
+    {
+        echo "=== GeuseMaker Error Log Session Started ==="
+        echo "Timestamp: $(date -Iseconds)"
+        echo "Session ID: $SESSION_ID"
+        echo "PID: $$"
+        echo "Script: ${BASH_SOURCE[2]:-unknown}"
+        echo "Mode: $ERROR_HANDLING_MODE"
+        echo "Bash Version: $BASH_VERSION"
+        echo "Platform: $(uname -s) $(uname -r)"
+        echo "User: $(whoami)"
+        echo "PWD: $PWD"
+        echo "Arguments: $*"
+        echo "============================================"
+    } > "$log_file"
+}
+
+# Structured logging function
+log_structured() {
+    local level="$1"
+    local message="$2"
+    shift 2
+    local attributes=("$@")
+    
+    # Check if log level is enabled
+    local current_level_num="${LOG_LEVELS[$LOG_LEVEL]:-2}"
+    local message_level_num="${LOG_LEVELS[$level]:-2}"
+    
+    if (( message_level_num < current_level_num )); then
+        return 0
+    fi
+    
+    local timestamp iso_timestamp caller_info
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    iso_timestamp=$(date -Iseconds)
+    caller_info=$(get_caller_info)
+    
+    # Build structured log entry
+    local log_entry
+    if [[ "$STRUCTURED_LOGGING" == "true" ]]; then
+        # JSON-like structured format
+        log_entry="{\"timestamp\":\"$iso_timestamp\",\"level\":\"$level\",\"message\":\"$message\",\"session_id\":\"$SESSION_ID\",\"caller\":\"$caller_info\",\"pid\":$$"
+        
+        for attr in "${attributes[@]}"; do
+            if [[ "$attr" =~ ^([^=]+)=(.*)$ ]]; then
+                local key="${BASH_REMATCH[1]}"
+                local value="${BASH_REMATCH[2]}"
+                log_entry="$log_entry,\"$key\":\"$value\""
+            fi
+        done
+        
+        log_entry="$log_entry}"
+    else
+        # Traditional format
+        log_entry="[$timestamp] [$level] $message"
+        for attr in "${attributes[@]}"; do
+            log_entry="$log_entry [$attr]"
+        done
+    fi
+    
+    # Output to console with colors
+    local color="${LOG_LEVEL_COLORS[$level]:-\033[0m}"
+    echo -e "${color}$log_entry${NC}" >&2
+    
+    # Output to log file
+    echo "$log_entry" >> "$ERROR_LOG_FILE"
+}
+
+# Initialize performance monitoring
+init_performance_monitoring() {
+    # Clear previous data
+    FUNCTION_TIMINGS=()
+    FUNCTION_CALL_COUNTS=()
+    CHECKPOINT_TIMES=()
+    
+    # Set initial checkpoint
+    CHECKPOINT_TIMES["session_start"]="$START_TIME"
+    
+    log_structured "DEBUG" "Performance monitoring initialized" \
+        "start_time=$START_TIME"
+}
+
+# Initialize error analytics
+init_error_analytics() {
+    local analytics_file="${ERROR_LOG_FILE%.*}_analytics.json"
+    
+    # Initialize analytics file if it doesn't exist
+    if [[ ! -f "$analytics_file" ]]; then
+        echo '{"error_counts":{},"error_patterns":{},"recovery_success":{},"session_stats":{}}' > "$analytics_file"
+    fi
+    
+    export ERROR_ANALYTICS_FILE="$analytics_file"
+}
+
+# Initialize resource monitoring
+init_resource_monitoring() {
+    # Check available memory and disk space
+    local available_memory available_disk
+    
+    if command -v free >/dev/null 2>&1; then
+        available_memory=$(free -m | awk 'NR==2{printf "%.1f", $7/1024}')
+    else
+        available_memory="unknown"
+    fi
+    
+    if command -v df >/dev/null 2>&1; then
+        available_disk=$(df -h . | awk 'NR==2{print $4}')
+    else
+        available_disk="unknown"
+    fi
+    
+    log_structured "DEBUG" "Resource monitoring initialized" \
+        "available_memory_gb=$available_memory" \
+        "available_disk=$available_disk"
+}
+
+# Update error analytics
+update_error_analytics() {
+    local error_type="$1"
+    local message="$2"
+    local context="${3:-}"
+    
+    if [[ -z "$ERROR_ANALYTICS_FILE" ]]; then
+        return 0
+    fi
+    
+    # Use jq if available for JSON manipulation, otherwise use basic approach
+    if command -v jq >/dev/null 2>&1; then
+        local temp_file
+        temp_file=$(mktemp)
+        
+        # Update error counts
+        jq --arg type "$error_type" \
+           '.error_counts[$type] = (.error_counts[$type] // 0) + 1' \
+           "$ERROR_ANALYTICS_FILE" > "$temp_file" && \
+        mv "$temp_file" "$ERROR_ANALYTICS_FILE"
+    else
+        # Basic analytics without jq
+        echo "$(date -Iseconds): $error_type - $message" >> "${ERROR_ANALYTICS_FILE%.json}.log"
+    fi
+}
+
+# Handle signal-based exits
+handle_signal_exit() {
+    local signal="$1"
+    local exit_code=${2:-130}
+    
+    log_structured "WARN" "Received signal $signal, initiating graceful shutdown" \
+        "signal=$signal" \
+        "exit_code=$exit_code"
+    
+    # Perform cleanup
+    cleanup_on_exit
+    
+    # Exit with appropriate code
+    exit "$exit_code"
+}
 
 init_error_handling() {
     local mode="${1:-$ERROR_MODE_STRICT}"
     local log_file="${2:-$ERROR_LOG_FILE}"
+    local options="${3:-}"
     
     export ERROR_HANDLING_MODE="$mode"
     export ERROR_LOG_FILE="$log_file"
     
-    # Initialize error log
-    echo "=== Error Log Initialized at $(date) ===" > "$ERROR_LOG_FILE"
-    echo "PID: $$" >> "$ERROR_LOG_FILE"
-    echo "Script: ${BASH_SOURCE[1]:-unknown}" >> "$ERROR_LOG_FILE"
-    echo "Mode: $ERROR_HANDLING_MODE" >> "$ERROR_LOG_FILE"
-    echo "" >> "$ERROR_LOG_FILE"
+    # Parse options
+    local enable_profiling=false
+    local enable_analytics=true
+    local log_rotation=true
     
-    # Set up error trapping based on mode
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --enable-profiling) enable_profiling=true; shift ;;
+            --disable-analytics) enable_analytics=false; shift ;;
+            --disable-log-rotation) log_rotation=false; shift ;;
+            *) shift ;;
+        esac
+    done
+    
+    # Initialize structured error log
+    init_structured_logging "$log_file" "$log_rotation"
+    
+    # Initialize performance monitoring if enabled
+    if [[ "$enable_profiling" == "true" || "$PERFORMANCE_MONITORING" == "true" ]]; then
+        init_performance_monitoring
+    fi
+    
+    # Initialize error analytics if enabled
+    if [[ "$enable_analytics" == "true" && "$ERROR_ANALYTICS" == "true" ]]; then
+        init_error_analytics
+    fi
+    
+    # Set up modern error trapping with enhanced diagnostics
     case "$mode" in
         "$ERROR_MODE_STRICT")
-            set -euo pipefail
-            trap 'handle_script_error $? $LINENO $BASH_COMMAND' ERR
+            set -euo pipefail -E  # -E ensures ERR trap is inherited by functions
+            trap 'handle_script_error $? $LINENO "$BASH_COMMAND" "${FUNCNAME[*]}" "${BASH_SOURCE[*]}" "${BASH_LINENO[*]}"' ERR
             ;;
         "$ERROR_MODE_RESILIENT")
-            set -uo pipefail
-            trap 'handle_script_error $? $LINENO $BASH_COMMAND' ERR
+            set -uo pipefail -E
+            trap 'handle_script_error $? $LINENO "$BASH_COMMAND" "${FUNCNAME[*]}" "${BASH_SOURCE[*]}" "${BASH_LINENO[*]}"' ERR
             ;;
         "$ERROR_MODE_INTERACTIVE")
-            set -uo pipefail
-            trap 'handle_script_error $? $LINENO $BASH_COMMAND' ERR
+            set -uo pipefail -E
+            trap 'handle_script_error $? $LINENO "$BASH_COMMAND" "${FUNCNAME[*]}" "${BASH_SOURCE[*]}" "${BASH_LINENO[*]}"' ERR
             ;;
     esac
     
-    # Set up exit trap for cleanup
-    trap cleanup_on_exit EXIT
+    # Set up comprehensive signal handling
+    trap 'handle_signal_exit SIGINT' INT
+    trap 'handle_signal_exit SIGTERM' TERM
+    trap 'handle_signal_exit SIGHUP' HUP
+    trap 'cleanup_on_exit' EXIT
     
-    log_debug "Error handling initialized in $mode mode"
+    # Set up resource monitoring
+    init_resource_monitoring
+    
+    log_structured "INFO" "Error handling initialized" \
+        "mode=$mode" \
+        "log_file=$log_file" \
+        "profiling=$enable_profiling" \
+        "analytics=$enable_analytics" \
+        "session_id=$SESSION_ID"
 }
 
 # =============================================================================
@@ -91,32 +400,55 @@ log_error() {
     local message="$1"
     local context="${2:-}"
     local exit_code="${3:-1}"
+    local error_type="${4:-UNKNOWN}"
+    local recovery_suggestion="${5:-}"
     
     ((ERROR_COUNT++))
     LAST_ERROR="$message"
     ERROR_CONTEXT="$context"
     
-    local timestamp
+    local timestamp error_id caller_info
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    error_id="${SESSION_ID}_$(printf '%04d' $ERROR_COUNT)"
+    caller_info=$(get_caller_info)
     
-    # Log to console
-    echo -e "${RED}[ERROR] $message${NC}" >&2
-    if [ -n "$context" ]; then
-        echo -e "${RED}        Context: $context${NC}" >&2
+    # Store error metadata
+    ERROR_TIMESTAMPS["$error_id"]="$timestamp"
+    ERROR_METADATA["$error_id"]="type=$error_type;context=$context;exit_code=$exit_code;caller=$caller_info"
+    ERROR_LOCATIONS["$error_id"]="${BASH_SOURCE[1]:-unknown}:${BASH_LINENO[0]:-0}"
+    
+    # Log with structured format
+    if [[ "$STRUCTURED_LOGGING" == "true" ]]; then
+        log_structured "ERROR" "$message" \
+            "error_id=$error_id" \
+            "error_type=$error_type" \
+            "context=$context" \
+            "exit_code=$exit_code" \
+            "caller=$caller_info" \
+            "recovery_suggestion=$recovery_suggestion"
+    else
+        # Legacy console output
+        echo -e "${RED}[ERROR] $message${NC}" >&2
+        if [ -n "$context" ]; then
+            echo -e "${RED}        Context: $context${NC}" >&2
+        fi
+        if [ -n "$recovery_suggestion" ]; then
+            echo -e "${YELLOW}        Suggestion: $recovery_suggestion${NC}" >&2
+        fi
     fi
     
-    # Log to file
-    echo "[$timestamp] ERROR: $message" >> "$ERROR_LOG_FILE"
-    if [ -n "$context" ]; then
-        echo "[$timestamp]        Context: $context" >> "$ERROR_LOG_FILE"
-    fi
-    
-    # Add to error stack
-    ERROR_STACK+=("[$timestamp] $message")
+    # Add to error stack with enhanced information
+    ERROR_STACK+=("[$timestamp] [$error_type] $message (ID: $error_id)")
+    ERROR_HISTORY+=("$error_id")
     
     # Send notification if enabled
     if [ "$ERROR_NOTIFICATION_ENABLED" = "true" ]; then
-        send_error_notification "$message" "$context"
+        send_error_notification "$message" "$context" "$error_type" "$error_id"
+    fi
+    
+    # Update error analytics
+    if [[ "$ERROR_ANALYTICS" == "true" ]]; then
+        update_error_analytics "$error_type" "$message" "$context"
     fi
     
     return "$exit_code"
@@ -649,4 +981,56 @@ generate_error_report() {
     
     log_debug "Error report generated: $report_file"
     echo "$report_file"
+}
+
+# =============================================================================
+# MODERN ERROR HANDLING INTEGRATION
+# =============================================================================
+
+# Source modern error handling extensions if available
+source_modern_error_handling() {
+    local lib_dir="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    local modern_lib="$lib_dir/modern-error-handling.sh"
+    
+    if [[ -f "$modern_lib" ]]; then
+        source "$modern_lib"
+        log_debug "Modern error handling extensions loaded"
+        return 0
+    else
+        log_warning "Modern error handling extensions not found: $modern_lib"
+        return 1
+    fi
+}
+
+# Initialize modern error handling with compatibility check
+init_enhanced_error_handling() {
+    local enable_modern="${1:-auto}"
+    local enable_monitoring="${2:-false}"
+    local enable_safety="${3:-true}"
+    
+    # Check if we should enable modern features
+    local use_modern=false
+    if [[ "$enable_modern" == "auto" ]]; then
+        # Auto-detect based on bash version
+        if bash_533_available 2>/dev/null; then
+            use_modern=true
+        fi
+    elif [[ "$enable_modern" == "true" ]]; then
+        use_modern=true
+    fi
+    
+    # Initialize basic error handling
+    init_error_handling
+    
+    # Load modern extensions if requested and available
+    if [[ "$use_modern" == "true" ]]; then
+        if source_modern_error_handling; then
+            init_modern_error_handling "$enable_monitoring" "$enable_safety"
+            log_debug "Enhanced error handling with modern features enabled"
+        else
+            log_warning "Modern error handling requested but not available, using basic mode"
+        fi
+    else
+        log_debug "Using basic error handling mode"
+    fi
 }

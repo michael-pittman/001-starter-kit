@@ -1,8 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Spot Instance Deployment Library
 # Specialized functions for AWS Spot Instance deployments
+# Requires: bash 5.3.3+
 # =============================================================================
+
+# Bash version validation
+if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/modules/core/bash_version.sh"
+    require_bash_533 "spot-instance.sh"
+    export BASH_VERSION_VALIDATED=true
+fi
+
+# Load associative array utilities
+source "$SCRIPT_DIR/associative-arrays.sh"
 
 # =============================================================================
 # VARIABLE INITIALIZATION AND DEFAULTS
@@ -20,26 +32,45 @@ CLOUDFRONT_DEFAULT_TTL="${CLOUDFRONT_DEFAULT_TTL:-86400}"
 CLOUDFRONT_MAX_TTL="${CLOUDFRONT_MAX_TTL:-31536000}"
 
 # =============================================================================
+# GLOBAL ASSOCIATIVE ARRAYS
+# =============================================================================
+
+# Global pricing cache with associative arrays
+declare -gA SPOT_PRICING_CACHE
+declare -gA INSTANCE_CAPABILITIES
+declare -gA PRICING_HISTORY
+declare -gA DEPLOYMENT_STATE
+
+# Initialize pricing data and capabilities
+aa_create_pricing_data SPOT_PRICING_CACHE
+aa_create_capability_matrix INSTANCE_CAPABILITIES
+
+# =============================================================================
 # SPOT PRICING ANALYSIS
 # =============================================================================
 
+# Enhanced spot pricing analysis using associative arrays
 analyze_spot_pricing() {
     local instance_type="$1"
     local region="${2:-$AWS_REGION}"
-    local availability_zones=("${@:3}")
+    shift 2
+    local availability_zones=("$@")
     
-    if [ -z "$instance_type" ]; then
+    if [[ -z "$instance_type" ]]; then
         error "analyze_spot_pricing requires instance_type parameter"
         return 1
     fi
 
-    log "Analyzing spot pricing for $instance_type in $region..."
+    log "Analyzing spot pricing for $instance_type in $region using associative arrays..."
 
-    # Get all AZs if none specified
-    if [ ${#availability_zones[@]} -eq 0 ]; then
-        # Use compatible method instead of mapfile for bash 3.2
+    # Create pricing analysis result array
+    declare -A pricing_analysis
+    declare -A az_prices
+    
+    # Get all AZs if none specified using AWS CLI v2 with caching
+    if [[ ${#availability_zones[@]} -eq 0 ]]; then
         local az_output
-        az_output=$(aws ec2 describe-availability-zones \
+        az_output=$(aws_cli_cached 1800 ec2 describe-availability-zones \
             --region "$region" \
             --query 'AvailabilityZones[].ZoneName' \
             --output text | tr '\t' ' ')
@@ -48,12 +79,26 @@ analyze_spot_pricing() {
 
     local best_az=""
     local best_price=""
-    local current_prices=()
+    local cache_key="${instance_type}:${region}"
+    local current_time=$(date +%s)
+    
+    # Check cache first
+    local cache_timestamp=$(aa_get SPOT_PRICING_CACHE "${cache_key}:timestamp" "0")
+    local cache_ttl=$(aa_get SPOT_PRICING_CACHE "_cache_ttl" "3600")
+    
+    if [[ $((current_time - cache_timestamp)) -lt $cache_ttl ]]; then
+        local cached_result=$(aa_get SPOT_PRICING_CACHE "${cache_key}:result" "")
+        if [[ -n "$cached_result" ]]; then
+            log "Using cached pricing data for $instance_type in $region"
+            echo "$cached_result"
+            return 0
+        fi
+    fi
 
-    # Check pricing in each AZ
-    for az in "${availability_zones[@]+"${availability_zones[@]}"}"; do
+    # Analyze pricing in each AZ using AWS CLI v2 with retry logic
+    for az in "${availability_zones[@]}"; do
         local price_info
-        price_info=$(aws ec2 describe-spot-price-history \
+        price_info=$(aws_cli_with_retry ec2 describe-spot-price-history \
             --instance-types "$instance_type" \
             --availability-zone "$az" \
             --product-descriptions "Linux/UNIX" \
@@ -62,12 +107,21 @@ analyze_spot_pricing() {
             --query 'SpotPriceHistory[0].[AvailabilityZone,SpotPrice,Timestamp]' \
             --output text 2>/dev/null)
 
-        if [ -n "$price_info" ]; then
-            local current_price
+        if [[ -n "$price_info" ]]; then
+            local current_price timestamp
             current_price=$(echo "$price_info" | cut -f2)
-            current_prices+=("$az:$current_price")
+            timestamp=$(echo "$price_info" | cut -f3)
             
-            if [ -z "$best_price" ] || (( $(echo "$current_price < $best_price" | bc -l) )); then
+            # Store in pricing analysis
+            aa_set az_prices "$az" "$current_price"
+            aa_set pricing_analysis "${az}:price" "$current_price"
+            aa_set pricing_analysis "${az}:timestamp" "$timestamp"
+            
+            # Update pricing history
+            aa_set PRICING_HISTORY "${instance_type}:${region}:${az}:$(date +%Y%m%d%H)" "$current_price"
+            
+            # Track best price
+            if [[ -z "$best_price" ]] || (( $(echo "$current_price < $best_price" | bc -l) )); then
                 best_az="$az"
                 best_price="$current_price"
             fi
@@ -76,15 +130,27 @@ analyze_spot_pricing() {
         fi
     done
 
-    if [ -n "$best_az" ]; then
+    # Store analysis results
+    if [[ -n "$best_az" ]]; then
+        local result="${best_az}:${best_price}"
+        aa_set pricing_analysis "best_az" "$best_az"
+        aa_set pricing_analysis "best_price" "$best_price"
+        aa_set pricing_analysis "analysis_time" "$current_time"
+        aa_set pricing_analysis "total_azs_checked" "${#availability_zones[@]}"
+        aa_set pricing_analysis "successful_checks" "$(aa_size az_prices)"
+        
+        # Cache the result
+        aa_set SPOT_PRICING_CACHE "${cache_key}:result" "$result"
+        aa_set SPOT_PRICING_CACHE "${cache_key}:timestamp" "$current_time"
+        aa_set SPOT_PRICING_CACHE "${cache_key}:analysis" "$(aa_to_json pricing_analysis)"
+        
         success "Best spot price: \$${best_price}/hour in $best_az"
-        echo "$best_az:$best_price"
+        echo "$result"
+        return 0
     else
         error "Could not retrieve spot pricing information"
         return 1
     fi
-
-    return 0
 }
 
 get_optimal_spot_configuration() {
@@ -138,24 +204,37 @@ get_optimal_spot_configuration() {
     return 0
 }
 
+# Enhanced alternative instance type suggestions using associative arrays
 suggest_alternative_instance_types() {
     local target_instance_type="$1"
     local max_price="$2"
     local region="$3"
     
-    log "Suggesting alternative instance types within budget..."
+    log "Suggesting alternative instance types within budget using capability matrix..."
 
-    # Alternative instance types based on target type
-    local alternatives=()
+    # Create alternatives mapping using associative arrays
+    declare -A alternatives_map
+    declare -A pricing_results
+    declare -A recommendations
+    
+    # Define alternative instance types with scoring
     case "$target_instance_type" in
         "g4dn.xlarge")
-            alternatives=("g4dn.large" "g5.large" "c5.xlarge" "m5.xlarge")
+            aa_set alternatives_map "g4dn.large" "0.8"  # 80% capability score
+            aa_set alternatives_map "g5.large" "0.9"   # 90% capability score
+            aa_set alternatives_map "c5.xlarge" "0.6"  # 60% capability score (no GPU)
+            aa_set alternatives_map "m5.xlarge" "0.5"  # 50% capability score (no GPU)
             ;;
         "g4dn.2xlarge")
-            alternatives=("g4dn.xlarge" "g5.xlarge" "c5.2xlarge" "m5.2xlarge")
+            aa_set alternatives_map "g4dn.xlarge" "0.8"
+            aa_set alternatives_map "g5.xlarge" "0.9"
+            aa_set alternatives_map "c5.2xlarge" "0.6"
+            aa_set alternatives_map "m5.2xlarge" "0.5"
             ;;
         "g5.xlarge")
-            alternatives=("g4dn.xlarge" "g5.large" "c5.xlarge")
+            aa_set alternatives_map "g4dn.xlarge" "0.8"
+            aa_set alternatives_map "g5.large" "0.7"
+            aa_set alternatives_map "c5.xlarge" "0.5"
             ;;
         *)
             warning "No alternatives defined for instance type: $target_instance_type"
@@ -163,20 +242,71 @@ suggest_alternative_instance_types() {
             ;;
     esac
 
-    info "Checking alternative instance types:"
-    for alt_type in "${alternatives[@]+"${alternatives[@]}"}"; do
+    info "Checking alternative instance types with capability scoring:"
+    
+    # Analyze each alternative
+    local alt_type capability_score
+    for alt_type in $(aa_keys alternatives_map); do
+        capability_score=$(aa_get alternatives_map "$alt_type")
+        
         local pricing_result
         pricing_result=$(analyze_spot_pricing "$alt_type" "$region" 2>/dev/null)
         
-        if [ $? -eq 0 ]; then
+        if [[ $? -eq 0 ]]; then
             local best_price="${pricing_result#*:}"
+            local best_az="${pricing_result%:*}"
+            
+            # Store pricing result
+            aa_set pricing_results "${alt_type}:price" "$best_price"
+            aa_set pricing_results "${alt_type}:az" "$best_az"
+            aa_set pricing_results "${alt_type}:capability_score" "$capability_score"
+            
+            # Check if within budget
             if (( $(echo "$best_price <= $max_price" | bc -l) )); then
-                success "  $alt_type: \$${best_price}/hour ✓"
+                local savings_percent
+                savings_percent=$(echo "scale=1; (($max_price - $best_price) / $max_price) * 100" | bc -l)
+                
+                # Create recommendation score (capability + cost efficiency)
+                local cost_efficiency
+                cost_efficiency=$(echo "scale=2; ($max_price - $best_price) / $max_price" | bc -l)
+                local recommendation_score
+                recommendation_score=$(echo "scale=2; ($capability_score * 0.7) + ($cost_efficiency * 0.3)" | bc -l)
+                
+                aa_set recommendations "$alt_type" "$recommendation_score"
+                
+                success "  $alt_type: \$${best_price}/hour (${savings_percent}% savings, capability: ${capability_score}, score: ${recommendation_score}) ✓"
             else
-                info "  $alt_type: \$${best_price}/hour (over budget)"
+                info "  $alt_type: \$${best_price}/hour (over budget, capability: ${capability_score})"
             fi
+        else
+            warning "  $alt_type: pricing data unavailable"
         fi
     done
+    
+    # Show best recommendation if any
+    if ! aa_is_empty recommendations; then
+        local best_alternative=""
+        local best_score="0"
+        
+        for alt_type in $(aa_keys recommendations); do
+            local score=$(aa_get recommendations "$alt_type")
+            if (( $(echo "$score > $best_score" | bc -l) )); then
+                best_alternative="$alt_type"
+                best_score="$score"
+            fi
+        done
+        
+        if [[ -n "$best_alternative" ]]; then
+            local alt_price=$(aa_get pricing_results "${best_alternative}:price")
+            local alt_az=$(aa_get pricing_results "${best_alternative}:az")
+            local alt_capability=$(aa_get pricing_results "${best_alternative}:capability_score")
+            
+            success "RECOMMENDATION: $best_alternative in $alt_az"
+            success "  Price: \$${alt_price}/hour, Capability: ${alt_capability}, Score: ${best_score}"
+        fi
+    else
+        warning "No suitable alternatives found within budget of \$${max_price}/hour"
+    fi
 }
 
 # =============================================================================
@@ -207,9 +337,9 @@ launch_spot_instance_with_failover() {
     if [ -n "$target_az" ]; then
         log "Using specified availability zone: $target_az"
         
-        # Get current spot price for the specified AZ
+        # Get current spot price for the specified AZ using AWS CLI v2
         local current_price
-        current_price=$(aws ec2 describe-spot-price-history \
+        current_price=$(aws_cli_with_retry ec2 describe-spot-price-history \
             --instance-types "$instance_type" \
             --availability-zone "$target_az" \
             --max-items 1 \
@@ -279,9 +409,9 @@ EOF
     # Debug: log the launch spec
     log "DEBUG: Launch spec file: $launch_spec_file"
 
-    # Submit spot instance request
+    # Submit spot instance request using AWS CLI v2 with retry logic
     local spot_request_id
-    spot_request_id=$(aws ec2 request-spot-instances \
+    spot_request_id=$(aws_cli_with_retry ec2 request-spot-instances \
         --spot-price "$bid_price" \
         --instance-count 1 \
         --type "$SPOT_TYPE" \
@@ -307,8 +437,8 @@ EOF
     if [ $? -ne 0 ]; then
         warning "Spot request failed or timed out. Attempting failover..."
         
-        # Cancel the failed request
-        aws ec2 cancel-spot-instance-requests \
+        # Cancel the failed request using AWS CLI v2
+        aws_cli_with_retry ec2 cancel-spot-instance-requests \
             --spot-instance-request-ids "$spot_request_id" \
             --region "$AWS_REGION" > /dev/null
         
@@ -336,7 +466,7 @@ wait_for_spot_fulfillment() {
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
         local request_state
-        request_state=$(aws ec2 describe-spot-instance-requests \
+        request_state=$(aws_cli_with_retry ec2 describe-spot-instance-requests \
             --spot-instance-request-ids "$spot_request_id" \
             --query 'SpotInstanceRequests[0].State' \
             --output text \
@@ -345,7 +475,7 @@ wait_for_spot_fulfillment() {
         case "$request_state" in
             "active")
                 local instance_id
-                instance_id=$(aws ec2 describe-spot-instance-requests \
+                instance_id=$(aws_cli_with_retry ec2 describe-spot-instance-requests \
                     --spot-instance-request-ids "$spot_request_id" \
                     --query 'SpotInstanceRequests[0].InstanceId' \
                     --output text \
@@ -362,7 +492,7 @@ wait_for_spot_fulfillment() {
                 ;;
             "failed"|"cancelled"|"closed")
                 local status_code
-                status_code=$(aws ec2 describe-spot-instance-requests \
+                status_code=$(aws_cli_with_retry ec2 describe-spot-instance-requests \
                     --spot-instance-request-ids "$spot_request_id" \
                     --query 'SpotInstanceRequests[0].Status.Code' \
                     --output text \
@@ -406,7 +536,7 @@ launch_spot_instance_fallback() {
     local azs=()
     while IFS= read -r az; do
         [ -n "$az" ] && azs+=("$az")
-    done < <(aws ec2 describe-availability-zones \
+    done < <(aws_cli_cached 1800 ec2 describe-availability-zones \
         --region "$AWS_REGION" \
         --query 'AvailabilityZones[].ZoneName' \
         --output text | tr '\t' '\n')
@@ -590,54 +720,173 @@ get_nvidia_optimized_ami() {
     return 0
 }
 
+# Enhanced cost savings calculation using associative arrays
 calculate_spot_savings() {
     local spot_price="$1"
     local instance_type="$2"
     local hours="${3:-24}"
+    local detailed="${4:-false}"
     
-    if [ -z "$spot_price" ] || [ -z "$instance_type" ]; then
+    if [[ -z "$spot_price" ]] || [[ -z "$instance_type" ]]; then
         error "calculate_spot_savings requires spot_price and instance_type parameters"
         return 1
     fi
 
-    # Get on-demand price (simplified lookup)
-    local ondemand_price
-    case "$instance_type" in
-        "g4dn.xlarge")
-            ondemand_price="0.526"
-            ;;
-        "g4dn.2xlarge")
-            ondemand_price="0.752"
-            ;;
-        "g5.xlarge")
-            ondemand_price="1.006"
-            ;;
-        *)
-            warning "On-demand price not available for $instance_type"
-            return 1
-            ;;
-    esac
+    # Create cost analysis using associative arrays
+    declare -A cost_analysis
+    declare -A pricing_data
+    
+    # Enhanced on-demand pricing lookup from capability matrix
+    local ondemand_price=$(aa_get SPOT_PRICING_CACHE "${instance_type}:${AWS_REGION:-us-east-1}:ondemand" "")
+    
+    # Fallback to static pricing if not cached
+    if [[ -z "$ondemand_price" ]]; then
+        case "$instance_type" in
+            "g4dn.xlarge")
+                ondemand_price="0.526"
+                ;;
+            "g4dn.2xlarge")
+                ondemand_price="0.752"
+                ;;
+            "g5.xlarge")
+                ondemand_price="1.006"
+                ;;
+            "g5.2xlarge")
+                ondemand_price="2.012"
+                ;;
+            "g4dn.large")
+                ondemand_price="0.263"
+                ;;
+            *)
+                warning "On-demand price not available for $instance_type"
+                return 1
+                ;;
+        esac
+    fi
 
-    local spot_cost
-    spot_cost=$(echo "$spot_price * $hours" | bc -l)
-    
-    local ondemand_cost
-    ondemand_cost=$(echo "$ondemand_price * $hours" | bc -l)
-    
-    local savings
-    savings=$(echo "$ondemand_cost - $spot_cost" | bc -l)
-    
-    local savings_percentage
+    # Calculate costs and savings
+    local spot_cost ondemand_cost savings savings_percentage
+    spot_cost=$(echo "scale=4; $spot_price * $hours" | bc -l)
+    ondemand_cost=$(echo "scale=4; $ondemand_price * $hours" | bc -l)
+    savings=$(echo "scale=4; $ondemand_cost - $spot_cost" | bc -l)
     savings_percentage=$(echo "scale=1; ($savings / $ondemand_cost) * 100" | bc -l)
 
-    info "=== Spot Instance Cost Analysis ==="
-    info "Instance Type: $instance_type"
-    info "Duration: ${hours} hours"
-    info "Spot Cost: \$${spot_cost}"
-    info "On-Demand Cost: \$${ondemand_cost}"
-    info "Savings: \$${savings} (${savings_percentage}%)"
+    # Store in associative array
+    aa_set cost_analysis "instance_type" "$instance_type"
+    aa_set cost_analysis "duration_hours" "$hours"
+    aa_set cost_analysis "spot_price_per_hour" "$spot_price"
+    aa_set cost_analysis "ondemand_price_per_hour" "$ondemand_price"
+    aa_set cost_analysis "spot_total_cost" "$spot_cost"
+    aa_set cost_analysis "ondemand_total_cost" "$ondemand_cost"
+    aa_set cost_analysis "total_savings" "$savings"
+    aa_set cost_analysis "savings_percentage" "$savings_percentage"
+    aa_set cost_analysis "analysis_timestamp" "$(date +%s)"
+    
+    # Add instance capabilities if available
+    local gpu_memory=$(aa_get INSTANCE_CAPABILITIES "${instance_type}:gpu_memory" "")
+    local gpu_type=$(aa_get INSTANCE_CAPABILITIES "${instance_type}:gpu_type" "")
+    local vcpus=$(aa_get INSTANCE_CAPABILITIES "${instance_type}:vcpus" "")
+    local memory=$(aa_get INSTANCE_CAPABILITIES "${instance_type}:memory" "")
+    
+    if [[ -n "$gpu_memory" ]]; then
+        aa_set cost_analysis "gpu_memory_gb" "$gpu_memory"
+        aa_set cost_analysis "gpu_type" "$gpu_type"
+        aa_set cost_analysis "vcpus" "$vcpus"
+        aa_set cost_analysis "memory_gb" "$memory"
+        
+        # Calculate cost per GPU GB
+        local cost_per_gpu_gb_spot cost_per_gpu_gb_ondemand
+        cost_per_gpu_gb_spot=$(echo "scale=6; $spot_price / $gpu_memory" | bc -l)
+        cost_per_gpu_gb_ondemand=$(echo "scale=6; $ondemand_price / $gpu_memory" | bc -l)
+        
+        aa_set cost_analysis "cost_per_gpu_gb_spot" "$cost_per_gpu_gb_spot"
+        aa_set cost_analysis "cost_per_gpu_gb_ondemand" "$cost_per_gpu_gb_ondemand"
+    fi
+
+    # Display results
+    info "=== Enhanced Spot Instance Cost Analysis ==="
+    aa_print cost_analysis "Cost Analysis for $instance_type" true
+    
+    if [[ "$detailed" == "true" ]]; then
+        info ""
+        info "=== Cost Breakdown ==="
+        printf "%-25s: %s\n" "Instance Type" "$instance_type"
+        printf "%-25s: %s hours\n" "Duration" "$hours"
+        printf "%-25s: \$%s/hour\n" "Spot Price" "$spot_price"
+        printf "%-25s: \$%s/hour\n" "On-Demand Price" "$ondemand_price"
+        printf "%-25s: \$%s\n" "Spot Total Cost" "$spot_cost"
+        printf "%-25s: \$%s\n" "On-Demand Total Cost" "$ondemand_cost"
+        printf "%-25s: \$%s (%s%%)\n" "Total Savings" "$savings" "$savings_percentage"
+        
+        if [[ -n "$gpu_memory" ]]; then
+            printf "%-25s: %s GB %s GPU\n" "GPU Specification" "$gpu_memory" "$gpu_type"
+            printf "%-25s: \$%s/GB/hour\n" "Spot Cost per GPU GB" "$cost_per_gpu_gb_spot"
+            printf "%-25s: \$%s/GB/hour\n" "OnDemand Cost per GPU GB" "$cost_per_gpu_gb_ondemand"
+        fi
+    fi
+    
+    # Store in pricing history for future analysis
+    local timestamp=$(date +%Y%m%d%H%M)
+    aa_set PRICING_HISTORY "cost_analysis:${instance_type}:${timestamp}" "$(aa_to_json cost_analysis)"
     
     return 0
+}
+
+# Get pricing statistics and trends using associative arrays
+get_pricing_statistics() {
+    local instance_type="$1"
+    local region="${2:-$AWS_REGION}"
+    local hours_back="${3:-24}"
+    
+    declare -A pricing_stats
+    declare -A historical_prices
+    
+    # Filter pricing history for this instance type and region
+    local history_key price_data timestamp price
+    local prices=()
+    local min_price="" max_price="" total_price=0 count=0
+    
+    # Collect historical prices
+    for history_key in $(aa_keys PRICING_HISTORY); do
+        if [[ "$history_key" =~ ^${instance_type}:${region}: ]]; then
+            price_data=$(aa_get PRICING_HISTORY "$history_key")
+            if [[ -n "$price_data" ]]; then
+                prices+=("$price_data")
+                
+                # Update min/max
+                if [[ -z "$min_price" ]] || (( $(echo "$price_data < $min_price" | bc -l) )); then
+                    min_price="$price_data"
+                fi
+                if [[ -z "$max_price" ]] || (( $(echo "$price_data > $max_price" | bc -l) )); then
+                    max_price="$price_data"
+                fi
+                
+                total_price=$(echo "scale=6; $total_price + $price_data" | bc -l)
+                count=$((count + 1))
+            fi
+        fi
+    done
+    
+    if [[ $count -gt 0 ]]; then
+        local avg_price volatility
+        avg_price=$(echo "scale=6; $total_price / $count" | bc -l)
+        volatility=$(echo "scale=2; (($max_price - $min_price) / $avg_price) * 100" | bc -l)
+        
+        aa_set pricing_stats "instance_type" "$instance_type"
+        aa_set pricing_stats "region" "$region"
+        aa_set pricing_stats "sample_count" "$count"
+        aa_set pricing_stats "min_price" "$min_price"
+        aa_set pricing_stats "max_price" "$max_price"
+        aa_set pricing_stats "avg_price" "$avg_price"
+        aa_set pricing_stats "volatility_percent" "$volatility"
+        aa_set pricing_stats "analysis_time" "$(date)"
+        
+        info "=== Pricing Statistics for $instance_type in $region ==="
+        aa_print_table pricing_stats "Metric" "Value"
+    else
+        warning "No historical pricing data available for $instance_type in $region"
+        return 1
+    fi
 }
 
 # =============================================================================

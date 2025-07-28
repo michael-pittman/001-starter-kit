@@ -68,11 +68,19 @@ _create_vpc_impl() {
 # Get VPC by stack name
 get_vpc_by_stack() {
     local stack_name="$1"
+    local vpc_id
     
-    aws ec2 describe-vpcs \
+    vpc_id=$(aws ec2 describe-vpcs \
         --filters "Name=tag:Stack,Values=$stack_name" \
         --query 'Vpcs[0].VpcId' \
-        --output text 2>/dev/null | grep -v "None" || true
+        --output text 2>/dev/null || true)
+    
+    # Return empty if no VPC found or if result is "None"
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        return 0
+    fi
+    
+    echo "$vpc_id"
 }
 
 # =============================================================================
@@ -96,6 +104,11 @@ _create_public_subnet_impl() {
     local cidr_block="$3"
     local stack_name="$4"
     
+    # Validate required parameters
+    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
+        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for subnet creation"
+    fi
+    
     # Auto-select AZ if not provided
     if [ -z "$availability_zone" ]; then
         availability_zone=$(get_available_az)
@@ -111,9 +124,9 @@ _create_public_subnet_impl() {
                   "Name=tag:Type,Values=public" \
                   "Name=availability-zone,Values=$availability_zone" \
         --query 'Subnets[0].SubnetId' \
-        --output text 2>/dev/null | grep -v "None") || true
+        --output text 2>/dev/null ) || true
     
-    if [ -n "$existing_subnet" ]; then
+    if [ -n "$existing_subnet" ] && [ "$existing_subnet" != "None" ] && [ "$existing_subnet" != "null" ]; then
         echo "Public subnet already exists: $existing_subnet" >&2
         echo "$existing_subnet"
         return 0
@@ -125,9 +138,9 @@ _create_public_subnet_impl() {
         --filters "Name=vpc-id,Values=$vpc_id" \
                   "Name=cidr-block,Values=$cidr_block" \
         --query 'Subnets[0].SubnetId' \
-        --output text 2>/dev/null | grep -v "None") || true
+        --output text 2>/dev/null ) || true
     
-    if [ -n "$cidr_conflict" ]; then
+    if [ -n "$cidr_conflict" ] && [ "$cidr_conflict" != "None" ] && [ "$cidr_conflict" != "null" ]; then
         echo "WARNING: CIDR conflict detected for $cidr_block (existing subnet: $cidr_conflict)" >&2
         echo "Attempting conflict resolution..." >&2
         
@@ -426,9 +439,9 @@ create_public_subnet_with_conflict_resolution() {
             --filters "Name=vpc-id,Values=$vpc_id" \
                       "Name=cidr-block,Values=$test_cidr" \
             --query 'Subnets[0].SubnetId' \
-            --output text 2>/dev/null | grep -v "None") || true
+            --output text 2>/dev/null ) || true
         
-        if [ -z "$existing_subnet" ]; then
+        if [ -z "$existing_subnet" ] || [ "$existing_subnet" = "None" ] || [ "$existing_subnet" = "null" ]; then
             # CIDR is available, create subnet
             echo "Attempting to create subnet with CIDR: $test_cidr in AZ: $availability_zone" >&2
             
@@ -488,9 +501,9 @@ create_private_subnet_with_conflict_resolution() {
             --filters "Name=vpc-id,Values=$vpc_id" \
                       "Name=cidr-block,Values=$test_cidr" \
             --query 'Subnets[0].SubnetId' \
-            --output text 2>/dev/null | grep -v "None") || true
+            --output text 2>/dev/null ) || true
         
-        if [ -z "$existing_subnet" ]; then
+        if [ -z "$existing_subnet" ] || [ "$existing_subnet" = "None" ] || [ "$existing_subnet" = "null" ]; then
             # CIDR is available, create subnet
             echo "Attempting to create private subnet with CIDR: $test_cidr in AZ: $availability_zone" >&2
             
@@ -534,9 +547,9 @@ create_internet_gateway_with_check() {
     existing_igw=$(aws ec2 describe-internet-gateways \
         --filters "Name=attachment.vpc-id,Values=$vpc_id" \
         --query 'InternetGateways[0].InternetGatewayId' \
-        --output text 2>/dev/null | grep -v "None") || true
+        --output text 2>/dev/null ) || true
     
-    if [ -n "$existing_igw" ]; then
+    if [ -n "$existing_igw" ] && [ "$existing_igw" != "None" ] && [ "$existing_igw" != "null" ]; then
         echo "Internet Gateway already exists and attached: $existing_igw" >&2
         
         # Register existing IGW
@@ -551,9 +564,9 @@ create_internet_gateway_with_check() {
     unattached_igw=$(aws ec2 describe-internet-gateways \
         --filters "Name=tag:Stack,Values=$stack_name" \
         --query 'InternetGateways[?length(Attachments) == `0`][0].InternetGatewayId' \
-        --output text 2>/dev/null | grep -v "None") || true
+        --output text 2>/dev/null ) || true
     
-    if [ -n "$unattached_igw" ]; then
+    if [ -n "$unattached_igw" ] && [ "$unattached_igw" != "None" ] && [ "$unattached_igw" != "null" ]; then
         echo "Found unattached IGW for stack, attempting to attach: $unattached_igw" >&2
         
         # Attempt to attach existing IGW

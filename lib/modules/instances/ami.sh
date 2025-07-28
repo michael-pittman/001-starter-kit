@@ -12,6 +12,7 @@ _AMI_SH_LOADED=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../core/errors.sh"
 source "${SCRIPT_DIR}/../config/variables.sh"
+source "${SCRIPT_DIR}/os-compatibility.sh"
 
 # Initialize AWS_REGION if not set
 if [ -z "${AWS_REGION:-}" ]; then
@@ -32,6 +33,33 @@ declare -r UBUNTU_ARM_PATTERN="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-se
 # AMI owners
 declare -r CANONICAL_OWNER="099720109477"  # Canonical
 declare -r AMAZON_OWNER="amazon"           # Amazon
+declare -r DEBIAN_OWNER="136693071363"     # Debian
+declare -r ROCKY_OWNER="792107900819"      # Rocky Linux
+declare -r ALMA_OWNER="764336703387"       # AlmaLinux
+
+# OS-specific AMI patterns
+declare -A OS_AMI_PATTERNS=(
+    ["ubuntu:20.04"]="ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"
+    ["ubuntu:22.04"]="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+    ["ubuntu:24.04"]="ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"
+    ["debian:11"]="debian-11-amd64-*"
+    ["debian:12"]="debian-12-amd64-*"
+    ["amazonlinux:2"]="amzn2-ami-hvm-*-x86_64-gp2"
+    ["amazonlinux:2023"]="al2023-ami-*-x86_64"
+    ["rocky:8"]="Rocky-8-*-x86_64"
+    ["rocky:9"]="Rocky-9-*-x86_64"
+    ["almalinux:8"]="AlmaLinux-8-*-x86_64"
+    ["almalinux:9"]="AlmaLinux-9-*-x86_64"
+)
+
+# OS owners mapping
+declare -A OS_OWNERS=(
+    ["ubuntu"]="$CANONICAL_OWNER"
+    ["debian"]="$DEBIAN_OWNER"
+    ["amazonlinux"]="$AMAZON_OWNER"
+    ["rocky"]="$ROCKY_OWNER"
+    ["almalinux"]="$ALMA_OWNER"
+)
 
 # =============================================================================
 # AMI SELECTION
@@ -299,4 +327,234 @@ ami_has_gpu_support() {
     else
         return 1
     fi
+}
+
+# =============================================================================
+# OS-SPECIFIC AMI SELECTION
+# =============================================================================
+
+# Get AMI for specific OS and version
+get_ami_for_os() {
+    local os_id="$1"
+    local os_version="$2"
+    local region="${3:-$AWS_REGION}"
+    local architecture="${4:-x86_64}"
+    
+    local os_key="${os_id}:${os_version}"
+    local pattern="${OS_AMI_PATTERNS[$os_key]:-}"
+    local owner="${OS_OWNERS[$os_id]:-}"
+    
+    if [ -z "$pattern" ]; then
+        echo "WARNING: No AMI pattern found for $os_key, using generic search" >&2
+        get_generic_ami_for_os "$os_id" "$region" "$architecture"
+        return
+    fi
+    
+    if [ -z "$owner" ]; then
+        echo "WARNING: No owner found for $os_id, using generic search" >&2
+        get_generic_ami_for_os "$os_id" "$region" "$architecture"
+        return
+    fi
+    
+    echo "Searching for $os_key AMI in region: $region" >&2
+    
+    local ami_id
+    ami_id=$(search_ami "$pattern" "$owner" "$region" "$architecture")
+    
+    if [ -z "$ami_id" ] || [ "$ami_id" = "None" ]; then
+        echo "WARNING: No AMI found for $os_key, trying generic search" >&2
+        get_generic_ami_for_os "$os_id" "$region" "$architecture"
+        return
+    fi
+    
+    validate_ami "$ami_id" "$region"
+    echo "$ami_id"
+}
+
+# Generic AMI search for OS family
+get_generic_ami_for_os() {
+    local os_id="$1"
+    local region="$2"
+    local architecture="${3:-x86_64}"
+    
+    echo "Performing generic AMI search for: $os_id" >&2
+    
+    case "$os_id" in
+        ubuntu*)
+            get_ubuntu_ami "$region" "$architecture"
+            ;;
+        debian*)
+            search_ami "debian-*-amd64-*" "$DEBIAN_OWNER" "$region" "$architecture" || \
+            search_ami "debian*" "$DEBIAN_OWNER" "$region" "$architecture"
+            ;;
+        amazonlinux*|amzn*)
+            search_ami "amzn2-ami-hvm-*" "$AMAZON_OWNER" "$region" "$architecture" || \
+            search_ami "al2023-ami-*" "$AMAZON_OWNER" "$region" "$architecture"
+            ;;
+        rocky*)
+            search_ami "Rocky-*-x86_64" "$ROCKY_OWNER" "$region" "$architecture"
+            ;;
+        almalinux*|alma*)
+            search_ami "AlmaLinux-*-x86_64" "$ALMA_OWNER" "$region" "$architecture"
+            ;;
+        centos*)
+            # CentOS images are often in marketplace or community AMIs
+            search_ami "CentOS*" "125523088429" "$region" "$architecture" || \
+            search_ami "CentOS*" "679593333241" "$region" "$architecture"
+            ;;
+        *)
+            echo "ERROR: Unsupported OS for generic search: $os_id" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Find compatible AMI for current system
+find_compatible_ami() {
+    local region="${1:-$AWS_REGION}"
+    local architecture="${2:-x86_64}"
+    local prefer_gpu="${3:-false}"
+    
+    # Detect current OS if not already done
+    if [ -z "${OS_ID:-}" ]; then
+        detect_os >/dev/null 2>&1
+    fi
+    
+    local os_id="${OS_ID:-ubuntu}"
+    local os_version="${OS_VERSION:-22.04}"
+    
+    echo "Finding compatible AMI for current system: $os_id $os_version" >&2
+    
+    # If GPU preference, try GPU-optimized AMI first
+    if [ "$prefer_gpu" = "true" ]; then
+        local gpu_ami
+        gpu_ami=$(get_nvidia_gpu_ami "$region" "$architecture" 2>/dev/null || echo "")
+        if [ -n "$gpu_ami" ] && [ "$gpu_ami" != "None" ]; then
+            echo "$gpu_ami"
+            return 0
+        fi
+    fi
+    
+    # Try OS-specific AMI
+    local os_ami
+    os_ami=$(get_ami_for_os "$os_id" "$os_version" "$region" "$architecture" 2>/dev/null || echo "")
+    if [ -n "$os_ami" ] && [ "$os_ami" != "None" ]; then
+        echo "$os_ami"
+        return 0
+    fi
+    
+    # Fallback to Ubuntu LTS
+    echo "WARNING: Using Ubuntu 22.04 LTS as fallback" >&2
+    get_ubuntu_ami "$region" "$architecture"
+}
+
+# List available AMIs for OS
+list_amis_for_os() {
+    local os_id="$1"
+    local region="${2:-$AWS_REGION}"
+    local max_results="${3:-10}"
+    
+    local owner="${OS_OWNERS[$os_id]:-}"
+    if [ -z "$owner" ]; then
+        echo "ERROR: Unknown OS for AMI listing: $os_id" >&2
+        return 1
+    fi
+    
+    echo "Listing AMIs for $os_id in $region:" >&2
+    
+    # Search for OS-specific patterns
+    case "$os_id" in
+        ubuntu)
+            aws ec2 describe-images \
+                --region "$region" \
+                --owners "$owner" \
+                --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-*-server-*" \
+                          "Name=state,Values=available" \
+                --query "sort_by(Images, &CreationDate)[-$max_results:].{ImageId: ImageId, Name: Name, CreationDate: CreationDate}" \
+                --output table
+            ;;
+        debian)
+            aws ec2 describe-images \
+                --region "$region" \
+                --owners "$owner" \
+                --filters "Name=name,Values=debian-*" \
+                          "Name=state,Values=available" \
+                --query "sort_by(Images, &CreationDate)[-$max_results:].{ImageId: ImageId, Name: Name, CreationDate: CreationDate}" \
+                --output table
+            ;;
+        amazonlinux)
+            aws ec2 describe-images \
+                --region "$region" \
+                --owners "$owner" \
+                --filters "Name=name,Values=amzn*-ami-*" \
+                          "Name=state,Values=available" \
+                --query "sort_by(Images, &CreationDate)[-$max_results:].{ImageId: ImageId, Name: Name, CreationDate: CreationDate}" \
+                --output table
+            ;;
+        *)
+            echo "AMI listing not implemented for: $os_id" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Validate OS compatibility with AMI
+validate_os_ami_compatibility() {
+    local ami_id="$1"
+    local target_os_id="$2"
+    local region="${3:-$AWS_REGION}"
+    
+    echo "Validating OS compatibility for AMI: $ami_id" >&2
+    
+    # Get AMI details
+    local ami_name
+    ami_name=$(aws ec2 describe-images \
+        --region "$region" \
+        --image-ids "$ami_id" \
+        --query 'Images[0].Name' \
+        --output text 2>/dev/null)
+    
+    if [ -z "$ami_name" ] || [ "$ami_name" = "None" ]; then
+        echo "ERROR: Could not retrieve AMI name for: $ami_id" >&2
+        return 1
+    fi
+    
+    echo "AMI name: $ami_name" >&2
+    
+    # Check OS compatibility
+    case "$target_os_id" in
+        ubuntu*)
+            if [[ "$ami_name" =~ ubuntu ]]; then
+                echo "✓ Ubuntu AMI confirmed" >&2
+                return 0
+            fi
+            ;;
+        debian*)
+            if [[ "$ami_name" =~ debian ]]; then
+                echo "✓ Debian AMI confirmed" >&2
+                return 0
+            fi
+            ;;
+        amazonlinux*|amzn*)
+            if [[ "$ami_name" =~ (amzn|amazon) ]]; then
+                echo "✓ Amazon Linux AMI confirmed" >&2
+                return 0
+            fi
+            ;;
+        rocky*)
+            if [[ "$ami_name" =~ [Rr]ocky ]]; then
+                echo "✓ Rocky Linux AMI confirmed" >&2
+                return 0
+            fi
+            ;;
+        almalinux*|alma*)
+            if [[ "$ami_name" =~ [Aa]lma ]]; then
+                echo "✓ AlmaLinux AMI confirmed" >&2
+                return 0
+            fi
+            ;;
+    esac
+    
+    echo "WARNING: AMI may not be compatible with target OS: $target_os_id" >&2
+    return 1
 }

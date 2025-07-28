@@ -2,9 +2,480 @@
 # =============================================================================
 # EC2 User Data Script for GeuseMaker
 # This script is executed when the instance first boots
+# Installs bash 5.3.3+ and switches to it for enhanced reliability
 # =============================================================================
 
 set -euo pipefail
+
+# =============================================================================
+# COMPREHENSIVE OS DETECTION AND BASH INSTALLATION
+# =============================================================================
+
+# Enhanced OS detection function
+detect_operating_system() {
+    local os_id=""
+    local os_version=""
+    local os_name=""
+    local os_family=""
+    
+    echo "Detecting operating system..." >&2
+    
+    # Primary detection via /etc/os-release (systemd standard)
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        os_id="${ID:-unknown}"
+        os_version="${VERSION_ID:-unknown}"
+        os_name="${NAME:-unknown}"
+        
+        # Determine OS family for package management
+        case "$os_id" in
+            amzn|amazonlinux)
+                os_family="amazon"
+                ;;
+            ubuntu|debian)
+                os_family="debian"
+                ;;
+            centos|rhel|rocky|almalinux|fedora)
+                os_family="redhat"
+                ;;
+            suse|opensuse*)
+                os_family="suse"
+                ;;
+            *)
+                os_family="unknown"
+                ;;
+        esac
+    
+    # Fallback detection methods
+    elif [ -f /etc/redhat-release ]; then
+        os_family="redhat"
+        if grep -q "Amazon Linux" /etc/redhat-release; then
+            os_id="amzn"
+            os_version=$(grep -o "release [0-9]\+" /etc/redhat-release | cut -d' ' -f2)
+        elif grep -q "CentOS" /etc/redhat-release; then
+            os_id="centos"
+            os_version=$(grep -o "release [0-9]\+" /etc/redhat-release | cut -d' ' -f2)
+        elif grep -q "Rocky" /etc/redhat-release; then
+            os_id="rocky"
+            os_version=$(grep -o "release [0-9]\+" /etc/redhat-release | cut -d' ' -f2)
+        elif grep -q "AlmaLinux" /etc/redhat-release; then
+            os_id="almalinux"
+            os_version=$(grep -o "release [0-9]\+" /etc/redhat-release | cut -d' ' -f2)
+        elif grep -q "Red Hat" /etc/redhat-release; then
+            os_id="rhel"
+            os_version=$(grep -o "release [0-9]\+" /etc/redhat-release | cut -d' ' -f2)
+        fi
+        os_name=$(cat /etc/redhat-release)
+        
+    elif [ -f /etc/debian_version ]; then
+        os_family="debian"
+        if [ -f /etc/lsb-release ]; then
+            . /etc/lsb-release
+            os_id=$(echo "$DISTRIB_ID" | tr '[:upper:]' '[:lower:]')
+            os_version="$DISTRIB_RELEASE"
+            os_name="$DISTRIB_DESCRIPTION"
+        else
+            os_id="debian"
+            os_version=$(cat /etc/debian_version)
+            os_name="Debian GNU/Linux"
+        fi
+        
+    else
+        # Final fallback
+        os_family="unknown"
+        os_id="unknown"
+        os_version="unknown"
+        os_name="Unknown Linux"
+    fi
+    
+    # Export detected information
+    export OS_ID="$os_id"
+    export OS_VERSION="$os_version"
+    export OS_NAME="$os_name"
+    export OS_FAMILY="$os_family"
+    
+    echo "OS Detection Results:"
+    echo "  ID: $os_id"
+    echo "  Version: $os_version"
+    echo "  Name: $os_name"
+    echo "  Family: $os_family"
+}
+
+# Get package manager for detected OS
+get_package_manager() {
+    case "${OS_FAMILY:-unknown}" in
+        amazon|redhat)
+            if command -v dnf >/dev/null 2>&1; then
+                echo "dnf"
+            elif command -v yum >/dev/null 2>&1; then
+                echo "yum"
+            else
+                echo "unknown"
+            fi
+            ;;
+        debian)
+            if command -v apt >/dev/null 2>&1; then
+                echo "apt"
+            else
+                echo "unknown"
+            fi
+            ;;
+        suse)
+            if command -v zypper >/dev/null 2>&1; then
+                echo "zypper"
+            else
+                echo "unknown"
+            fi
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# Version comparison function (bash 3.x compatible)
+version_compare() {
+    local version1="$1"
+    local version2="$2"
+    local operator="${3:-ge}"
+    
+    # Extract major and minor versions
+    local ver1_major=$(echo "$version1" | cut -d. -f1)
+    local ver1_minor=$(echo "$version1" | cut -d. -f2 | sed 's/[^0-9].*//')
+    local ver2_major=$(echo "$version2" | cut -d. -f1)
+    local ver2_minor=$(echo "$version2" | cut -d. -f2 | sed 's/[^0-9].*//')
+    
+    # Default to 0 if empty
+    ver1_major=${ver1_major:-0}
+    ver1_minor=${ver1_minor:-0}
+    ver2_major=${ver2_major:-0}
+    ver2_minor=${ver2_minor:-0}
+    
+    # Convert to comparable numbers
+    local ver1_num=$((ver1_major * 100 + ver1_minor))
+    local ver2_num=$((ver2_major * 100 + ver2_minor))
+    
+    case "$operator" in
+        ge) [ $ver1_num -ge $ver2_num ] ;;
+        gt) [ $ver1_num -gt $ver2_num ] ;;
+        le) [ $ver1_num -le $ver2_num ] ;;
+        lt) [ $ver1_num -lt $ver2_num ] ;;
+        eq) [ $ver1_num -eq $ver2_num ] ;;
+        *) return 2 ;;
+    esac
+}
+
+# Get current bash version
+get_bash_version() {
+    local bash_path="${1:-$(command -v bash)}"
+    if [ -x "$bash_path" ]; then
+        "$bash_path" --version | head -n1 | sed 's/.*version \([0-9]\+\.[0-9]\+\).*/\1/'
+    else
+        echo "unknown"
+    fi
+}
+
+# Check if bash version meets requirements
+check_bash_version() {
+    local min_version="${1:-5.3}"
+    local current_version
+    
+    current_version=$(get_bash_version)
+    
+    if [ "$current_version" = "unknown" ]; then
+        echo "ERROR: Could not determine bash version" >&2
+        return 1
+    fi
+    
+    if version_compare "$current_version" "$min_version" "ge"; then
+        echo "✓ Bash version $current_version meets requirements (>= $min_version)"
+        return 0
+    else
+        echo "✗ Bash version $current_version insufficient (required: >= $min_version)"
+        return 1
+    fi
+}
+
+# Install development dependencies for bash compilation
+install_build_dependencies() {
+    local pkg_mgr="$1"
+    
+    echo "Installing build dependencies for bash compilation..."
+    
+    case "$pkg_mgr" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y build-essential wget curl gcc make libc6-dev \
+                libncurses5-dev libreadline-dev bison flex autoconf
+            ;;
+        yum)
+            yum groupinstall -y "Development Tools"
+            yum install -y wget curl gcc make glibc-devel \
+                ncurses-devel readline-devel bison flex autoconf
+            ;;
+        dnf)
+            dnf groupinstall -y "Development Tools"
+            dnf install -y wget curl gcc make glibc-devel \
+                ncurses-devel readline-devel bison flex autoconf
+            ;;
+        zypper)
+            zypper install -y -t pattern devel_basis
+            zypper install -y wget curl gcc make glibc-devel \
+                ncurses-devel readline-devel bison flex autoconf
+            ;;
+        *)
+            echo "ERROR: Unknown package manager: $pkg_mgr" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Compile bash from source with comprehensive configuration
+compile_bash_from_source() {
+    local bash_version="${1:-5.3}"
+    local install_prefix="${2:-/usr/local}"
+    local temp_dir="/tmp/bash-build-$$"
+    
+    echo "Compiling bash $bash_version from source..."
+    
+    # Create temporary build directory
+    mkdir -p "$temp_dir"
+    cd "$temp_dir" || return 1
+    
+    # Download bash source with fallbacks
+    local source_urls=(
+        "https://ftp.gnu.org/gnu/bash/bash-${bash_version}.tar.gz"
+        "http://ftp.gnu.org/gnu/bash/bash-${bash_version}.tar.gz"
+        "https://mirrors.kernel.org/gnu/bash/bash-${bash_version}.tar.gz"
+    )
+    
+    local download_success=false
+    for url in "${source_urls[@]}"; do
+        echo "Trying to download from: $url"
+        if wget -q --timeout=30 --tries=3 "$url"; then
+            download_success=true
+            break
+        fi
+    done
+    
+    if [ "$download_success" != "true" ]; then
+        echo "ERROR: Failed to download bash source from any URL" >&2
+        cd / && rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # Extract source
+    if ! tar -xzf "bash-${bash_version}.tar.gz"; then
+        echo "ERROR: Failed to extract bash source" >&2
+        cd / && rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    cd "bash-${bash_version}" || return 1
+    
+    # Configure with comprehensive options
+    echo "Configuring bash build..."
+    if ! ./configure \
+        --prefix="$install_prefix" \
+        --enable-static-link \
+        --with-installed-readline \
+        --enable-progcomp \
+        --enable-history \
+        --enable-bang-history \
+        --enable-alias \
+        --enable-select \
+        --enable-arith-for-command \
+        --enable-array-variables \
+        --enable-brace-expansion \
+        --enable-casemod-attrs \
+        --enable-casemod-expansions \
+        --enable-command-timing \
+        --enable-cond-command \
+        --enable-cond-regexp \
+        --enable-debugger \
+        --enable-directory-stack \
+        --enable-dparen-arithmetic \
+        --enable-extended-glob \
+        --enable-help-builtin \
+        --enable-job-control \
+        --enable-multibyte \
+        --enable-net-redirections \
+        --enable-process-substitution \
+        --enable-readline; then
+        echo "ERROR: Bash configure failed" >&2
+        cd / && rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # Compile
+    echo "Compiling bash (this may take several minutes)..."
+    local cpu_count=$(nproc 2>/dev/null || echo 2)
+    if ! make -j"$cpu_count"; then
+        echo "ERROR: Bash compilation failed" >&2
+        cd / && rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # Install
+    echo "Installing bash to $install_prefix..."
+    if ! make install; then
+        echo "ERROR: Bash installation failed" >&2
+        cd / && rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # Clean up
+    cd / && rm -rf "$temp_dir"
+    
+    return 0
+}
+
+# Install bash via package manager
+install_bash_package_manager() {
+    local pkg_mgr="$1"
+    
+    echo "Installing bash via package manager: $pkg_mgr"
+    
+    case "$pkg_mgr" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y bash
+            ;;
+        yum)
+            yum update -y bash
+            ;;
+        dnf)
+            dnf update -y bash
+            ;;
+        zypper)
+            zypper install -y bash
+            ;;
+        *)
+            echo "ERROR: Unsupported package manager: $pkg_mgr" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Main bash installation function with comprehensive OS support
+install_modern_bash() {
+    local min_version="${1:-5.3}"
+    local force_compile="${2:-false}"
+    
+    echo "Installing modern bash (minimum version: $min_version)..."
+    
+    # Detect operating system
+    detect_operating_system
+    
+    # Check if upgrade is needed
+    if [ "$force_compile" != "true" ] && check_bash_version "$min_version"; then
+        echo "Bash version already meets requirements"
+        return 0
+    fi
+    
+    # Get package manager
+    local pkg_mgr
+    pkg_mgr=$(get_package_manager)
+    
+    if [ "$pkg_mgr" = "unknown" ]; then
+        echo "ERROR: Cannot determine package manager for OS: $OS_ID" >&2
+        return 1
+    fi
+    
+    echo "Detected package manager: $pkg_mgr"
+    
+    # Strategy 1: Try package manager first (unless forced to compile)
+    if [ "$force_compile" != "true" ]; then
+        echo "Attempting package manager installation..."
+        if install_bash_package_manager "$pkg_mgr"; then
+            if check_bash_version "$min_version"; then
+                echo "✓ Package manager installation successful"
+                setup_bash_environment
+                return 0
+            else
+                echo "Package manager version insufficient, will compile from source"
+            fi
+        else
+            echo "Package manager installation failed, will compile from source"
+        fi
+    fi
+    
+    # Strategy 2: Compile from source
+    echo "Installing build dependencies..."
+    if ! install_build_dependencies "$pkg_mgr"; then
+        echo "ERROR: Failed to install build dependencies" >&2
+        return 1
+    fi
+    
+    echo "Compiling bash from source..."
+    if ! compile_bash_from_source "$min_version"; then
+        echo "ERROR: Failed to compile bash from source" >&2
+        return 1
+    fi
+    
+    # Setup environment
+    setup_bash_environment
+    
+    # Verify installation
+    if check_bash_version "$min_version"; then
+        echo "✓ Bash installation completed successfully"
+        return 0
+    else
+        echo "ERROR: Bash installation verification failed" >&2
+        return 1
+    fi
+}
+
+# Setup bash environment and PATH
+setup_bash_environment() {
+    local new_bash_path="/usr/local/bin/bash"
+    
+    if [ -x "$new_bash_path" ]; then
+        # Create compatibility symlinks
+        ln -sf "$new_bash_path" /usr/local/bin/bash-modern
+        ln -sf "$new_bash_path" /usr/local/bin/bash5
+        
+        # Update PATH in profile
+        cat > /etc/profile.d/modern-bash.sh << 'EOF'
+# Modern Bash Configuration
+export PATH="/usr/local/bin:$PATH"
+export BASH="/usr/local/bin/bash"
+
+# Aliases for compatibility
+alias bash-modern="/usr/local/bin/bash"
+alias bash5="/usr/local/bin/bash"
+EOF
+        chmod +x /etc/profile.d/modern-bash.sh
+        
+        # Update /etc/shells
+        if ! grep -q "^$new_bash_path$" /etc/shells 2>/dev/null; then
+            echo "$new_bash_path" >> /etc/shells
+        fi
+        
+        echo "✓ Bash environment configured"
+        
+        # Switch to modern bash for this script if available and needed
+        local current_version
+        current_version=$(get_bash_version)
+        local new_version
+        new_version=$(get_bash_version "$new_bash_path")
+        
+        if version_compare "$new_version" "$current_version" "gt"; then
+            echo "Switching to modern bash: $new_bash_path (version $new_version)"
+            export BASH="$new_bash_path"
+            
+            # Re-execute this script with modern bash
+            if [ "${BASH_SOURCE[0]:-}" = "${0}" ]; then
+                exec "$new_bash_path" "$0" "$@"
+            fi
+        fi
+    fi
+}
+
+# Install modern bash first
+install_modern_bash
 
 # Configuration from Terraform template with input validation
 STACK_NAME="${stack_name}"

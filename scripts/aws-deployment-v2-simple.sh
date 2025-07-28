@@ -1,8 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # AWS Deployment Orchestrator v2 - Simplified Version
-# Bash 3.x compatible modular deployment orchestrator
-
-set -euo pipefail
+# Requires: bash 5.3.3+ (updated from bash 3.x compatibility)
 
 # =============================================================================
 # SETUP AND INITIALIZATION
@@ -11,6 +9,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Validate bash version before proceeding with deployment
+source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
+require_bash_533 "aws-deployment-v2-simple.sh"
+
+set -euo pipefail
+
 # Source core libraries (fallback to existing if modules fail)
 if [[ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]]; then
     source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
@@ -18,6 +22,23 @@ fi
 
 if [[ -f "$PROJECT_ROOT/lib/error-handling.sh" ]]; then
     source "$PROJECT_ROOT/lib/error-handling.sh"
+fi
+
+# Source new validation and recovery libraries
+if [[ -f "$PROJECT_ROOT/lib/deployment-validation.sh" ]]; then
+    source "$PROJECT_ROOT/lib/deployment-validation.sh"
+fi
+
+if [[ -f "$PROJECT_ROOT/lib/error-recovery.sh" ]]; then
+    source "$PROJECT_ROOT/lib/error-recovery.sh"
+fi
+
+if [[ -f "$PROJECT_ROOT/lib/aws-quota-checker.sh" ]]; then
+    source "$PROJECT_ROOT/lib/aws-quota-checker.sh"
+fi
+
+if [[ -f "$PROJECT_ROOT/lib/deployment-health.sh" ]]; then
+    source "$PROJECT_ROOT/lib/deployment-health.sh"
 fi
 
 # =============================================================================
@@ -398,16 +419,37 @@ cleanup_deployment() {
 validate_prerequisites() {
     log_info "Validating prerequisites..."
     
-    # Check AWS CLI
-    if ! command -v aws >/dev/null 2>&1; then
-        log_error "AWS CLI not found"
-        return 1
+    # Use comprehensive validation if available
+    if declare -f validate_deployment_prerequisites >/dev/null 2>&1; then
+        log_info "Running comprehensive deployment validation..."
+        if ! validate_deployment_prerequisites "$STACK_NAME" "$AWS_REGION"; then
+            log_error "Comprehensive validation failed"
+            return 1
+        fi
+    else
+        # Fallback to basic validation
+        log_info "Running basic validation..."
+        
+        # Check AWS CLI
+        if ! command -v aws >/dev/null 2>&1; then
+            log_error "AWS CLI not found"
+            return 1
+        fi
+        
+        # Check AWS credentials
+        if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            log_error "AWS credentials not configured"
+            return 1
+        fi
     fi
     
-    # Check AWS credentials
-    if ! aws sts get-caller-identity >/dev/null 2>&1; then
-        log_error "AWS credentials not configured"
-        return 1
+    # Check AWS quotas if function available
+    if declare -f check_all_quotas >/dev/null 2>&1; then
+        log_info "Checking AWS service quotas..."
+        if ! check_all_quotas "$AWS_REGION" "simple"; then
+            log_error "AWS quota check failed - deployment may fail due to insufficient quotas"
+            # Continue with warning rather than failing
+        fi
     fi
     
     log_success "Prerequisites validated"
@@ -501,23 +543,62 @@ main() {
         fi
     fi
     
-    # Deployment phases
-    if ! deploy_infrastructure "$STACK_NAME"; then
-        log_error "Infrastructure deployment failed"
-        cleanup_deployment "$STACK_NAME"
-        exit 1
+    # Deployment phases with retry logic
+    log_info "Starting deployment phases..."
+    
+    # Infrastructure deployment with retry
+    if declare -f retry_with_backoff >/dev/null 2>&1; then
+        if ! retry_with_backoff "deploy_infrastructure '$STACK_NAME'" "Infrastructure deployment" 2; then
+            log_error "Infrastructure deployment failed after retries"
+            cleanup_deployment "$STACK_NAME"
+            exit 1
+        fi
+    else
+        if ! deploy_infrastructure "$STACK_NAME"; then
+            log_error "Infrastructure deployment failed"
+            cleanup_deployment "$STACK_NAME"
+            exit 1
+        fi
     fi
     
-    if ! deploy_compute "$STACK_NAME" "$INSTANCE_TYPE" "$AWS_REGION"; then
-        log_error "Compute deployment failed"
-        cleanup_deployment "$STACK_NAME"
-        exit 1
+    # Compute deployment with intelligent recovery
+    if declare -f orchestrate_recovery >/dev/null 2>&1; then
+        if ! deploy_compute "$STACK_NAME" "$INSTANCE_TYPE" "$AWS_REGION"; then
+            log_error "Compute deployment failed, attempting recovery..."
+            if ! orchestrate_recovery "EC2_INSUFFICIENT_CAPACITY" "$STACK_NAME"; then
+                log_error "Recovery failed"
+                cleanup_deployment "$STACK_NAME"
+                exit 1
+            fi
+            # Retry with recovered configuration
+            if ! deploy_compute "$STACK_NAME" "$INSTANCE_TYPE" "$AWS_REGION"; then
+                log_error "Compute deployment failed after recovery"
+                cleanup_deployment "$STACK_NAME"
+                exit 1
+            fi
+        fi
+    else
+        if ! deploy_compute "$STACK_NAME" "$INSTANCE_TYPE" "$AWS_REGION"; then
+            log_error "Compute deployment failed"
+            cleanup_deployment "$STACK_NAME"
+            exit 1
+        fi
     fi
     
+    # Application deployment
     if ! deploy_application "$STACK_NAME"; then
         log_error "Application deployment failed"
         cleanup_deployment "$STACK_NAME"
         exit 1
+    fi
+    
+    # Post-deployment health check
+    if declare -f perform_health_check >/dev/null 2>&1; then
+        log_info "Running post-deployment health check..."
+        if ! perform_health_check "$STACK_NAME" "$AWS_REGION"; then
+            log_error "Post-deployment health check detected issues"
+            # Continue but warn user
+        fi
     fi
     
     local end_time=$(date +%s)
