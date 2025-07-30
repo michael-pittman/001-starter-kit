@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Configuration Validation Tool
 # Validates all configuration files and settings
@@ -6,18 +6,31 @@
 
 set -euo pipefail
 
-# Source common functions
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
+
+# Source the errors module
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
+# Standard library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-fi
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-if [ -f "$PROJECT_ROOT/lib/error-handling.sh" ]; then
-    source "$PROJECT_ROOT/lib/error-handling.sh"
-    init_error_handling "resilient"
-fi
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
+
+# Initialize error handling
+init_error_handling "resilient"
 
 # =============================================================================
 # VALIDATION FUNCTIONS

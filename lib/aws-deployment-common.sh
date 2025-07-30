@@ -2,17 +2,9 @@
 # =============================================================================
 # AWS Deployment Common Library
 # Shared functions for all AWS deployment scripts
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation - critical for deployment safety
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    # Get the directory of this script for sourcing bash_version module
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "aws-deployment-common.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # =============================================================================
 # UNIFIED LOGGING AND OUTPUT FUNCTIONS
@@ -1772,7 +1764,7 @@ generate_user_data_script() {
     local additional_commands="$2"
     
     cat << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # GeuseMaker Instance Setup
 set -e
 

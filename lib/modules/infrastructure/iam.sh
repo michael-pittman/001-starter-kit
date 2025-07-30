@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # IAM Infrastructure Module
 # Comprehensive IAM roles, policies, and permissions management

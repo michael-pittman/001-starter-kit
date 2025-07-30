@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Application Health Monitor Module
 # Provides comprehensive health checking, performance monitoring,
@@ -818,7 +818,7 @@ _start_performance_monitoring_impl() {
     
     # Create monitoring script
     cat > "$output_dir/performance-monitor.sh" << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # Performance monitoring daemon
 
 set -euo pipefail
@@ -1154,7 +1154,7 @@ create_log_collector() {
     local enable_rotation="$2"
     
     cat > "$log_dir/collect-logs.sh" << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # Log collection script
 
 set -euo pipefail
@@ -1205,7 +1205,7 @@ setup_log_rotation() {
     local retention_days="$2"
     
     cat > "$log_dir/rotate-logs.sh" << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # Log rotation script
 
 set -euo pipefail
@@ -1236,7 +1236,7 @@ create_log_analysis_tools() {
     
     # Error analyzer
     cat > "$log_dir/analyze-errors.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Error log analyzer
 
 set -euo pipefail
@@ -1289,7 +1289,7 @@ EOF
     
     # Performance log analyzer
     cat > "$log_dir/analyze-performance.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Performance log analyzer
 
 set -euo pipefail
@@ -1409,7 +1409,7 @@ create_alerting_script() {
     local alerts_dir="$1"
     
     cat > "$alerts_dir/alert-manager.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Alert manager script
 
 set -euo pipefail
@@ -1574,7 +1574,7 @@ setup_alert_monitoring() {
     
     # Create alert dashboard
     cat > "$alerts_dir/dashboard.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Alert dashboard
 
 set -euo pipefail
@@ -1642,7 +1642,7 @@ create_health_endpoint() {
     local bind_address="${2:-0.0.0.0}"
     
     cat > /shared/health-endpoint.sh << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # Simple health check endpoint for load balancers
 
 # Start simple HTTP server for health checks

@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # AWS Resource Management Library
-# Enhanced resource tracking, monitoring, and lifecycle management using bash 5.3.3+
-# Requires: bash 5.3.3+
+# Enhanced resource tracking, monitoring, and lifecycle management
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "aws-resource-manager.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # Load associative array utilities
 source "$SCRIPT_DIR/associative-arrays.sh"
@@ -27,7 +20,6 @@ readonly AWS_RESOURCE_MANAGER_LIB_LOADED=true
 # =============================================================================
 
 readonly AWS_RESOURCE_MANAGER_VERSION="1.0.0"
-readonly REQUIRED_BASH_VERSION="5.3.3"
 
 # =============================================================================
 # GLOBAL ASSOCIATIVE ARRAYS FOR RESOURCE MANAGEMENT

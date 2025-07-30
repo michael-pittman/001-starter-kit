@@ -2,16 +2,12 @@
 # =============================================================================
 # AWS CLI v2 Enhanced Library
 # Modern AWS CLI v2 compliance with best practices
-# Requires: bash 5.3.3+, AWS CLI v2
+# Compatible with bash 3.x+, AWS CLI v2
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "aws-cli-v2.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
+# Set script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 
 # Load common logging functions
 source "$SCRIPT_DIR/aws-deployment-common.sh"
@@ -270,6 +266,14 @@ is_retryable_error() {
         "Connection timed out"
         "Name resolution failed"
         "Could not connect"
+        "InsufficientInstanceCapacity"
+        "InsufficientCapacity"
+        "CapacityNotAvailable"
+        "Server.InsufficientInstanceCapacity"
+        "Unsupported"  # Often temporary when new instance types are rolling out
+        "ServiceUnavailableException"
+        "503 Service Unavailable"
+        "Service is currently unavailable"
     )
     
     for pattern in "${retryable_patterns[@]}"; do
@@ -285,9 +289,9 @@ is_retryable_error() {
 # RATE LIMITING AND API CALL MONITORING
 # =============================================================================
 
-# Rate limiting implementation
-declare -A AWS_API_CALL_TIMESTAMPS
-declare -A AWS_API_CALL_COUNTS
+# Rate limiting implementation (bash 3.x compatible)
+AWS_API_CALL_TIMESTAMPS=()
+AWS_API_CALL_COUNTS=()
 
 # Enforce rate limiting for AWS API calls
 enforce_rate_limit() {
@@ -297,8 +301,15 @@ enforce_rate_limit() {
     local minute_window=$((current_time / 60))
     local rate_key="${api_key}_${minute_window}"
     
-    # Get current call count for this minute
-    local current_count="${AWS_API_CALL_COUNTS[$rate_key]:-0}"
+    # Get current call count for this minute (bash 3.x compatible)
+    local current_count=0
+    local i
+    for i in "${!AWS_API_CALL_COUNTS[@]}"; do
+        if [[ "$i" == "$rate_key" ]]; then
+            current_count="${AWS_API_CALL_COUNTS[$i]}"
+            break
+        fi
+    done
     
     if [[ $current_count -ge $max_calls_per_minute ]]; then
         local sleep_time=$((60 - (current_time % 60)))
@@ -311,11 +322,18 @@ enforce_rate_limit() {
         current_count=0
     fi
     
-    # Increment counter
-    AWS_API_CALL_COUNTS[$rate_key]=$((current_count + 1))
+    # Increment counter (bash 3.x compatible)
+    AWS_API_CALL_COUNTS["$rate_key"]=$((current_count + 1))
     
     # Add small delay between API calls
-    local last_call_time="${AWS_API_CALL_TIMESTAMPS[$api_key]:-0}"
+    local last_call_time=0
+    for i in "${!AWS_API_CALL_TIMESTAMPS[@]}"; do
+        if [[ "$i" == "$api_key" ]]; then
+            last_call_time="${AWS_API_CALL_TIMESTAMPS[$i]}"
+            break
+        fi
+    done
+    
     local min_interval=0.1
     local time_since_last_call=$(echo "$current_time - $last_call_time" | bc -l 2>/dev/null || echo "1")
     
@@ -325,7 +343,7 @@ enforce_rate_limit() {
         sleep "$sleep_time"
     fi
     
-    AWS_API_CALL_TIMESTAMPS[$api_key]="$current_time"
+    AWS_API_CALL_TIMESTAMPS["$api_key"]="$current_time"
 }
 
 # Log AWS API calls for monitoring and debugging
@@ -463,15 +481,15 @@ supports_pagination() {
 # ENHANCED ERROR HANDLING AND CIRCUIT BREAKER
 # =============================================================================
 
-# Circuit breaker implementation for AWS services
-declare -A AWS_SERVICE_CIRCUIT_BREAKERS
-declare -A AWS_SERVICE_FAILURE_COUNTS
-declare -A AWS_SERVICE_LAST_FAILURE_TIME
+# Circuit breaker implementation for AWS services (bash 3.x compatible)
+AWS_SERVICE_CIRCUIT_BREAKERS=()
+AWS_SERVICE_FAILURE_COUNTS=()
+AWS_SERVICE_LAST_FAILURE_TIME=()
 
 # Circuit breaker states
-readonly CB_CLOSED=0
-readonly CB_OPEN=1
-readonly CB_HALF_OPEN=2
+[[ -z "${CB_CLOSED:-}" ]] && readonly CB_CLOSED=0
+[[ -z "${CB_OPEN:-}" ]] && readonly CB_OPEN=1
+[[ -z "${CB_HALF_OPEN:-}" ]] && readonly CB_HALF_OPEN=2
 
 # Initialize circuit breaker for a service
 init_circuit_breaker() {
@@ -754,44 +772,93 @@ aws_service_health_check() {
     local services=("${@:-ec2 elbv2 efs ssm cloudformation}")
     local overall_status=0
     
+    # Check if in development mode
+    local is_development=false
+    if [[ "${DEPLOYMENT_MODE:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "dev" ]] || \
+       [[ "${DEVELOPMENT_MODE:-}" == "true" ]]; then
+        is_development=true
+        info "Running AWS service health checks in development mode"
+    fi
+    
     log "Performing AWS service health check"
     
     for service in ${services[*]}; do
         info "Checking $service service health..."
         
-        # Initialize circuit breaker
-        init_circuit_breaker "$service"
+        # Initialize circuit breaker with service-specific settings
+        case "$service" in
+            "ec2")
+                # EC2 often has temporary issues, so be more tolerant
+                init_circuit_breaker "$service" 10 120  # 10 failures, 2 minute timeout
+                ;;
+            *)
+                # Standard settings for other services
+                init_circuit_breaker "$service" 5 60   # 5 failures, 1 minute timeout
+                ;;
+        esac
         
         # Check circuit breaker state
         if ! check_circuit_breaker "$service"; then
             warning "Service $service is unavailable (circuit breaker open)"
-            overall_status=1
+            if [[ "$is_development" != "true" ]]; then
+                overall_status=1
+            fi
             continue
         fi
         
-        # Perform service-specific health check
+        # Perform service-specific health check with retries
         local health_check_result=0
-        case "$service" in
-            "ec2")
-                aws_cli_with_retry "ec2" "describe-regions" --max-items 1 >/dev/null 2>&1 || health_check_result=1
-                ;;
-            "elbv2")
-                aws_cli_with_retry "elbv2" "describe-load-balancers" --max-items 1 >/dev/null 2>&1 || health_check_result=1
-                ;;
-            "efs")
-                aws_cli_with_retry "efs" "describe-file-systems" --max-items 1 >/dev/null 2>&1 || health_check_result=1
-                ;;
-            "ssm")
-                aws_cli_with_retry "ssm" "describe-parameters" --max-items 1 >/dev/null 2>&1 || health_check_result=1
-                ;;
-            "cloudformation")
-                aws_cli_with_retry "cloudformation" "describe-stacks" --max-items 1 >/dev/null 2>&1 || health_check_result=1
-                ;;
-            *)
-                warning "Unknown service for health check: $service"
-                health_check_result=1
-                ;;
-        esac
+        local retry_count=0
+        local max_retries=3
+        
+        while [[ $retry_count -lt $max_retries ]]; do
+            case "$service" in
+                "ec2")
+                    # Try primary health check
+                    if aws_cli_with_retry "ec2" "describe-regions" --max-items 1 >/dev/null 2>&1; then
+                        health_check_result=0
+                        break
+                    # Fallback: Try describe-availability-zones as alternative
+                    elif aws_cli_with_retry "ec2" "describe-availability-zones" --max-items 1 >/dev/null 2>&1; then
+                        info "EC2 service available (via availability zones check)"
+                        health_check_result=0
+                        break
+                    # Second fallback: Try to get current instance metadata if running on EC2
+                    elif [[ -n "${AWS_REGION:-}" ]] && aws ec2 describe-vpcs --region "$AWS_REGION" --max-items 1 >/dev/null 2>&1; then
+                        info "EC2 service available (via VPC check)"
+                        health_check_result=0
+                        break
+                    else
+                        health_check_result=1
+                    fi
+                    ;;
+                "elbv2")
+                    aws_cli_with_retry "elbv2" "describe-load-balancers" --max-items 1 >/dev/null 2>&1 && health_check_result=0 && break || health_check_result=1
+                    ;;
+                "efs")
+                    aws_cli_with_retry "efs" "describe-file-systems" --max-items 1 >/dev/null 2>&1 && health_check_result=0 && break || health_check_result=1
+                    ;;
+                "ssm")
+                    aws_cli_with_retry "ssm" "describe-parameters" --max-items 1 >/dev/null 2>&1 && health_check_result=0 && break || health_check_result=1
+                    ;;
+                "cloudformation")
+                    aws_cli_with_retry "cloudformation" "describe-stacks" --max-items 1 >/dev/null 2>&1 && health_check_result=0 && break || health_check_result=1
+                    ;;
+                *)
+                    warning "Unknown service for health check: $service"
+                    health_check_result=1
+                    break
+                    ;;
+            esac
+            
+            if [[ $health_check_result -ne 0 ]] && [[ $retry_count -lt $((max_retries - 1)) ]]; then
+                warning "Health check failed for $service, retrying in 2 seconds (attempt $((retry_count + 2))/$max_retries)..."
+                sleep 2
+            fi
+            ((retry_count++))
+        done
         
         # Record result in circuit breaker
         if [[ $health_check_result -eq 0 ]]; then
@@ -799,15 +866,25 @@ aws_service_health_check() {
             success "Service $service is healthy"
         else
             record_circuit_breaker_result "$service" "false"
-            error "Service $service is unhealthy"
-            overall_status=1
+            if [[ "$is_development" == "true" ]]; then
+                warning "Service $service is unhealthy (development mode - continuing anyway)"
+            else
+                error "Service $service is unhealthy"
+                overall_status=1
+            fi
         fi
     done
     
     if [[ $overall_status -eq 0 ]]; then
         success "All AWS services are healthy"
     else
-        warning "Some AWS services are unhealthy"
+        if [[ "$is_development" == "true" ]]; then
+            warning "Some AWS services are unhealthy, but continuing in development mode"
+            # Don't fail in development mode
+            return 0
+        else
+            warning "Some AWS services are unhealthy"
+        fi
     fi
     
     return $overall_status
@@ -848,8 +925,23 @@ init_aws_cli_v2() {
     refresh_aws_sso_session "$profile" || true
     
     # Perform health check
+    # Check if in development mode
+    local is_development=false
+    if [[ "${DEPLOYMENT_MODE:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "dev" ]] || \
+       [[ "${DEVELOPMENT_MODE:-}" == "true" ]]; then
+        is_development=true
+    fi
+    
     if ! aws_service_health_check; then
-        warning "Some AWS services are not healthy, but continuing..."
+        if [[ "$is_development" == "true" ]]; then
+            warning "Some AWS services are not healthy, but continuing in development mode..."
+        else
+            warning "Some AWS services are not healthy. This may affect deployment."
+            warning "To continue anyway, set ENVIRONMENT=development or DEVELOPMENT_MODE=true"
+            # Still continue, but warn the user
+        fi
     fi
     
     # Clean up old cache

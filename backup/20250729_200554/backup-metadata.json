@@ -1,0 +1,25 @@
+{
+  "backup_timestamp": "20250729_200554",
+  "backup_version": "1.0",
+  "project_root": "/Users/nucky/Repos/001-starter-kit",
+  "backup_scope": [
+    "scripts/",
+    "lib/",
+    "config/",
+    "docs/",
+    "tests/",
+    "Makefile",
+    "README.md",
+    "deploy.sh"
+  ],
+  "system_info": {
+    "hostname": "Nuckys-MBP.mynetworksettings.com",
+    "user": "nucky",
+    "bash_version": "5.3.3(1)-release",
+    "os": "Darwin",
+    "os_version": "25.0.0"
+  },
+  "backup_checksum": "b438bc7dbeb3dfa692745e45b0ada3b8126c2f73306624a010c8e0e714cfd022",
+  "backup_size": "",
+  "compression_ratio": null
+}

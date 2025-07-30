@@ -1,0 +1,6 @@
+Library System Usage Test Report (Quick Scan)
+============================================
+Generated: Mon Jul 28 22:06:40 EDT 2025
+
+Checking for direct module sourcing violations...
+

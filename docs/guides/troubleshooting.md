@@ -2,6 +2,36 @@
 
 ## Common Issues and Solutions
 
+### Bash Version Compatibility
+
+#### Working with Different Bash Versions
+
+**Symptom**: Running on systems with older bash versions (e.g., macOS with bash 3.2)
+
+**Solution**: Scripts are fully compatible with bash 3.x+
+```bash
+# Check your current bash version
+bash --version
+
+# No upgrade required - compatibility layers handle older versions automatically
+# Optional: Upgrade for additional features
+# macOS:
+brew install bash
+echo '/usr/local/bin/bash' | sudo tee -a /etc/shells
+chsh -s /usr/local/bin/bash
+
+# Ubuntu/Debian:
+sudo apt update && sudo apt install bash
+
+# RHEL/Amazon Linux:
+sudo yum install bash
+```
+
+**Note**: 
+- Scripts remain functional with bash 3.2+ (macOS default)
+- Core features work across all versions
+- Some advanced features may have reduced functionality with older bash
+
 ### Deployment Issues
 
 #### 1. EC2 Instance Launch Failures
@@ -19,12 +49,14 @@ InsufficientInstanceCapacity: We currently do not have sufficient capacity in th
 # 3. Fallback regions (us-east-2, us-west-2)
 
 # Manual override if needed:
-./scripts/aws-deployment-v2-simple.sh -t g5.xlarge -r us-west-2 stack-name
+export EC2_INSTANCE_TYPE=g5.xlarge
+export AWS_REGION=us-west-2
+make deploy-spot ENV=dev STACK_NAME=my-stack
 ```
 
 **Prevention**: Use spot instance optimization
 ```bash
-./scripts/aws-deployment-modular.sh --spot stack-name
+make deploy-spot ENV=dev STACK_NAME=my-stack
 ```
 
 #### 2. Variable Export Errors
@@ -60,10 +92,10 @@ Spot Instance interruption notice received
 **Solution**: Use intelligent spot management
 ```bash
 # Enable spot optimization with fallback
-./scripts/aws-deployment-modular.sh --spot --multi-az stack-name
+make deploy-spot ENV=prod STACK_NAME=my-stack
 
 # Check spot instance health
-./scripts/check-instance-status.sh stack-name
+make status ENV=prod STACK_NAME=my-stack
 ```
 
 ### Service Issues
@@ -92,13 +124,13 @@ free -h
 **Solutions**:
 ```bash
 # Clean up disk space
-./scripts/fix-deployment-issues.sh stack-name region
+./lib/modules/cleanup/resources.sh --stack-name my-stack
 
 # Restart services
 docker compose down && docker compose up -d
 
 # Check service health
-./scripts/health-check-advanced.sh stack-name
+make health ENV=dev STACK_NAME=my-stack
 ```
 
 #### 2. GPU Not Detected
@@ -127,7 +159,8 @@ sudo apt-get install nvidia-docker2
 sudo systemctl restart docker
 
 # Or redeploy with GPU optimization
-./scripts/aws-deployment-modular.sh -t g4dn.xlarge stack-name
+export EC2_INSTANCE_TYPE=g4dn.xlarge
+make deploy-spot ENV=dev STACK_NAME=my-stack
 ```
 
 #### 3. EFS Mount Failures
@@ -152,7 +185,7 @@ aws ec2 describe-security-groups --group-ids sg-12345
 ./scripts/setup-parameter-store.sh validate
 
 # Fix EFS configuration
-./scripts/fix-deployment-issues.sh stack-name region
+./lib/modules/cleanup/resources.sh --stack-name my-stack
 
 # Manual mount test
 sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,intr,timeo=600,retrans=2 \
@@ -183,10 +216,10 @@ aws ec2 describe-security-groups --filters "Name=group-name,Values=*stack-name*"
 **Solutions**:
 ```bash
 # Update security groups
-./scripts/aws-deployment-modular.sh --alb stack-name
+make deploy-alb ENV=dev STACK_NAME=my-stack
 
 # Check ALB health
-make health-check STACK_NAME=stack-name
+make health ENV=dev STACK_NAME=my-stack
 
 # Direct service test
 ssh -i key.pem ubuntu@ip "curl localhost:5678"
@@ -245,7 +278,8 @@ ps aux --sort=-%mem | head -10
 docker compose restart ollama
 
 # Upgrade instance type
-./scripts/aws-deployment-modular.sh -t g4dn.2xlarge stack-name
+export EC2_INSTANCE_TYPE=g4dn.2xlarge
+make deploy-spot ENV=dev STACK_NAME=my-stack
 
 # Optimize resource allocation
 # Edit docker-compose.yml memory limits
@@ -275,7 +309,8 @@ iostat -x 1
 **Solutions**:
 ```bash
 # Scale up instance
-./scripts/aws-deployment-modular.sh -t g5.xlarge stack-name
+export EC2_INSTANCE_TYPE=g5.xlarge
+make deploy-spot ENV=dev STACK_NAME=my-stack
 
 # Check model loading
 docker compose logs ollama
@@ -299,7 +334,7 @@ AccessDenied: User is not authorized to perform: ssm:GetParameter
 aws iam get-role-policy --role-name role-name --policy-name policy-name
 
 # Update IAM policies
-./scripts/setup-parameter-store.sh setup
+./archive/legacy/setup-parameter-store.sh setup
 
 # Verify parameters exist
 aws ssm get-parameter --name /aibuildkit/OPENAI_API_KEY
@@ -323,7 +358,7 @@ aws ec2 describe-security-groups \
 ./scripts/security-validation.sh
 
 # Use ALB for controlled access
-./scripts/aws-deployment-modular.sh --alb stack-name
+make deploy-alb ENV=dev STACK_NAME=my-stack
 ```
 
 ## Debug Commands
@@ -332,16 +367,16 @@ aws ec2 describe-security-groups \
 
 ```bash
 # Comprehensive system check
-./scripts/health-check-advanced.sh stack-name
+make health ENV=dev STACK_NAME=my-stack
 
 # Check all services
-make health-check STACK_NAME=stack-name
+make status ENV=dev STACK_NAME=my-stack
 
 # Instance status
-./scripts/check-instance-status.sh stack-name
+./lib/modules/monitoring/health.sh --stack-name my-stack
 
 # AWS resource validation
-aws ec2 describe-instances --filters "Name=tag:Stack,Values=stack-name"
+aws ec2 describe-instances --filters "Name=tag:Stack,Values=my-stack"
 ```
 
 ### Log Analysis
@@ -397,11 +432,11 @@ docker compose up -d --force-recreate
 aws ec2 reboot-instances --instance-ids i-12345
 
 # Replace instance (spot interruption)
-./scripts/aws-deployment-v2-simple.sh --cleanup-only stack-name
-./scripts/aws-deployment-v2-simple.sh stack-name
+make destroy ENV=dev STACK_NAME=my-stack
+make deploy-spot ENV=dev STACK_NAME=my-stack
 
 # Emergency cleanup
-./scripts/cleanup-consolidated.sh --stack stack-name
+./lib/modules/cleanup/resources.sh --stack-name my-stack
 ```
 
 ### Data Recovery
@@ -443,7 +478,7 @@ docker compose exec -T postgres psql database_name < backup.sql
 # Configuration backups
 
 # Test recovery procedures monthly
-./scripts/test-recovery.sh stack-name
+./tests/test-recovery.sh my-stack
 ```
 
 ### Cost Monitoring
@@ -500,11 +535,11 @@ When reporting issues, include:
 
 | Issue | Quick Fix |
 |-------|-----------|
-| Disk space full | `./scripts/fix-deployment-issues.sh STACK REGION` |
+| Disk space full | `./lib/modules/cleanup/resources.sh --stack-name STACK` |
 | Services not starting | `docker compose down && docker compose up -d` |
 | EFS not mounting | `./scripts/setup-parameter-store.sh validate` |
-| GPU not detected | Redeploy with `-t g4dn.xlarge` |
-| Spot interruption | `./scripts/aws-deployment-modular.sh --spot STACK` |
+| GPU not detected | Redeploy with `export EC2_INSTANCE_TYPE=g4dn.xlarge` |
+| Spot interruption | `make deploy-spot ENV=dev STACK_NAME=STACK` |
 | Security group issues | `./scripts/security-validation.sh` |
 | Variable errors | Use modular deployment scripts |
-| High costs | `./scripts/aws-deployment-modular.sh --spot STACK` |
+| High costs | `make deploy-spot ENV=dev STACK_NAME=STACK` |

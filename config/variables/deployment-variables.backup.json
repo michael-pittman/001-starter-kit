@@ -1,0 +1,127 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2025-07-30T13:13:21Z",
+    "last_modified": "2025-07-30T13:13:22Z"
+  },
+  "global": {},
+  "stacks": {},
+  "environments": {},
+  "temporary": {},
+  "stack": {
+    "STACK_NAME": {
+      "value": "geusemaker-spot-alb-cdn",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENVIRONMENT": {
+      "value": "dev",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "AWS_REGION": {
+      "value": "us-east-1",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "AWS_PROFILE": {
+      "value": "dev",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "DEPLOYMENT_TYPE": {
+      "value": "full",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_ALB": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_CDN": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_EFS": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_MULTI_AZ": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_SPOT": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ENABLE_MONITORING": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "VPC_CIDR": {
+      "value": "10.0.0.0/16",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "PUBLIC_SUBNETS": {
+      "value": "",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "PRIVATE_SUBNETS": {
+      "value": "",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "INSTANCE_TYPE": {
+      "value": "g4dn.xlarge",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "MIN_CAPACITY": {
+      "value": "2",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "MAX_CAPACITY": {
+      "value": "10",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "EFS_ENCRYPTION": {
+      "value": "true",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:21Z"
+    },
+    "ALB_INTERNAL": {
+      "value": "false",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T13:13:22Z"
+    }
+  }
+}

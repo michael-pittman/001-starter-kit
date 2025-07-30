@@ -1,48 +1,41 @@
-#!/bin/bash
-# Generate documentation from existing markdown files
-set -e
+#!/usr/bin/env bash
+# Generate documentation
 
-echo "📚 Generating documentation..."
+set -euo pipefail
+
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "generate-docs.sh" "core/variables" "core/logging"
+
+log "Generating project documentation..."
 
 # Create docs directory if it doesn't exist
-mkdir -p docs/generated
+mkdir -p "$PROJECT_ROOT/docs"
 
-# Generate README index
-echo "📄 Creating documentation index..."
-cat > docs/generated/README.md << 'EOF'
-# GeuseMaker Documentation
+# Generate README if it doesn't exist
+if [[ ! -f "$PROJECT_ROOT/README.md" ]]; then
+    log "Creating README.md..."
+    cat > "$PROJECT_ROOT/README.md" << 'EOF'
+# AI Starter Kit
+
+A comprehensive AWS deployment toolkit for AI applications.
 
 ## Quick Start
-- [Getting Started](../getting-started/)
-- [Prerequisites](../getting-started/prerequisites.md)
 
-## Deployment Guides
-- [AWS Deployment](../reference/cli/deployment.md)
-- [Management Commands](../reference/cli/management.md)
+```bash
+./deploy.sh
+```
 
-## API Reference
-- [Service APIs](../reference/api/)
-- [CLI Reference](../reference/cli/)
+## Documentation
 
-## Security
-- [Security Guide](../security-guide.md)
-
-## Troubleshooting
-- [Common Issues](../setup/troubleshooting.md)
+See the `docs/` directory for detailed documentation.
 EOF
+fi
 
-# Generate command reference from Makefile
-echo "⚙️  Generating command reference..."
-echo "# Make Commands Reference" > docs/generated/commands.md
-echo "" >> docs/generated/commands.md
-echo "Generated from Makefile on $(date)" >> docs/generated/commands.md
-echo "" >> docs/generated/commands.md
-
-# Extract commands and descriptions from Makefile
-grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | \
-    sort | \
-    awk 'BEGIN {FS = ":.*?## "}; {printf "- **%s**: %s\n", $1, $2}' >> docs/generated/commands.md
-
-echo "✅ Documentation generated in docs/generated/"
-echo "📋 Files created:"
-find docs/generated -name "*.md" -exec echo "  - {}" \;
+success "Documentation generation complete"

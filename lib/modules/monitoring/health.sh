@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Health Check and Monitoring Module
 # Provides health checks and monitoring capabilities

@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
 #
-# Enhanced Error Recovery Library
-# Provides intelligent retry mechanisms, cleanup, and recovery strategies
+# Error Recovery Library
+# Provides comprehensive error handling and recovery mechanisms
 #
-# Dependencies: deployment-validation.sh, error-handling.sh
-# Required Bash Version: 5.3+
+# Dependencies: aws-cli, jq
+# Compatible with bash 3.x+
 #
 
 set -euo pipefail
 
 # Source required libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/modules/core/bash_version.sh"
-source "${SCRIPT_DIR}/modules/core/errors.sh"
-source "${SCRIPT_DIR}/modules/core/variables.sh"
-source "${SCRIPT_DIR}/error-handling.sh"
+# Note: These libraries expect to be called from scripts that have already set PROJECT_ROOT
+if [[ -z "${PROJECT_ROOT:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+# Source using library loader pattern
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Load required modules through the library system
+load_module "core/errors"
+load_module "core/variables"
+load_module "error-handling"
 
 # Recovery configuration
 declare -gA RECOVERY_CONFIG=(
@@ -226,12 +234,27 @@ recover_network_timeout() {
     export AWS_CLI_TIMEOUT=300
     export CURL_TIMEOUT=300
     
-    # Check network connectivity
+    # Set development mode for network recovery to be more lenient
+    export DEPLOYMENT_MODE="development"
+    
+    # Check network connectivity with retries
     if ! check_network_connectivity; then
         echo "⚠ Network connectivity issues detected"
         echo "Waiting 30s for network to stabilize..."
         sleep 30
+        
+        # Try again after wait
+        if ! check_network_connectivity; then
+            echo "⚠ Network still unstable, but continuing with recovery"
+            # Show troubleshooting tips if function is available
+            if command -v show_network_troubleshooting_tips &>/dev/null; then
+                show_network_troubleshooting_tips
+            fi
+        fi
     fi
+    
+    # Reset deployment mode
+    unset DEPLOYMENT_MODE
     
     return 0
 }

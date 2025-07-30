@@ -2,16 +2,9 @@
 # =============================================================================
 # Simple Instance Deployment Library
 # Specialized functions for simple AWS deployments
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "simple-instance.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # =============================================================================
 # SIMPLE INSTANCE LAUNCH
@@ -156,7 +149,7 @@ create_simple_user_data() {
     local compose_file="${2:-docker-compose.yml}"
     
     cat << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # Simple GeuseMaker Instance Setup
 set -e
 

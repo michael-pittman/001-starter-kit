@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # AI Services Module
 # Manages Ollama model deployment, n8n workflow automation setup,
@@ -494,7 +494,7 @@ create_model_test_scripts() {
     
     # Create comprehensive test script
     cat > /shared/test-models.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Comprehensive AI Model Testing Script
 
 set -euo pipefail
@@ -602,7 +602,7 @@ EOF
     
     # Create performance benchmark script
     cat > /shared/benchmark-models.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # AI Model Performance Benchmark
 
 set -euo pipefail
@@ -1590,7 +1590,7 @@ create_integration_test_script() {
     echo "Creating AI services integration test script..." >&2
     
     cat > /shared/test-ai-integration.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # AI Services Integration Test Suite
 
 set -euo pipefail

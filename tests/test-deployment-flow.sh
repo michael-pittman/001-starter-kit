@@ -1,17 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Complete Deployment Flow Test
 # Tests the full modular deployment system end-to-end
 
-set -euo pipefail
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
 
-# =============================================================================
-# TEST SETUP
-# =============================================================================
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
 
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Test configuration
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-deployment-flow.sh" "core/variables" "core/logging"
+
 readonly TEST_STACK_NAME="test-deployment-$(date +%s)"
 readonly TEST_REGION="us-east-1"
 readonly TEST_INSTANCE_TYPE="t3.micro"  # Small instance for testing
@@ -23,10 +35,19 @@ readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m'
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+# Use standardized logging if available, otherwise fallback to custom functions
+if command -v log_message >/dev/null 2>&1; then
+    log_info() { log_message "INFO" "$1" "TEST"; }
+    log_success() { log_message "INFO" "$1" "TEST"; }  # Use INFO level for success
+    log_error() { log_message "ERROR" "$1" "TEST"; }
+    log_warn() { log_message "WARN" "$1" "TEST"; }
+else
+    # Fallback to custom colored logging
+    log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+    log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+    log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+    log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+fi
 
 # =============================================================================
 # VALIDATION FUNCTIONS
@@ -87,7 +108,6 @@ test_variable_management() {
     # Create a temporary test script
     local test_script="/tmp/test-variables-$$.sh"
     cat > "$test_script" <<'EOF'
-#!/bin/bash
 set -euo pipefail
 
 # Initialize arrays without -g flag for bash 3.x compatibility
@@ -133,7 +153,6 @@ test_error_handling() {
     # Create a temporary test script
     local test_script="/tmp/test-errors-$$.sh"
     cat > "$test_script" <<'EOF'
-#!/bin/bash
 set -euo pipefail
 
 # Initialize error tracking arrays
@@ -183,7 +202,6 @@ test_registry_system() {
     # Create a temporary test script
     local test_script="/tmp/test-registry-$$.sh"
     cat > "$test_script" <<'EOF'
-#!/bin/bash
 set -euo pipefail
 
 RESOURCE_REGISTRY_FILE="/tmp/test-registry-$$.json"
@@ -246,7 +264,6 @@ test_compute_module() {
     # Create a temporary test script
     local test_script="/tmp/test-compute-$$.sh"
     cat > "$test_script" <<'EOF'
-#!/bin/bash
 set -euo pipefail
 
 # Test instance type fallback logic

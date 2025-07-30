@@ -2,7 +2,7 @@
 
 ## Overview
 
-GeuseMaker uses a modular architecture designed for maintainability, scalability, and cost optimization. The system is built with bash 3.x compatibility for macOS development while supporting advanced Linux features in production.
+GeuseMaker uses a modular architecture designed for maintainability, scalability, and cost optimization. The system is compatible with bash 3.x+ for broad compatibility while providing enhanced features through our consolidated module system.
 
 ## System Architecture
 
@@ -44,92 +44,124 @@ GeuseMaker uses a modular architecture designed for maintainability, scalability
 
 ## Module System
 
-The codebase is organized into 23 specialized modules:
+The codebase has been consolidated from 23 specialized modules into 8 major functional groups for better maintainability:
 
-### Core Modules (`/lib/modules/core/`)
+### Core Module (`/lib/modules/core/`)
 
-**variables.sh**
-- Variable sanitization and validation
+**Consolidated Components:**
+- **variables.sh** - Variable sanitization, validation, and persistence
+- **logging.sh** - Structured logging with multiple levels
+- **errors.sh** - Base error handling and context wrapping
+- **validation.sh** - Input validation and type checking
+- **registry.sh** - Resource lifecycle tracking and cleanup orchestration
+- **dependency-groups.sh** - Library dependency management
+- **instance-utils.sh** - Common instance utility functions
+
+**Key Features:**
+- Bash 3.x+ compatible with automatic enhancement for bash 4.0+
 - Type-safe variable management
-- Bash 3.x compatible implementation
+- Centralized resource tracking
+- Enhanced error context preservation
 
-**registry.sh**
-- Resource lifecycle tracking
-- Dependency management
-- Cleanup orchestration
+### Infrastructure Module (`/lib/modules/infrastructure/`)
 
-**errors.sh**
-- Base error handling functions
-- Context wrapping for errors
+**Consolidated Components:**
+- **vpc.sh** - Multi-AZ VPC creation, subnet management, gateways
+- **ec2.sh** - EC2 instance management and configuration
+- **security.sh** - Security groups with least-privilege access
+- **iam.sh** - IAM roles, policies, and instance profiles
+- **efs.sh** - Encrypted file systems with multi-AZ mount targets
+- **alb.sh** - Application Load Balancer and target groups
+- **cloudfront.sh** - CDN distribution management
 
-### Infrastructure Modules (`/lib/modules/infrastructure/`)
+**Key Features:**
+- Unified infrastructure provisioning
+- Consistent error handling across components
+- Resource registration for cleanup
+- CloudFormation integration support
 
-**vpc.sh**
-- Multi-AZ VPC creation
-- Public/private subnet management
-- Internet/NAT Gateway setup
+### Compute Module (`/lib/modules/compute/`)
 
-**security.sh**
-- Security group management
-- Least-privilege port access
-- Service-specific rules
+**Consolidated Components:**
+- **ami.sh** - AMI selection based on architecture and region
+- **spot_optimizer.sh** - Spot pricing analysis and optimization
+- **provisioner.sh** - Instance provisioning with retry logic
+- **autoscaling.sh** - Auto-scaling group management
+- **launch.sh** - Launch template creation and management
+- **lifecycle.sh** - Instance lifecycle management
+- **security.sh** - Compute-specific security configuration
 
-**iam.sh**
-- IAM roles and policies
-- Instance profiles
-- Service-linked roles
+**Key Features:**
+- Intelligent instance selection with fallback strategies
+- Cross-region failover capabilities
+- 70% cost savings through spot optimization
+- GPU instance support (T4, A10G)
+- Comprehensive error recovery
 
-**efs.sh**
-- Encrypted file system creation
-- Multi-AZ mount targets
-- Service-specific access points
+### Application Module (`/lib/modules/application/`)
 
-**alb.sh**
-- Application Load Balancer
-- Target group management
-- CloudFront integration
+**Consolidated Components:**
+- **base.sh** - Base application utilities and common functions
+- **docker_manager.sh** - Docker installation, NVIDIA runtime setup
+- **service_config.sh** - Docker Compose generation, resource allocation
+- **ai_services.sh** - AI stack deployment (Ollama, n8n, Qdrant, Crawl4AI)
+- **health_monitor.sh** - Service health checks and monitoring
 
-### Compute Modules (`/lib/modules/compute/`)
+**Key Features:**
+- Unified application deployment
+- GPU-optimized container configuration
+- Automated health monitoring
+- Service dependency management
+- Resource allocation optimization
 
-**provisioner.sh**
-- EC2 instance provisioning
-- Retry logic with exponential backoff
-- Cross-region failover
+### Deployment Module (`/lib/modules/deployment/`)
 
-**spot_optimizer.sh**
-- Spot pricing analysis
-- Instance type selection
-- Cost optimization strategies
+**Consolidated Components:**
+- **orchestrator.sh** - Main deployment workflow coordination
+- **state.sh** - Deployment state management and persistence
+- **rollback.sh** - Rollback mechanisms and recovery
+- **userdata.sh** - EC2 user data script generation
 
-### Application Modules (`/lib/modules/application/`)
+**Key Features:**
+- Stateful deployment tracking
+- Atomic rollback capabilities
+- Progress tracking and reporting
+- User data automation for EC2
 
-**docker_manager.sh**
-- Docker installation and setup
-- NVIDIA runtime configuration
-- Container orchestration
+### Monitoring Module (`/lib/modules/monitoring/`)
 
-**service_config.sh**
-- Docker Compose generation
-- Environment configuration
-- Resource allocation
+**Components:**
+- **health.sh** - Comprehensive health checks
+- **metrics.sh** - Performance metrics collection
 
-**ai_services.sh**
-- Ollama model deployment
-- n8n workflow setup
-- Qdrant vector database
-- Crawl4AI configuration
-
-**health_monitor.sh**
-- Service health checks
-- Performance monitoring
+**Key Features:**
+- Real-time health monitoring
+- CloudWatch integration
+- Custom metric collection
 - Alert management
 
-### Error Handling (`/lib/modules/errors/`)
+### Errors Module (`/lib/modules/errors/`)
 
-**error_types.sh**
-- Structured error definitions
-- Recovery strategies
-- Error categorization
+**Components:**
+- **error_types.sh** - Structured error definitions
+- **clear_messages.sh** - User-friendly error messages
+
+**Key Features:**
+- Categorized error types
+- Recovery strategy recommendations
+- Clear, actionable error messages
+- Context preservation
+
+### Cleanup Module (`/lib/modules/cleanup/`)
+
+**Component:**
+- **resources.sh** - Resource cleanup orchestration
+
+**Key Features:**
+- Safe resource deletion
+- Dependency-aware cleanup
+- Failed deployment recovery
+- Orphaned resource identification
 
 ## Design Patterns
 
@@ -152,13 +184,18 @@ wrap_error_context "vpc_creation" "stack=$STACK_NAME" \
     create_vpc_internal "$@"
 ```
 
-### 3. Bash Compatibility
+### 3. Bash Compatibility and Modernization
 
-Supports both bash 3.x and 4.x:
+Compatible with bash 3.x+ with automatic enhancements when bash 4.0+ is available:
 ```bash
-# Avoid bash 4.x only features
-declare -A array        # OK
-declare -g -A array     # Not OK (no -g in bash 3.x)
+# Modern bash patterns (auto-enabled when available)
+declare -A CONFIG_CACHE              # Associative arrays
+declare -n config_ref="CONFIG_CACHE" # Nameref variables
+config_ref["key"]="value"            # Enhanced array operations
+
+# Comprehensive error handling
+declare -A ERROR_REGISTRY
+ERROR_REGISTRY["EC2_INSUFFICIENT_CAPACITY"]="retry_with_fallback"
 ```
 
 ### 4. Resource Registry
@@ -352,7 +389,7 @@ Centralized logging:
 
 ```bash
 # Test without AWS
-./scripts/simple-demo.sh
+./archive/demos/simple-demo.sh
 
 # Validate modules
 ./tests/test-modular-v2.sh
@@ -375,7 +412,7 @@ Pipeline:
 ## Best Practices
 
 1. **Always use modules** - Don't add to monolithic scripts
-2. **Test locally first** - Use simple-demo.sh
+2. **Test locally first** - Use archive/demos/simple-demo.sh
 3. **Handle errors gracefully** - Use error_types.sh
 4. **Track resources** - Register for cleanup
 5. **Document changes** - Update CLAUDE.md

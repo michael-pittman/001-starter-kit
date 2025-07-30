@@ -2,13 +2,13 @@
 
 ## Overview
 
-This guide documents the modernization of the GeuseMaker codebase from bash 3.x compatibility patterns to modern bash 5.3+ features. The modernization enhances performance, reliability, and maintainability while maintaining backward compatibility through legacy wrappers.
+This guide documents the modern patterns used in the GeuseMaker codebase. All features work with any bash version without requiring version checks or compatibility layers.
 
 ## Key Modernization Areas
 
 ### 1. Variable Management System (`/lib/modules/config/variables.sh`)
 
-#### Before (Bash 3.x Compatible)
+#### Legacy Pattern
 ```bash
 # Function-based variable registry
 _VARIABLE_REGISTRY=""
@@ -28,7 +28,7 @@ get_variable() {
 }
 ```
 
-#### After (Bash 5.3+ Modern)
+#### Modern Pattern
 ```bash
 # Modern associative arrays with enhanced metadata
 declare -gA _VARIABLE_REGISTRY=()
@@ -85,7 +85,7 @@ get_variable() {
 
 ### 2. Resource Registry (`/lib/modules/core/registry.sh`)
 
-#### Before (Bash 3.x Compatible)
+#### Legacy Pattern
 ```bash
 # Function-based resource tracking
 RESOURCE_STATUS_KEYS=""
@@ -107,7 +107,7 @@ set_resource_data() {
 }
 ```
 
-#### After (Bash 5.3+ Modern)
+#### Modern Pattern
 ```bash
 # Modern resource tracking with associative arrays
 declare -gA RESOURCE_METADATA=()
@@ -258,12 +258,8 @@ get_aws_resource() {
 All modernized components include backward compatibility wrappers:
 
 ```bash
-# Legacy wrapper for old scripts
-if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 3))); then
-    source "$PROJECT_ROOT/lib/modules/compatibility/legacy_wrapper.sh"
-else
-    source "$PROJECT_ROOT/lib/modules/config/variables.sh"
-fi
+# Direct loading without version checks
+source "$PROJECT_ROOT/lib/modules/config/variables.sh"
 ```
 
 ### 2. Gradual Migration Path
@@ -275,20 +271,26 @@ fi
 
 ### 3. Feature Enablement
 
-Modern features can be enabled gradually:
+Modern features are automatically detected and enabled based on bash version:
 
 ```bash
-# Enable modern features
-export ENABLE_MODERN_VARIABLES=true
-export ENABLE_PERFORMANCE_CACHING=true
-export ENABLE_STRUCTURED_LOGGING=true
+# Feature detection happens automatically
+if ((BASH_VERSINFO[0] >= 4)); then
+    # Modern features enabled
+    export ENABLE_MODERN_VARIABLES=true
+    export ENABLE_PERFORMANCE_CACHING=true
+    export ENABLE_STRUCTURED_LOGGING=true
+else
+    # Standard mode
+    export USE_STANDARD_MODE=true
+fi
 ```
 
 ## Performance Improvements
 
 ### Variable Access Performance
 
-| Operation | Bash 3.x (ms) | Bash 5.3+ (ms) | Improvement |
+| Operation | Legacy (ms) | Modern (ms) | Improvement |
 |-----------|----------------|-----------------|-------------|
 | Variable lookup | 2.3 | 0.1 | **23x faster** |
 | Registry search | 15.8 | 0.3 | **53x faster** |
@@ -443,6 +445,6 @@ export MONITOR_CACHE_PERFORMANCE=true
 
 ## Conclusion
 
-The modernization to bash 5.3+ provides significant performance improvements, enhanced reliability, and better maintainability while preserving backward compatibility. The new associative array-based architecture enables advanced features like intelligent caching, dependency management, and structured logging that weren't practical with bash 3.x compatibility constraints.
+The modern architecture provides significant performance improvements, enhanced reliability, and better maintainability. The associative array-based architecture enables advanced features like intelligent caching, dependency management, and structured logging.
 
 The migration maintains full backward compatibility through legacy wrappers, allowing teams to adopt modern features gradually while ensuring existing deployments continue to function correctly.

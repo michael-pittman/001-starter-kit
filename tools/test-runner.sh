@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Comprehensive Test Runner
 # Runs all types of tests for the GeuseMaker
@@ -6,18 +6,46 @@
 
 set -euo pipefail
 
-# Source common functions
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
+
+# Source the errors module
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
+# Standard library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_DIR="$PROJECT_ROOT/lib"
 
-if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-fi
+# Load required libraries with error handling
+load_library() {
+    local library="$1"
+    local library_path="${LIB_DIR}/${library}"
+    
+    if [ ! -f "$library_path" ]; then
+        echo "ERROR: Required library not found: $library_path" >&2
+        exit 1
+    fi
+    
+    # shellcheck source=/dev/null
+    source "$library_path" || {
+        echo "ERROR: Failed to source library: $library_path" >&2
+        exit 1
+    }
+}
 
-if [ -f "$PROJECT_ROOT/lib/error-handling.sh" ]; then
-    source "$PROJECT_ROOT/lib/error-handling.sh"
-    init_error_handling "resilient"
-fi
+# Load common libraries
+load_library "aws-deployment-common.sh"
+load_library "error-handling.sh"
+
+# Initialize error handling
+init_error_handling "resilient"
 
 # =============================================================================
 # TEST CONFIGURATION
@@ -46,12 +74,13 @@ get_test_category_description() {
         "deployment") echo "$TEST_CATEGORIES_DEPLOYMENT" ;;
         "smoke") echo "$TEST_CATEGORIES_SMOKE" ;;
         "config") echo "Configuration management tests" ;;
+        "maintenance") echo "Maintenance suite functionality tests" ;;
         *) echo "Unknown test category" ;;
     esac
 }
 
 # Array of available test categories
-readonly AVAILABLE_TEST_CATEGORIES=("unit" "integration" "security" "performance" "deployment" "smoke" "config")
+readonly AVAILABLE_TEST_CATEGORIES=("unit" "integration" "security" "performance" "deployment" "smoke" "config" "maintenance")
 
 # =============================================================================
 # SETUP AND CLEANUP
@@ -373,7 +402,7 @@ run_performance_tests() {
     # Basic script performance tests
     info "Running script performance analysis..."
     
-    local scripts=("$PROJECT_ROOT/scripts/aws-deployment-unified.sh")
+    local scripts=("$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh" "$PROJECT_ROOT/scripts/aws-deployment-modular.sh")
     
     for script in "${scripts[@]}"; do
         if [ -f "$script" ]; then
@@ -405,7 +434,7 @@ run_deployment_tests() {
     # Test deployment script syntax and validation
     info "Testing deployment script validation..."
     
-    local deployment_script="$PROJECT_ROOT/scripts/aws-deployment-unified.sh"
+    local deployment_script="$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"
     
     if [ -f "$deployment_script" ]; then
         # Test script syntax
@@ -538,6 +567,80 @@ run_config_tests() {
     else
         log_warning "Configuration management library not found"
     fi
+    
+    return $exit_code
+}
+
+# =============================================================================
+# MAINTENANCE TESTS
+# =============================================================================
+
+run_maintenance_tests() {
+    log "Running maintenance suite tests..."
+    
+    local exit_code=0
+    
+    # Run maintenance suite unit tests
+    local maintenance_test="$PROJECT_ROOT/tests/test-maintenance-suite.sh"
+    if [ -f "$maintenance_test" ]; then
+        info "Running maintenance suite functionality tests..."
+        
+        if "$maintenance_test"; then
+            success "Maintenance suite tests passed"
+        else
+            log_error "Maintenance suite tests failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Maintenance suite test not found: $maintenance_test"
+    fi
+    
+    # Run maintenance integration tests
+    local maintenance_integration="$PROJECT_ROOT/tests/test-maintenance-integration.sh"
+    if [ -f "$maintenance_integration" ]; then
+        info "Running maintenance integration tests..."
+        
+        if "$maintenance_integration"; then
+            success "Maintenance integration tests passed"
+        else
+            log_error "Maintenance integration tests failed"
+            exit_code=1
+        fi
+    else
+        log_warning "Maintenance integration test not found: $maintenance_integration"
+    fi
+    
+    # Test wrapper scripts
+    info "Testing maintenance wrapper scripts..."
+    local wrapper_dir="$PROJECT_ROOT/scripts"
+    local wrapper_count=0
+    
+    for wrapper in "$wrapper_dir"/*-wrapper.sh; do
+        if [ -f "$wrapper" ]; then
+            ((wrapper_count++))
+            local wrapper_name=$(basename "$wrapper")
+            
+            # Test wrapper syntax
+            if bash -n "$wrapper"; then
+                success "Wrapper syntax valid: $wrapper_name"
+            else
+                log_error "Wrapper syntax error: $wrapper_name"
+                exit_code=1
+            fi
+            
+            # Test wrapper help
+            if timeout 10s "$wrapper" --help >/dev/null 2>&1; then
+                success "Wrapper help works: $wrapper_name"
+            else
+                log_warning "Wrapper help timeout: $wrapper_name"
+            fi
+        fi
+    done
+    
+    info "Tested $wrapper_count wrapper scripts"
+    
+    # Update results
+    update_test_results "maintenance" "$exit_code"
     
     return $exit_code
 }
@@ -876,6 +979,16 @@ main() {
                 ;;
             "smoke")
                 if ! run_smoke_tests; then
+                    overall_exit_code=1
+                fi
+                ;;
+            "config")
+                if ! run_config_tests; then
+                    overall_exit_code=1
+                fi
+                ;;
+            "maintenance")
+                if ! run_maintenance_tests; then
                     overall_exit_code=1
                 fi
                 ;;

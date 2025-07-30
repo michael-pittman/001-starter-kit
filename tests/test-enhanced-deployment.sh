@@ -4,16 +4,28 @@
 # Validates the enhanced deployment functionality with ALB/CloudFront
 # =============================================================================
 
-set -euo pipefail
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
 
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Source test framework
-source "$PROJECT_ROOT/tests/lib/shell-test-framework.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Test configuration
+# Initialize script with required modules
+initialize_script "test-enhanced-deployment.sh" "core/variables" "core/logging"
+
 TEST_STACK_NAME="test-enhanced-$(date +%s)"
 ENHANCED_SCRIPT="$PROJECT_ROOT/scripts/deploy-spot-cdn-enhanced.sh"
 MODULAR_SCRIPT="$PROJECT_ROOT/scripts/aws-deployment-modular.sh"

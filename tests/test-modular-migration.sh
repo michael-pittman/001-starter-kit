@@ -1,14 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Modular Migration Integration Test
 # Tests the migrated functions and compatibility layer
 # =============================================================================
 
-set -euo pipefail
 
-# Script configuration
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-modular-migration.sh" \
+    "core/variables" \
+    "core/logging" \
+    "core/registry" \
+    "core/errors"
+
 LIB_DIR="$PROJECT_ROOT/lib"
 
 # Test configuration
@@ -70,9 +80,8 @@ setup_test_environment() {
     export INSTANCE_TYPE="t3.medium"
     export ENVIRONMENT="development"
     
-    # Source the compatibility layer
-    if [ -f "$LIB_DIR/modules/compatibility/legacy_wrapper.sh" ]; then
-        source "$LIB_DIR/modules/compatibility/legacy_wrapper.sh"
+    # Verify compatibility layer was loaded
+    if type -t create_standard_iam_role >/dev/null 2>&1; then
         echo "✅ Compatibility layer loaded successfully"
     else
         echo "❌ Failed to load compatibility layer"

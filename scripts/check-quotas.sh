@@ -1,41 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Quick quota and pricing check script
 # Usage: ./scripts/check-quotas.sh [instance-type] [region]
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "check-quotas.sh" "core/variables" "core/logging"
 
 # Configuration
 INSTANCE_TYPE="${1:-g4dn.xlarge}"
 AWS_REGION="${2:-us-east-1}"
-
-log() {
-    echo -e "${BLUE}[$(date +'%H:%M:%S')] $1${NC}"
-}
-
-error() {
-    echo -e "${RED}[ERROR] $1${NC}"
-}
-
-success() {
-    echo -e "${GREEN}[SUCCESS] $1${NC}"
-}
-
-warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
-}
-
-info() {
-    echo -e "${CYAN}[INFO] $1${NC}"
-}
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${GREEN}  Quick AWS Quota & Pricing Check      ${NC}"

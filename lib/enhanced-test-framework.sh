@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Enhanced Test Framework Library
-# Modern test framework using bash 5.3.3+ associative arrays
-# Requires: bash 5.3.3+
+# Modern test framework using associative arrays
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "enhanced-test-framework.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # Load associative array utilities
-source "$SCRIPT_DIR/associative-arrays.sh"
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/associative-arrays.sh"
 
 # Prevent multiple sourcing
 if [[ "${ENHANCED_TEST_FRAMEWORK_LIB_LOADED:-}" == "true" ]]; then
@@ -33,18 +26,18 @@ readonly ENHANCED_TEST_FRAMEWORK_VERSION="1.0.0"
 # =============================================================================
 
 # Test results and metrics
-declare -gA TEST_RESULTS            # Test execution results
-declare -gA TEST_METRICS            # Performance and timing metrics
-declare -gA TEST_CATEGORIES         # Test category definitions and metadata
-declare -gA TEST_DEPENDENCIES       # Test dependency mapping
-declare -gA TEST_CONFIGURATION      # Test framework configuration
-declare -gA TEST_FIXTURES           # Shared test fixtures and setup data
-declare -gA TEST_ASSERTIONS         # Custom assertion results
-declare -gA TEST_COVERAGE           # Code coverage tracking
+declare -A TEST_RESULTS            # Test execution results
+declare -A TEST_METRICS            # Performance and timing metrics
+declare -A TEST_CATEGORIES         # Test category definitions and metadata
+declare -A TEST_DEPENDENCIES       # Test dependency mapping
+declare -A TEST_CONFIGURATION      # Test framework configuration
+declare -A TEST_FIXTURES           # Shared test fixtures and setup data
+declare -A TEST_ASSERTIONS         # Custom assertion results
+declare -A TEST_COVERAGE           # Code coverage tracking
 
 # Test execution state
-declare -gA TEST_EXECUTION_STATE
-declare -gA TEST_SUITE_METADATA
+declare -A TEST_EXECUTION_STATE
+declare -A TEST_SUITE_METADATA
 
 # =============================================================================
 # TEST FRAMEWORK INITIALIZATION

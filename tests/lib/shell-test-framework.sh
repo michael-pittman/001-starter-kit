@@ -1,34 +1,33 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Modern Shell Unit Testing Framework
-# Enhanced testing framework leveraging bash 5.3+ features
-# Features: associative arrays, parallel execution, advanced error handling
+# Enhanced testing framework compatible with bash 3.x+
+# Features: compatibility layer for associative arrays, parallel execution, advanced error handling
 # =============================================================================
 
 set -euo pipefail
 
-# Ensure bash 5.0+ for modern features
-if (( BASH_VERSINFO[0] < 5 )); then
-    echo "Error: This framework requires bash 5.0 or later. Current: ${BASH_VERSION}" >&2
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "shell-test-framework.sh" "core/variables" "core/logging"
+
+# Load associative arrays compatibility layer
+source "$PROJECT_ROOT/lib/associative-arrays.sh" || {
+    error "Failed to load compatibility layer"
     exit 1
-fi
+}
 
 # =============================================================================
 # FRAMEWORK GLOBALS AND CONFIGURATION
 # =============================================================================
 
-# Color codes for output
-declare -r TEST_RED='\033[0;31m'
-declare -r TEST_GREEN='\033[0;32m'
-declare -r TEST_YELLOW='\033[0;33m'
-declare -r TEST_BLUE='\033[0;34m'
-declare -r TEST_CYAN='\033[0;36m'
-declare -r TEST_BOLD='\033[1m'
-declare -r TEST_NC='\033[0m'
-declare -r TEST_DIM='\033[2m'
-declare -r TEST_MAGENTA='\033[0;35m'
-
-# Test state using associative arrays (bash 5.3+ feature)
+# Test state using associative arrays with compatibility layer
 declare -A TEST_RESULTS=()
 declare -A TEST_METADATA=()
 declare -A TEST_TIMING=()
@@ -87,9 +86,9 @@ test_init() {
     # Create test output directory
     mkdir -p "$(dirname "$TEST_OUTPUT_FILE")"
     
-    echo -e "${TEST_BLUE}${TEST_BOLD}=== Shell Unit Test Framework ===${TEST_NC}"
-    echo -e "${TEST_CYAN}Test file: $test_file${TEST_NC}"
-    echo -e "${TEST_CYAN}Started at: $(date)${TEST_NC}"
+    echo -e "${BLUE}${BOLD}=== Shell Unit Test Framework ===${NC}"
+    echo -e "${CYAN}Test file: $test_file${NC}"
+    echo -e "${CYAN}Started at: $(date)${NC}"
     echo ""
 }
 
@@ -99,13 +98,13 @@ test_cleanup() {
     local duration=$((end_time - TEST_START_TIME))
     
     echo ""
-    echo -e "${TEST_BLUE}${TEST_BOLD}=== Test Results Summary ===${TEST_NC}"
-    echo -e "${TEST_CYAN}Test file: $CURRENT_TEST_FILE${TEST_NC}"
-    echo -e "${TEST_CYAN}Duration: ${duration}s${TEST_NC}"
-    echo -e "${TEST_GREEN}Passed: $TEST_PASSED${TEST_NC}"
-    echo -e "${TEST_RED}Failed: $TEST_FAILED${TEST_NC}"
-    echo -e "${TEST_YELLOW}Skipped: $TEST_SKIPPED${TEST_NC}"
-    echo -e "${TEST_CYAN}Total: $TEST_TOTAL${TEST_NC}"
+    echo -e "${BLUE}${BOLD}=== Test Results Summary ===${NC}"
+    echo -e "${CYAN}Test file: $CURRENT_TEST_FILE${NC}"
+    echo -e "${CYAN}Duration: ${duration}s${NC}"
+    echo -e "${GREEN}Passed: $TEST_PASSED${NC}"
+    echo -e "${RED}Failed: $TEST_FAILED${NC}"
+    echo -e "${YELLOW}Skipped: $TEST_SKIPPED${NC}"
+    echo -e "${CYAN}Total: $TEST_TOTAL${NC}"
     
     # Clean up temporary files
     if [[ -f "$TEST_OUTPUT_FILE" ]]; then
@@ -137,12 +136,12 @@ test_start() {
     TEST_METADATA["${test_name}_category"]="$CURRENT_TEST_CATEGORY"
     
     if [[ "$TEST_VERBOSE" == "true" ]]; then
-        echo -e "${TEST_CYAN}${TEST_BOLD}▶${TEST_NC} ${TEST_CYAN}Running: $test_name${TEST_NC}"
+        echo -e "${CYAN}${BOLD}▶${NC} ${CYAN}Running: $test_name${NC}"
         if [[ -n "$test_description" && "$test_description" != "No description provided" ]]; then
-            echo -e "${TEST_DIM}  Description: $test_description${TEST_NC}"
+            echo -e "${DIM}  Description: $test_description${NC}"
         fi
         if [[ -n "$test_tags" ]]; then
-            echo -e "${TEST_DIM}  Tags: $test_tags${TEST_NC}"
+            echo -e "${DIM}  Tags: $test_tags${NC}"
         fi
     fi
 }
@@ -165,13 +164,13 @@ test_pass() {
     TEST_METADATA["${CURRENT_TEST_NAME}_message"]="$message"
     
     if [[ "$TEST_BENCHMARK_ENABLED" == "true" ]]; then
-        echo -e "${TEST_GREEN}✓${TEST_NC} $CURRENT_TEST_NAME ${TEST_DIM}(${duration_ms}ms)${TEST_NC}"
+        echo -e "${GREEN}✓${NC} $CURRENT_TEST_NAME ${DIM}(${duration_ms}ms)${NC}"
     else
-        echo -e "${TEST_GREEN}✓${TEST_NC} $CURRENT_TEST_NAME"
+        echo -e "${GREEN}✓${NC} $CURRENT_TEST_NAME"
     fi
     
     if [[ "$TEST_VERBOSE" == "true" && "$message" != "Test passed" ]]; then
-        echo -e "${TEST_DIM}  → $message${TEST_NC}"
+        echo -e "${DIM}  → $message${NC}"
     fi
 }
 
@@ -199,15 +198,15 @@ test_fail() {
         TEST_METADATA["${CURRENT_TEST_NAME}_context"]="$context"
     fi
     
-    echo -e "${TEST_RED}✗${TEST_NC} $CURRENT_TEST_NAME ${TEST_DIM}(${duration_ms}ms)${TEST_NC}"
-    echo -e "${TEST_RED}  ✗ Error: $message${TEST_NC}"
+    echo -e "${RED}✗${NC} $CURRENT_TEST_NAME ${DIM}(${duration_ms}ms)${NC}"
+    echo -e "${RED}  ✗ Error: $message${NC}"
     
     if [[ -n "$context" ]]; then
-        echo -e "${TEST_DIM}  Context: $context${TEST_NC}"
+        echo -e "${DIM}  Context: $context${NC}"
     fi
     
     if [[ "$TEST_STOP_ON_FAILURE" == "true" ]]; then
-        echo -e "${TEST_RED}${TEST_BOLD}Stopping on failure as requested${TEST_NC}"
+        echo -e "${RED}${BOLD}Stopping on failure as requested${NC}"
         test_cleanup
         exit 1
     fi
@@ -226,10 +225,10 @@ test_skip() {
     TEST_METADATA["${CURRENT_TEST_NAME}_skip_reason"]="$reason"
     TEST_METADATA["${CURRENT_TEST_NAME}_skip_category"]="$skip_category"
     
-    echo -e "${TEST_YELLOW}○${TEST_NC} $CURRENT_TEST_NAME ${TEST_YELLOW}(skipped: $reason)${TEST_NC}"
+    echo -e "${YELLOW}○${NC} $CURRENT_TEST_NAME ${YELLOW}(skipped: $reason)${NC}"
     
     if [[ "$TEST_VERBOSE" == "true" ]]; then
-        echo -e "${TEST_DIM}  Category: $skip_category${TEST_NC}"
+        echo -e "${DIM}  Category: $skip_category${NC}"
     fi
 }
 
@@ -243,7 +242,7 @@ test_warn() {
     TEST_METADATA["${CURRENT_TEST_NAME}_warning"]="$message"
     TEST_METADATA["${CURRENT_TEST_NAME}_warning_code"]="$warning_code"
     
-    echo -e "${TEST_YELLOW}⚠${TEST_NC} $CURRENT_TEST_NAME ${TEST_YELLOW}(warning: $message)${TEST_NC}"
+    echo -e "${YELLOW}⚠${NC} $CURRENT_TEST_NAME ${YELLOW}(warning: $message)${NC}"
 }
 
 # =============================================================================
@@ -403,6 +402,46 @@ assert_output_contains() {
     fi
 }
 
+# Assert numeric comparison (e.g., assert_numeric_comparison "5" "-gt" "3" "5 should be greater than 3")
+assert_numeric_comparison() {
+    local value1="$1"
+    local operator="$2"
+    local value2="$3"
+    local message="${4:-Numeric comparison should be true}"
+    
+    # Validate operator
+    case "$operator" in
+        "-eq"|"-ne"|"-lt"|"-le"|"-gt"|"-ge")
+            ;;
+        *)
+            test_fail "Invalid numeric comparison operator: '$operator'. Valid operators: -eq, -ne, -lt, -le, -gt, -ge"
+            return 1
+            ;;
+    esac
+    
+    # Perform numeric comparison
+    case "$operator" in
+        "-eq")
+            if (( value1 == value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+        "-ne")
+            if (( value1 != value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+        "-lt")
+            if (( value1 < value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+        "-le")
+            if (( value1 <= value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+        "-gt")
+            if (( value1 > value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+        "-ge")
+            if (( value1 >= value2 )); then test_pass; else test_fail "$message. Comparison: $value1 $operator $value2"; fi
+            ;;
+    esac
+}
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
@@ -512,7 +551,7 @@ run_test_file() {
     local test_file="$1"
     
     if [[ ! -f "$test_file" ]]; then
-        echo -e "${TEST_RED}Error: Test file not found: $test_file${TEST_NC}"
+        echo -e "${RED}Error: Test file not found: $test_file${NC}"
         return 1
     fi
     
@@ -619,7 +658,7 @@ EOF
 </html>
 EOF
     
-    echo -e "${TEST_CYAN}Coverage report generated: $coverage_file${TEST_NC}"
+    echo -e "${CYAN}Coverage report generated: $coverage_file${NC}"
 }
 
 # =============================================================================
@@ -673,12 +712,12 @@ benchmark_test() {
     TEST_METADATA["${test_function}_benchmark_max"]="$max_ms"
     TEST_METADATA["${test_function}_benchmark_iterations"]="$iterations"
     
-    echo -e "${TEST_MAGENTA}Benchmark: $test_function - Avg: ${avg_ms}ms, Min: ${min_ms}ms, Max: ${max_ms}ms (${iterations} runs)${TEST_NC}"
+    echo -e "${MAGENTA}Benchmark: $test_function - Avg: ${avg_ms}ms, Min: ${min_ms}ms, Max: ${max_ms}ms (${iterations} runs)${NC}"
 }
 
 # Display performance statistics
 display_performance_stats() {
-    echo -e "${TEST_BLUE}${TEST_BOLD}=== Performance Statistics ===${TEST_NC}"
+    echo -e "${BLUE}${BOLD}=== Performance Statistics ===${NC}"
     
     local total_benchmark_time=0
     local benchmark_count=0
@@ -691,7 +730,7 @@ display_performance_stats() {
             local max_time=${TEST_METADATA["${test_name}_benchmark_max"]:-0}
             local iterations=${TEST_METADATA["${test_name}_benchmark_iterations"]:-1}
             
-            echo -e "${TEST_CYAN}$test_name: ${avg_time}ms avg (${min_time}-${max_time}ms, ${iterations} runs)${TEST_NC}"
+            echo -e "${CYAN}$test_name: ${avg_time}ms avg (${min_time}-${max_time}ms, ${iterations} runs)${NC}"
             
             total_benchmark_time=$((total_benchmark_time + avg_time))
             benchmark_count=$((benchmark_count + 1))
@@ -700,7 +739,7 @@ display_performance_stats() {
     
     if [[ $benchmark_count -gt 0 ]]; then
         local avg_benchmark_time=$((total_benchmark_time / benchmark_count))
-        echo -e "${TEST_BLUE}Overall average: ${avg_benchmark_time}ms across $benchmark_count tests${TEST_NC}"
+        echo -e "${BLUE}Overall average: ${avg_benchmark_time}ms across $benchmark_count tests${NC}"
     fi
 }
 
@@ -829,7 +868,7 @@ EOF
 </html>
 EOF
     
-    echo -e "${TEST_CYAN}Enhanced report generated: $report_file${TEST_NC}"
+    echo -e "${CYAN}Enhanced report generated: $report_file${NC}"
 }
 
 # Save failure artifact for debugging
@@ -974,7 +1013,7 @@ else
     # Framework is being executed directly - show help
     echo "Modern Shell Testing Framework v2.0"
     echo "====================================="
-    echo "This framework provides enhanced testing capabilities for bash 5.3+"
+    echo "This framework provides enhanced testing capabilities for bash"
     echo ""
     echo "Features:"
     echo "  • Associative arrays for comprehensive test tracking"

@@ -1,18 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Dependency Installation Script
-# Installs required tools and dependencies for GeuseMaker
+# Dependency Installation Tool
+# Installs and configures all required dependencies
 # =============================================================================
 
 set -euo pipefail
 
-# Source common functions
+# Standard library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-fi
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
 
 # =============================================================================
 # DEPENDENCY DEFINITIONS (bash 3.x compatible - no associative arrays)

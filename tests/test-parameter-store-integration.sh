@@ -1,12 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Parameter Store Integration Test Suite
 # Tests AWS Parameter Store integration with fallback mechanisms
 # =============================================================================
 
-set -euo pipefail
 
-# Test configuration
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-parameter-store-integration.sh" "core/variables" "core/logging"
+
 readonly TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
 readonly VARIABLE_MANAGEMENT_LIB="$PROJECT_ROOT/lib/variable-management.sh"

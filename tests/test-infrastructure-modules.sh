@@ -1,17 +1,30 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Infrastructure Modules Test Suite
 # Comprehensive testing for VPC, Security, IAM, EFS, and ALB modules
 # =============================================================================
 
-set -euo pipefail
 
-# =============================================================================
-# TEST SETUP
-# =============================================================================
-
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-infrastructure-modules.sh" \
+    "core/variables" \
+    "core/logging" \
+    "core/registry" \
+    "core/errors" \
+    "config/variables" \
+    "infrastructure/vpc" \
+    "infrastructure/security" \
+    "infrastructure/iam" \
+    "infrastructure/efs" \
+    "infrastructure/alb"
+
 TEST_RESULTS_DIR="$PROJECT_ROOT/test-reports"
 TEST_LOG_FILE="$TEST_RESULTS_DIR/infrastructure-modules-test.log"
 
@@ -99,11 +112,6 @@ run_test() {
 setup_test_environment() {
     test_info "Setting up test environment"
     
-    # Source required modules
-    source "$PROJECT_ROOT/lib/modules/config/variables.sh"
-    source "$PROJECT_ROOT/lib/modules/core/registry.sh"
-    source "$PROJECT_ROOT/lib/modules/core/errors.sh"
-    
     # Set test variables
     set_variable "STACK_NAME" "$TEST_STACK_NAME"
     set_variable "AWS_REGION" "$TEST_REGION"
@@ -140,43 +148,43 @@ cleanup_test_environment() {
 test_module_loading() {
     local all_modules_loaded=true
     
-    # Test VPC module loading
-    if source "$PROJECT_ROOT/lib/modules/infrastructure/vpc.sh" 2>/dev/null; then
+    # Test VPC module loading by checking key functions
+    if type -t create_vpc >/dev/null 2>&1; then
         test_info "VPC module loaded successfully"
     else
-        test_fail "VPC module loading" "Failed to source vpc.sh"
+        test_fail "VPC module loading" "VPC functions not available"
         all_modules_loaded=false
     fi
     
     # Test Security module loading
-    if source "$PROJECT_ROOT/lib/modules/infrastructure/security.sh" 2>/dev/null; then
+    if type -t create_security_group >/dev/null 2>&1; then
         test_info "Security module loaded successfully"
     else
-        test_fail "Security module loading" "Failed to source security.sh"
+        test_fail "Security module loading" "Security functions not available"
         all_modules_loaded=false
     fi
     
     # Test IAM module loading
-    if source "$PROJECT_ROOT/lib/modules/infrastructure/iam.sh" 2>/dev/null; then
+    if type -t create_ec2_iam_role >/dev/null 2>&1; then
         test_info "IAM module loaded successfully"
     else
-        test_fail "IAM module loading" "Failed to source iam.sh"
+        test_fail "IAM module loading" "IAM functions not available"
         all_modules_loaded=false
     fi
     
     # Test EFS module loading
-    if source "$PROJECT_ROOT/lib/modules/infrastructure/efs.sh" 2>/dev/null; then
+    if type -t create_efs_file_system >/dev/null 2>&1; then
         test_info "EFS module loaded successfully"
     else
-        test_fail "EFS module loading" "Failed to source efs.sh"
+        test_fail "EFS module loading" "EFS functions not available"
         all_modules_loaded=false
     fi
     
     # Test ALB module loading
-    if source "$PROJECT_ROOT/lib/modules/infrastructure/alb.sh" 2>/dev/null; then
+    if type -t create_application_load_balancer >/dev/null 2>&1; then
         test_info "ALB module loaded successfully"
     else
-        test_fail "ALB module loading" "Failed to source alb.sh"
+        test_fail "ALB module loading" "ALB functions not available"
         all_modules_loaded=false
     fi
     

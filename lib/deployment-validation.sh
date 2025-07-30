@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 #
-# Comprehensive Deployment Validation Library
-# Provides dependency checking, AWS validation, and health monitoring
+# Deployment Validation Library
+# Provides comprehensive validation for deployment prerequisites and configurations
 #
-# Dependencies: aws-cli, jq, curl
-# Required Bash Version: 5.3+
+# Dependencies: aws-cli, jq
+# Compatible with bash 3.x+
 #
 
 set -euo pipefail
 
 # Source required libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/modules/core/bash_version.sh"
-source "${SCRIPT_DIR}/modules/core/errors.sh"
-source "${SCRIPT_DIR}/modules/core/variables.sh"
-source "${SCRIPT_DIR}/aws-cli-v2.sh"
+# Note: These libraries expect to be called from scripts that have already set PROJECT_ROOT
+if [[ -z "${PROJECT_ROOT:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+# Source using library loader pattern
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Load required modules through the library system
+load_module "core/errors"
+load_module "core/variables"
 
 # Global validation state
 declare -gA VALIDATION_RESULTS
@@ -25,6 +32,7 @@ declare -gA HEALTH_CHECK_RESULTS
 # Validation constants
 declare -gr MIN_DISK_SPACE_GB=20
 declare -gr MIN_MEMORY_MB=2048
+declare -gr MIN_MEMORY_MB_DEV=512  # Lower requirement for development environments
 declare -gr AWS_CLI_MIN_VERSION="2.0.0"
 declare -gr JQ_MIN_VERSION="1.5"
 declare -gr DOCKER_MIN_VERSION="20.10.0"
@@ -257,7 +265,7 @@ check_aws_permissions() {
         # Try to perform a dry-run or describe operation
         case "$action" in
             "ec2:DescribeInstances")
-                if aws ec2 describe-instances --max-results 1 &>/dev/null; then
+                if aws ec2 describe-instances --max-items 1 &>/dev/null; then
                     echo "✓"
                 else
                     echo "✗"
@@ -265,7 +273,7 @@ check_aws_permissions() {
                 fi
                 ;;
             "vpc:DescribeVpcs")
-                if aws ec2 describe-vpcs --max-results 1 &>/dev/null; then
+                if aws ec2 describe-vpcs --max-items 1 &>/dev/null; then
                     echo "✓"
                 else
                     echo "✗"
@@ -273,7 +281,7 @@ check_aws_permissions() {
                 fi
                 ;;
             "ssm:GetParameter")
-                if aws ssm describe-parameters --max-results 1 &>/dev/null; then
+                if aws ssm describe-parameters --max-items 1 &>/dev/null; then
                     echo "✓"
                 else
                     echo "✗"
@@ -362,6 +370,17 @@ check_aws_quotas() {
 check_system_resources() {
     echo -e "\n=== Checking System Resources ==="
     
+    # Check if in development mode
+    local is_development=false
+    if [[ "${DEPLOYMENT_MODE:-}" == "development" ]] || \
+       [[ "${ENV:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "dev" ]] || \
+       [[ "${DEVELOPMENT_MODE:-}" == "true" ]]; then
+        is_development=true
+        echo "ℹ️  Running in development mode - warnings only for low resources"
+    fi
+    
     # Check disk space
     echo -n "Checking disk space... "
     local available_space_gb
@@ -376,13 +395,26 @@ check_system_resources() {
         echo "✓ (${available_space_gb}GB available)"
         VALIDATION_RESULTS[disk_space]="passed"
     else
-        echo "✗ (${available_space_gb}GB available, need ${MIN_DISK_SPACE_GB}GB)"
-        VALIDATION_RESULTS[disk_space]="failed"
+        if [[ "$is_development" == "true" ]]; then
+            echo "⚠️  WARNING: Low disk space (${available_space_gb}GB available, recommend ${MIN_DISK_SPACE_GB}GB)"
+            VALIDATION_RESULTS[disk_space]="passed"  # Pass with warning in dev mode
+        else
+            echo "✗ (${available_space_gb}GB available, need ${MIN_DISK_SPACE_GB}GB)"
+            VALIDATION_RESULTS[disk_space]="failed"
+        fi
     fi
     
     # Check memory
     echo -n "Checking memory... "
     local available_memory_mb
+    
+    # Set memory requirement based on deployment mode
+    local required_memory_mb
+    if [[ "$is_development" == "true" ]]; then
+        required_memory_mb=$MIN_MEMORY_MB_DEV  # 512MB for development
+    else
+        required_memory_mb=$MIN_MEMORY_MB  # 2048MB for production
+    fi
     
     if [[ "$OSTYPE" == "darwin"* ]]; then
         available_memory_mb=$(vm_stat | grep "Pages free" | awk '{print $3}' | tr -d '.' | awk '{print int($1*4096/1024/1024)}')
@@ -390,20 +422,76 @@ check_system_resources() {
         available_memory_mb=$(free -m | awk 'NR==2 {print $7}')
     fi
     
-    if [[ $available_memory_mb -ge $MIN_MEMORY_MB ]]; then
-        echo "✓ (${available_memory_mb}MB available)"
+    if [[ $available_memory_mb -ge $required_memory_mb ]]; then
+        echo "✓ (${available_memory_mb}MB available, required: ${required_memory_mb}MB)"
         VALIDATION_RESULTS[memory]="passed"
     else
-        echo "✗ (${available_memory_mb}MB available, need ${MIN_MEMORY_MB}MB)"
-        VALIDATION_RESULTS[memory]="failed"
+        if [[ "$is_development" == "true" ]]; then
+            echo "⚠️  WARNING: Low memory (${available_memory_mb}MB available, recommend ${required_memory_mb}MB)"
+            VALIDATION_RESULTS[memory]="passed"  # Pass with warning in dev mode
+        else
+            echo "✗ (${available_memory_mb}MB available, need ${required_memory_mb}MB)"
+            VALIDATION_RESULTS[memory]="failed"
+        fi
+    fi
+    
+    # Always return 0 in development mode
+    if [[ "$is_development" == "true" ]]; then
+        return 0
     fi
     
     return 0
 }
 
+# Display network troubleshooting tips
+show_network_troubleshooting_tips() {
+    echo -e "\n💡 Network Troubleshooting Tips:"
+    echo "  1. Check your internet connection:"
+    echo "     - Try: ping -c 1 google.com"
+    echo "     - Try: curl -I https://www.google.com"
+    echo "  2. Check DNS resolution:"
+    echo "     - Try: nslookup aws.amazon.com"
+    echo "     - Try: dig github.com"
+    echo "  3. Check firewall/proxy settings:"
+    echo "     - Corporate networks may block port 443"
+    echo "     - Check HTTP(S)_PROXY environment variables"
+    echo "  4. For development without internet:"
+    echo "     - Set: export SKIP_NETWORK_CHECK=true"
+    echo "     - Use local Docker registry if available"
+    echo "  5. Common fixes:"
+    echo "     - Restart network service: sudo systemctl restart network"
+    echo "     - Reset DNS: sudo systemctl restart systemd-resolved"
+    echo "     - Check /etc/resolv.conf for valid nameservers"
+}
+
 # Check network connectivity
 check_network_connectivity() {
     echo -e "\n=== Checking Network Connectivity ==="
+    
+    # Check if in development mode
+    local is_development=false
+    local is_production=true
+    if [[ "${DEPLOYMENT_MODE:-}" == "development" ]] || \
+       [[ "${ENV:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "dev" ]] || \
+       [[ "${DEVELOPMENT_MODE:-}" == "true" ]]; then
+        is_development=true
+        is_production=false
+    fi
+    
+    # Check if skip network check is explicitly set
+    if [[ "${SKIP_NETWORK_CHECK:-}" == "true" ]] || [[ "${SKIP_NETWORK_VALIDATION:-}" == "true" ]]; then
+        echo "ℹ️  Network checks explicitly skipped"
+        VALIDATION_RESULTS[network]="passed"
+        echo "✓ Network checks skipped (SKIP_NETWORK_CHECK=true)"
+        return 0
+    fi
+    
+    if [[ "$is_development" == "true" ]]; then
+        echo "ℹ️  Running in development mode - network checks are optional"
+        echo "  Network failures will be treated as warnings only"
+    fi
     
     local -a endpoints=(
         "aws.amazon.com:443"
@@ -412,29 +500,105 @@ check_network_connectivity() {
     )
     
     local -i errors=0
+    local -i successful_endpoints=0
+    local -i total_endpoints=${#endpoints[@]}
+    
+    # Enhanced retry configuration
+    local -i retries=3
+    local retry_delay=2
+    local -i max_retry_delay=10
+    
+    # Allow customization via environment variables
+    retries=${NETWORK_CHECK_RETRIES:-3}
+    retry_delay=${NETWORK_CHECK_RETRY_DELAY:-2}
     
     for endpoint in "${endpoints[@]}"; do
         local host="${endpoint%:*}"
         local port="${endpoint#*:}"
+        local success=false
+        local current_delay=$retry_delay
         
         echo -n "Checking connectivity to $host... "
         
-        if timeout 5 bash -c "echo >/dev/tcp/$host/$port" 2>/dev/null; then
+        # Enhanced retry logic with exponential backoff for temporary network issues
+        for ((attempt=1; attempt<=retries; attempt++)); do
+            if timeout 5 bash -c "echo >/dev/tcp/$host/$port" 2>/dev/null; then
+                success=true
+                ((successful_endpoints++))
+                break
+            elif [[ $attempt -lt $retries ]]; then
+                echo -n "(retry $attempt in ${current_delay}s) "
+                sleep $current_delay
+                # Exponential backoff with max delay
+                current_delay=$((current_delay * 2))
+                [[ $current_delay -gt $max_retry_delay ]] && current_delay=$max_retry_delay
+            fi
+        done
+        
+        if [[ "$success" == "true" ]]; then
             echo "✓"
         else
-            echo "✗"
-            ((errors++))
+            if [[ "$is_development" == "true" ]]; then
+                echo "⚠️  WARNING (development mode - continuing anyway)"
+            else
+                echo "✗"
+                ((errors++))
+            fi
         fi
     done
     
-    if [[ $errors -eq 0 ]]; then
+    # Enhanced result handling with partial connectivity support
+    if [[ $successful_endpoints -eq $total_endpoints ]]; then
+        # All endpoints reachable
         VALIDATION_RESULTS[network]="passed"
-        echo -e "\n✓ Network connectivity verified"
+        echo -e "\n✓ Network connectivity verified (${successful_endpoints}/${total_endpoints} endpoints reachable)"
         return 0
+    elif [[ $successful_endpoints -gt 0 ]]; then
+        # Partial connectivity
+        if [[ "$is_development" == "true" ]]; then
+            VALIDATION_RESULTS[network]="passed"
+            echo -e "\n⚠️  WARNING: Partial network connectivity (${successful_endpoints}/${total_endpoints} endpoints reachable)"
+            echo "  This is acceptable for development, but may cause issues with:"
+            echo "  - Docker image pulls (if registry.docker.io is unreachable)"
+            echo "  - AWS API calls (if aws.amazon.com is unreachable)"
+            echo "  - Git operations (if github.com is unreachable)"
+            echo "  To skip network checks: export SKIP_NETWORK_CHECK=true"
+            return 0
+        else
+            VALIDATION_RESULTS[network]="failed"
+            echo -e "\n✗ Partial network connectivity detected (${successful_endpoints}/${total_endpoints} endpoints reachable)"
+            echo "  Full network connectivity is required for production deployments."
+            echo "  To proceed in development mode: export ENVIRONMENT=development"
+            show_network_troubleshooting_tips
+            return 1
+        fi
     else
-        VALIDATION_RESULTS[network]="failed"
-        echo -e "\n✗ Network connectivity issues detected"
-        return 1
+        # No connectivity
+        if [[ "$is_development" == "true" ]]; then
+            VALIDATION_RESULTS[network]="passed"
+            echo -e "\n⚠️  WARNING: No network connectivity detected"
+            echo "  Development mode allows offline work, but you will experience:"
+            echo "  - Cannot pull Docker images (use local registry or pre-built images)"
+            echo "  - Cannot access AWS services (use LocalStack or offline mode)"
+            echo "  - Cannot clone repositories (work with existing code only)"
+            echo "\n  For offline development:"
+            echo "  1. Pre-pull all required Docker images"
+            echo "  2. Use local development tools (LocalStack, etc.)"
+            echo "  3. Set: export SKIP_NETWORK_CHECK=true"
+            echo "\n  If this is unexpected, check your network connection."
+            return 0
+        else
+            VALIDATION_RESULTS[network]="failed"
+            echo -e "\n✗ No network connectivity detected"
+            echo "  Network connectivity is required for production deployments."
+            echo "  Please check your internet connection and firewall settings."
+            echo "\n  Options:"
+            echo "  1. Fix network connectivity issues"
+            echo "  2. Run in development mode: export ENVIRONMENT=development"
+            echo "  3. Skip check (NOT recommended): export SKIP_NETWORK_CHECK=true"
+            show_network_troubleshooting_tips
+            return 1
+        fi
     fi
 }
 
@@ -452,16 +616,36 @@ validate_deployment_prerequisites() {
     # Initialize validation
     init_validation
     
+    # Check if in development mode
+    local is_development=false
+    if [[ "${DEPLOYMENT_MODE:-}" == "development" ]] || \
+       [[ "${ENV:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "development" ]] || \
+       [[ "${ENVIRONMENT:-}" == "dev" ]] || \
+       [[ "${DEVELOPMENT_MODE:-}" == "true" ]]; then
+        is_development=true
+        echo "ℹ️  Running validation in DEVELOPMENT MODE"
+        echo "  - Network connectivity checks are optional"
+        echo "  - Resource requirements are relaxed"
+        echo ""
+    fi
+    
     # Run all checks
     local -i total_errors=0
+    local -i critical_errors=0
     
     # Run checks and count errors
     check_dependencies || ((total_errors++))
-    check_aws_credentials || ((total_errors++))
-    check_aws_permissions || ((total_errors++))
+    check_aws_credentials || ((critical_errors++, total_errors++))
+    check_aws_permissions || ((critical_errors++, total_errors++))
     check_aws_quotas || ((total_errors++))
     check_system_resources || ((total_errors++))
-    check_network_connectivity || ((total_errors++))
+    check_network_connectivity || {
+        # In development mode, network errors are not critical
+        if [[ "$is_development" != "true" ]]; then
+            ((total_errors++))
+        fi
+    }
     
     # Summary
     echo -e "\n===================================================="
@@ -488,73 +672,30 @@ validate_deployment_prerequisites() {
         echo -e "\n✓ All validation checks passed. Ready for deployment!"
         return 0
     else
-        VALIDATION_RESULTS[overall]="failed"
-        echo -e "\n✗ Validation failed with $total_errors errors"
-        echo -e "\nPlease resolve the issues above before proceeding with deployment."
-        return 1
+        # In development mode, we can proceed with warnings
+        if [[ "$is_development" == "true" ]] && [[ $critical_errors -eq 0 ]]; then
+            VALIDATION_RESULTS[overall]="passed"
+            echo -e "\n⚠️  Development Mode: Proceeding with $total_errors warnings"
+            echo "  - Critical checks (AWS credentials, permissions) passed"
+            echo "  - Non-critical issues can be resolved later"
+            echo "  - For production deployment, fix all issues first"
+            echo -e "\n✓ Development deployment can proceed with warnings"
+            return 0
+        else
+            VALIDATION_RESULTS[overall]="failed"
+            if [[ $critical_errors -gt 0 ]]; then
+                echo -e "\n✗ Validation failed with $critical_errors critical errors"
+                echo "  Critical errors must be resolved even in development mode."
+            else
+                echo -e "\n✗ Validation failed with $total_errors errors"
+            fi
+            echo -e "\nPlease resolve the issues above before proceeding with deployment."
+            echo "To run in development mode with relaxed checks: export ENVIRONMENT=development"
+            return 1
+        fi
     fi
 }
 
-# Enhanced bash version check with instructions
-check_bash_version_enhanced() {
-    echo -e "\n=== Checking Bash Version ==="
-    
-    local current_version="${BASH_VERSION}"
-    local major_version="${BASH_VERSINFO[0]}"
-    local minor_version="${BASH_VERSINFO[1]}"
-    
-    echo "Current Bash version: $current_version"
-    
-    if [[ $major_version -lt 5 ]] || ([[ $major_version -eq 5 ]] && [[ $minor_version -lt 3 ]]); then
-        echo -e "\n✗ ERROR: Bash version 5.3 or higher is required"
-        echo -e "\nYour current version ($current_version) is too old for this project."
-        echo -e "\nUpgrade Instructions:"
-        
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            echo -e "\nmacOS:"
-            echo "  1. Install Homebrew if not already installed:"
-            echo "     /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-            echo "  2. Install modern Bash:"
-            echo "     brew install bash"
-            echo "  3. Add to allowed shells:"
-            echo "     sudo echo '/opt/homebrew/bin/bash' >> /etc/shells"
-            echo "  4. Change your default shell (optional):"
-            echo "     chsh -s /opt/homebrew/bin/bash"
-            echo "  5. Or run scripts with:"
-            echo "     /opt/homebrew/bin/bash script.sh"
-        elif [[ -f /etc/debian_version ]]; then
-            echo -e "\nUbuntu/Debian:"
-            echo "  1. Update package list:"
-            echo "     sudo apt update"
-            echo "  2. Install latest bash:"
-            echo "     sudo apt install -y bash"
-            echo "  3. If still old, compile from source:"
-            echo "     wget https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz"
-            echo "     tar -xzf bash-5.3.tar.gz && cd bash-5.3"
-            echo "     ./configure --prefix=/usr/local && make && sudo make install"
-            echo "     sudo ln -sf /usr/local/bin/bash /usr/bin/bash"
-        elif [[ -f /etc/redhat-release ]] || [[ -f /etc/system-release ]]; then
-            echo -e "\nRed Hat/CentOS/Amazon Linux:"
-            echo "  1. Enable EPEL repository:"
-            echo "     sudo yum install -y epel-release"
-            echo "  2. Install development tools:"
-            echo "     sudo yum groupinstall -y 'Development Tools'"
-            echo "  3. Compile from source:"
-            echo "     wget https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz"
-            echo "     tar -xzf bash-5.3.tar.gz && cd bash-5.3"
-            echo "     ./configure --prefix=/usr/local && make && sudo make install"
-            echo "     sudo ln -sf /usr/local/bin/bash /usr/bin/bash"
-        fi
-        
-        echo -e "\nVerify installation:"
-        echo "  bash --version"
-        
-        return 1
-    else
-        echo "✓ Bash version $current_version meets requirements"
-        return 0
-    fi
-}
 
 # Deployment health check
 check_deployment_health() {
@@ -689,9 +830,9 @@ export -f check_aws_credentials
 export -f check_aws_permissions
 export -f check_aws_quotas
 export -f check_system_resources
+export -f show_network_troubleshooting_tips
 export -f check_network_connectivity
 export -f validate_deployment_prerequisites
-export -f check_bash_version_enhanced
 export -f check_deployment_health
 export -f generate_validation_report
 export -f version_compare

@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Deployment State Management Library
-# Comprehensive deployment orchestration and state tracking using bash 5.3.3+
-# Requires: bash 5.3.3+
+# Comprehensive deployment orchestration and state tracking
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "deployment-state-manager.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # Load associative array utilities
 source "$SCRIPT_DIR/associative-arrays.sh"

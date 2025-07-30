@@ -2,17 +2,17 @@
 # =============================================================================
 # Error Handling Library
 # Comprehensive error handling patterns and utilities
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation - critical for error handling reliability
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    # Get the directory of this script for sourcing bash_version module
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "error-handling.sh"
-    export BASH_VERSION_VALIDATED=true
+# Check bash version for associative array support
+BASH_MAJOR_VERSION="${BASH_VERSION%%.*}"
+if [[ $BASH_MAJOR_VERSION -lt 4 ]]; then
+    ERROR_HANDLING_COMPAT_MODE=true
+else
+    ERROR_HANDLING_COMPAT_MODE=false
 fi
+
 
 # =============================================================================
 # COLOR DEFINITIONS (fallback if not already defined)
@@ -40,9 +40,10 @@ if [[ -z "${ERROR_HANDLING_MODES_DEFINED:-}" ]]; then
     readonly ERROR_HANDLING_MODES_DEFINED=true
 fi
 
-# Enhanced error types using bash 5.3+ features
+# Enhanced error types - compatible with bash 3.x+
 if [[ -z "${ERROR_TYPES_DEFINED:-}" ]]; then
-    declare -A ERROR_TYPES=(
+    if [[ "$ERROR_HANDLING_COMPAT_MODE" != "true" ]]; then
+        declare -A ERROR_TYPES=(
         [SYSTEM]="System error"
         [AWS]="AWS API error"
         [DOCKER]="Docker error"
@@ -59,13 +60,14 @@ if [[ -z "${ERROR_TYPES_DEFINED:-}" ]]; then
         [USER]="User error"
         [UNKNOWN]="Unknown error"
     )
-    readonly ERROR_TYPES
+    fi
     export ERROR_TYPES_DEFINED=true
 fi
 
-# Logging levels with modern bash features
+# Logging levels - compatible with bash 3.x+
 if [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
-    declare -A LOG_LEVELS=(
+    if [[ "$ERROR_HANDLING_COMPAT_MODE" != "true" ]]; then
+        declare -A LOG_LEVELS=(
         [TRACE]=0
         [DEBUG]=1
         [INFO]=2
@@ -73,7 +75,7 @@ if [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
         [ERROR]=4
         [FATAL]=5
     )
-    declare -A LOG_LEVEL_COLORS=(
+        declare -A LOG_LEVEL_COLORS=(
         [TRACE]="\033[0;37m"     # Light gray
         [DEBUG]="\033[0;36m"     # Cyan
         [INFO]="\033[0;32m"      # Green
@@ -81,16 +83,16 @@ if [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
         [ERROR]="\033[0;31m"     # Red
         [FATAL]="\033[1;31m"     # Bold red
     )
-    readonly LOG_LEVELS LOG_LEVEL_COLORS
+    fi
     export LOG_LEVELS_DEFINED=true
 fi
 
 # Performance monitoring variables
 if [[ -z "${PERF_MONITORING_INITIALIZED:-}" ]]; then
-    declare -A FUNCTION_TIMINGS
-    declare -A FUNCTION_CALL_COUNTS
-    declare -A CHECKPOINT_TIMES
-    readonly FUNCTION_TIMINGS FUNCTION_CALL_COUNTS CHECKPOINT_TIMES
+    # Initialize arrays if not already initialized (bash 3.x compatible)
+    FUNCTION_TIMINGS=()
+    FUNCTION_CALL_COUNTS=()
+    CHECKPOINT_TIMES=()
     export PERF_MONITORING_INITIALIZED=true
 fi
 
@@ -99,7 +101,12 @@ export ERROR_HANDLING_MODE="${ERROR_HANDLING_MODE:-$ERROR_MODE_STRICT}"
 export ERROR_LOG_FILE="${ERROR_LOG_FILE:-/tmp/GeuseMaker-errors.log}"
 export ERROR_NOTIFICATION_ENABLED="${ERROR_NOTIFICATION_ENABLED:-false}"
 export ERROR_CLEANUP_ENABLED="${ERROR_CLEANUP_ENABLED:-true}"
+
+# Default logging configuration
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+export STRUCTURED_LOGGING="${STRUCTURED_LOGGING:-false}"
+export SESSION_ID="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)_$$}"
+export START_TIME="${START_TIME:-$(date +%s)}"
 export STRUCTURED_LOGGING="${STRUCTURED_LOGGING:-true}"
 export PERFORMANCE_MONITORING="${PERFORMANCE_MONITORING:-false}"
 export ERROR_ANALYTICS="${ERROR_ANALYTICS:-true}"
@@ -116,25 +123,22 @@ ERROR_CONTEXT=""
 ERROR_STACK=()
 ERROR_HISTORY=()
 
-# Error metadata tracking
+# Error metadata tracking (bash 3.x compatible)
 if [[ -z "${ERROR_METADATA_INITIALIZED:-}" ]]; then
-    declare -A ERROR_METADATA
-    declare -A ERROR_TIMESTAMPS
-    declare -A ERROR_LOCATIONS
-    declare -A ERROR_RECOVERY_ATTEMPTS
-    readonly ERROR_METADATA ERROR_TIMESTAMPS ERROR_LOCATIONS ERROR_RECOVERY_ATTEMPTS
+    ERROR_METADATA=()
+    ERROR_TIMESTAMPS=()
+    ERROR_LOCATIONS=()
+    ERROR_RECOVERY_ATTEMPTS=()
     export ERROR_METADATA_INITIALIZED=true
 fi
 
 # Process and session tracking
-SESSION_ID="$(date +%Y%m%d_%H%M%S)_$$"
-START_TIME="$(date +%s.%N)"
 PROCESS_HIERARCHY=()
 CURRENT_OPERATION=""
 OPERATION_STACK=()
 
 # =============================================================================
-# MODERN BASH 5.3+ UTILITY FUNCTIONS
+# UTILITY FUNCTIONS - Compatible with bash 3.x+
 # =============================================================================
 
 # Get caller information with enhanced stack trace
@@ -161,7 +165,7 @@ init_structured_logging() {
     if [[ "$enable_rotation" == "true" && -f "$log_file" ]]; then
         local log_size
         log_size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
-        if (( log_size > 10485760 )); then  # 10MB
+        if [ "$log_size" -gt 10485760 ]; then  # 10MB
             mv "$log_file" "${log_file}.$(date +%Y%m%d_%H%M%S).old"
         fi
     fi
@@ -183,6 +187,47 @@ init_structured_logging() {
     } > "$log_file"
 }
 
+# Comprehensive initialization function
+ensure_logging_initialized() {
+    # Initialize LOG_LEVELS if not already done
+    if [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
+        if [[ "$ERROR_HANDLING_COMPAT_MODE" != "true" ]]; then
+            declare -gA LOG_LEVELS=(
+                [TRACE]=0
+                [DEBUG]=1
+                [INFO]=2
+                [WARN]=3
+                [ERROR]=4
+                [FATAL]=5
+            )
+        fi
+        export LOG_LEVELS_DEFINED=true
+    fi
+    
+    # Initialize LOG_LEVEL_COLORS if not already done
+    if [[ -z "${LOG_LEVEL_COLORS_DEFINED:-}" ]]; then
+        if [[ "$ERROR_HANDLING_COMPAT_MODE" != "true" ]]; then
+            declare -gA LOG_LEVEL_COLORS=(
+            [TRACE]="\033[0;37m"
+            [DEBUG]="\033[0;36m"
+            [INFO]="\033[0;32m"
+            [WARN]="\033[0;33m"
+            [ERROR]="\033[0;31m"
+            [FATAL]="\033[1;31m"
+        )
+        fi
+        export LOG_LEVEL_COLORS_DEFINED=true
+    fi
+    
+    # Set default values for other required variables
+    export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+    export STRUCTURED_LOGGING="${STRUCTURED_LOGGING:-false}"
+    export SESSION_ID="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)_$$}"
+    export START_TIME="${START_TIME:-$(date +%s)}"
+    export ERROR_LOG_FILE="${ERROR_LOG_FILE:-/tmp/GeuseMaker-errors.log}"
+    export NC="${NC:-\033[0m}"
+}
+
 # Structured logging function
 log_structured() {
     local level="$1"
@@ -190,11 +235,41 @@ log_structured() {
     shift 2
     local attributes=("$@")
     
-    # Check if log level is enabled
-    local current_level_num="${LOG_LEVELS[$LOG_LEVEL]:-2}"
-    local message_level_num="${LOG_LEVELS[$level]:-2}"
+    # Ensure all required variables are initialized
+    ensure_logging_initialized
     
-    if (( message_level_num < current_level_num )); then
+    # Check if log level is enabled
+    local current_level_num message_level_num
+    if [[ "$ERROR_HANDLING_COMPAT_MODE" == "true" ]] || [[ -z "${LOG_LEVELS_DEFINED:-}" ]]; then
+        # In compat mode or if LOG_LEVELS not defined, use default INFO level (2)
+        current_level_num=2
+        case "${LOG_LEVEL:-INFO}" in
+            TRACE) current_level_num=0 ;;
+            DEBUG) current_level_num=1 ;;
+            INFO) current_level_num=2 ;;
+            WARN) current_level_num=3 ;;
+            ERROR) current_level_num=4 ;;
+            FATAL) current_level_num=5 ;;
+        esac
+        
+        message_level_num=2
+        case "$level" in
+            TRACE) message_level_num=0 ;;
+            DEBUG) message_level_num=1 ;;
+            INFO) message_level_num=2 ;;
+            WARN) message_level_num=3 ;;
+            ERROR) message_level_num=4 ;;
+            FATAL) message_level_num=5 ;;
+        esac
+    else
+        # Work around set -u issues with associative arrays
+        set +u
+        current_level_num="${LOG_LEVELS[$LOG_LEVEL]:-2}"
+        message_level_num="${LOG_LEVELS[$level]:-2}"
+        set -u
+    fi
+    
+    if [ "$message_level_num" -lt "$current_level_num" ]; then
         return 0
     fi
     
@@ -236,10 +311,10 @@ log_structured() {
 
 # Initialize performance monitoring
 init_performance_monitoring() {
-    # Clear previous data
-    FUNCTION_TIMINGS=()
-    FUNCTION_CALL_COUNTS=()
-    CHECKPOINT_TIMES=()
+    # Ensure arrays are declared globally
+    declare -gA FUNCTION_TIMINGS=()
+    declare -gA FUNCTION_CALL_COUNTS=()
+    declare -gA CHECKPOINT_TIMES=()
     
     # Set initial checkpoint
     CHECKPOINT_TIMES["session_start"]="$START_TIME"
@@ -288,7 +363,7 @@ update_error_analytics() {
     local message="$2"
     local context="${3:-}"
     
-    if [[ -z "$ERROR_ANALYTICS_FILE" ]]; then
+    if [[ -z "${ERROR_ANALYTICS_FILE:-}" ]]; then
         return 0
     fi
     
@@ -403,7 +478,7 @@ log_error() {
     local error_type="${4:-UNKNOWN}"
     local recovery_suggestion="${5:-}"
     
-    ((ERROR_COUNT++))
+    ERROR_COUNT=$((ERROR_COUNT + 1))
     LAST_ERROR="$message"
     ERROR_CONTEXT="$context"
     
@@ -412,22 +487,31 @@ log_error() {
     error_id="${SESSION_ID}_$(printf '%04d' $ERROR_COUNT)"
     caller_info=$(get_caller_info)
     
-    # Store error metadata
+    # Store error metadata - ensure arrays are initialized
+    if [[ -z "${ERROR_METADATA_INITIALIZED:-}" ]]; then
+        declare -gA ERROR_METADATA=()
+        declare -gA ERROR_TIMESTAMPS=()
+        declare -gA ERROR_LOCATIONS=()
+        declare -gA ERROR_RECOVERY_ATTEMPTS=()
+        export ERROR_METADATA_INITIALIZED=true
+    fi
+    
     ERROR_TIMESTAMPS["$error_id"]="$timestamp"
     ERROR_METADATA["$error_id"]="type=$error_type;context=$context;exit_code=$exit_code;caller=$caller_info"
     ERROR_LOCATIONS["$error_id"]="${BASH_SOURCE[1]:-unknown}:${BASH_LINENO[0]:-0}"
     
-    # Log with structured format
-    if [[ "$STRUCTURED_LOGGING" == "true" ]]; then
-        log_structured "ERROR" "$message" \
-            "error_id=$error_id" \
-            "error_type=$error_type" \
-            "context=$context" \
-            "exit_code=$exit_code" \
-            "caller=$caller_info" \
-            "recovery_suggestion=$recovery_suggestion"
+    # Use standardized logging
+    if command -v log_message >/dev/null 2>&1; then
+        # Use structured logging if available
+        if command -v log_structured >/dev/null 2>&1; then
+            log_structured "ERROR" "$message" \
+                "{\"error_id\":\"$error_id\",\"error_type\":\"$error_type\",\"context\":\"$context\",\"exit_code\":$exit_code,\"caller\":\"$caller_info\",\"recovery_suggestion\":\"$recovery_suggestion\"}" \
+                "ERROR_HANDLING"
+        else
+            log_message "ERROR" "$message" "ERROR_HANDLING"
+        fi
     else
-        # Legacy console output
+        # Fallback to legacy console output
         echo -e "${RED}[ERROR] $message${NC}" >&2
         if [ -n "$context" ]; then
             echo -e "${RED}        Context: $context${NC}" >&2
@@ -458,21 +542,26 @@ log_warning() {
     local message="$1"
     local context="${2:-}"
     
-    ((WARNING_COUNT++))
+    WARNING_COUNT=$((WARNING_COUNT + 1))
     
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # Log to console
-    echo -e "${YELLOW}[WARNING] $message${NC}" >&2
-    if [ -n "$context" ]; then
-        echo -e "${YELLOW}          Context: $context${NC}" >&2
-    fi
-    
-    # Log to file
-    echo "[$timestamp] WARNING: $message" >> "$ERROR_LOG_FILE"
-    if [ -n "$context" ]; then
-        echo "[$timestamp]          Context: $context" >> "$ERROR_LOG_FILE"
+    # Use standardized logging
+    if command -v log_message >/dev/null 2>&1; then
+        log_message "WARN" "$message" "ERROR_HANDLING"
+    else
+        # Fallback to legacy console output
+        local timestamp
+        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        
+        echo -e "${YELLOW}[WARNING] $message${NC}" >&2
+        if [ -n "$context" ]; then
+            echo -e "${YELLOW}          Context: $context${NC}" >&2
+        fi
+        
+        # Log to file
+        echo "[$timestamp] WARNING: $message" >> "$ERROR_LOG_FILE"
+        if [ -n "$context" ]; then
+            echo "[$timestamp]          Context: $context" >> "$ERROR_LOG_FILE"
+        fi
     fi
 }
 
@@ -482,18 +571,49 @@ log_debug() {
     
     # Only log debug messages if debug mode is enabled
     if [ "${DEBUG:-false}" = "true" ]; then
-        local timestamp
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        
-        echo -e "${CYAN}[DEBUG] $message${NC}" >&2
-        if [ -n "$context" ]; then
-            echo -e "${CYAN}        Context: $context${NC}" >&2
+        # Use standardized logging
+        if command -v log_message >/dev/null 2>&1; then
+            log_message "DEBUG" "$message" "ERROR_HANDLING"
+        else
+            # Fallback to legacy console output
+            local timestamp
+            timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+            
+            echo -e "${CYAN}[DEBUG] $message${NC}" >&2
+            if [ -n "$context" ]; then
+                echo -e "${CYAN}        Context: $context${NC}" >&2
+            fi
+            
+            echo "[$timestamp] DEBUG: $message" >> "$ERROR_LOG_FILE"
+            if [ -n "$context" ]; then
+                echo "[$timestamp]        Context: $context" >> "$ERROR_LOG_FILE"
+            fi
         fi
-        
-        echo "[$timestamp] DEBUG: $message" >> "$ERROR_LOG_FILE"
-        if [ -n "$context" ]; then
-            echo "[$timestamp]        Context: $context" >> "$ERROR_LOG_FILE"
-        fi
+    fi
+}
+
+# Success logging function
+success() {
+    local message="$1"
+    local context="${2:-}"
+    
+    # Ensure colors are defined
+    GREEN="${GREEN:-\033[0;32m}"
+    NC="${NC:-\033[0m}"
+    
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Log to console
+    echo -e "${GREEN}[SUCCESS] $message${NC}" >&2
+    if [ -n "$context" ]; then
+        echo -e "${GREEN}          Context: $context${NC}" >&2
+    fi
+    
+    # Log to file
+    echo "[$timestamp] SUCCESS: $message" >> "$ERROR_LOG_FILE"
+    if [ -n "$context" ]; then
+        echo "[$timestamp]          Context: $context" >> "$ERROR_LOG_FILE"
     fi
 }
 
@@ -528,7 +648,7 @@ retry_command() {
                 sleep "$delay"
             fi
             
-            ((attempt++))
+            attempt=$((attempt + 1))
         fi
     done
     
@@ -566,7 +686,7 @@ retry_with_backoff() {
                 delay=$(echo "$delay * $backoff_multiplier" | bc -l | cut -d. -f1)
             fi
             
-            ((attempt++))
+            attempt=$((attempt + 1))
         fi
     done
     
@@ -614,7 +734,7 @@ handle_interactive_error() {
     local command="$3"
     
     echo
-    warning "An error occurred. What would you like to do?"
+    log_warning "An error occurred. What would you like to do?"
     echo "1) Continue execution (ignore error)"
     echo "2) Retry the failed command"
     echo "3) Exit the script"
@@ -671,7 +791,7 @@ generate_stack_trace() {
         local script_name="${line_info##* }"
         
         log_error "  [$i] $script_name:$line_number in $function_name()"
-        ((i++))
+        i=$((i + 1))
     done
 }
 
@@ -1011,8 +1131,8 @@ init_enhanced_error_handling() {
     # Check if we should enable modern features
     local use_modern=false
     if [[ "$enable_modern" == "auto" ]]; then
-        # Auto-detect based on bash version
-        if bash_533_available 2>/dev/null; then
+        # Auto-detect based on available features
+        if command -v bash_533_available >/dev/null 2>&1 && bash_533_available 2>/dev/null; then
             use_modern=true
         fi
     elif [[ "$enable_modern" == "true" ]]; then

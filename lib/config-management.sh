@@ -2,16 +2,9 @@
 # =============================================================================
 # Configuration Management Library 
 # Centralized configuration system for GeuseMaker project
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "config-management.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # Load associative array utilities
 source "$SCRIPT_DIR/associative-arrays.sh"
@@ -145,29 +138,47 @@ check_config_dependencies() {
     
     # Provide helpful information but don't fail
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        if declare -f warning >/dev/null 2>&1; then
-            warning "Missing recommended dependencies: ${missing_tools[*]}"
+        if command -v log_message >/dev/null 2>&1; then
+            log_message "WARN" "Missing recommended dependencies: ${missing_tools[*]}" "CONFIG_MANAGEMENT"
             if [ "$available_alternatives" = "true" ]; then
-                warning "Using fallback implementations (reduced functionality)"
+                log_message "WARN" "Using fallback implementations" "CONFIG_MANAGEMENT"
             else
-                warning "Some enhanced features may not be available"
+                log_message "WARN" "Some enhanced features may not be available" "CONFIG_MANAGEMENT"
             fi
         else
-            echo "WARNING: Missing recommended dependencies: ${missing_tools[*]}" >&2
-            if [ "$available_alternatives" = "true" ]; then
-                echo "WARNING: Using fallback implementations" >&2
+            if command -v log_message >/dev/null 2>&1; then
+                log_message "WARN" "Missing recommended dependencies: ${missing_tools[*]}" "CONFIG_MANAGEMENT"
+                if [ "$available_alternatives" = "true" ]; then
+                    log_message "WARN" "Using fallback implementations" "CONFIG_MANAGEMENT"
+                else
+                    log_message "WARN" "Some enhanced features may not be available" "CONFIG_MANAGEMENT"
+                fi
             else
-                echo "WARNING: Some enhanced features may not be available" >&2
+                echo "WARNING: Missing recommended dependencies: ${missing_tools[*]}" >&2
+                if [ "$available_alternatives" = "true" ]; then
+                    echo "WARNING: Using fallback implementations" >&2
+                else
+                    echo "WARNING: Some enhanced features may not be available" >&2
+                fi
             fi
         fi
-        echo "Install with:" >&2
-        echo "  macOS: brew install yq jq" >&2
-        echo "  Ubuntu: apt-get install yq jq" >&2
-        echo "  Or: pip3 install PyYAML" >&2
+        if command -v log_message >/dev/null 2>&1; then
+            log_message "INFO" "Install with:" "CONFIG_MANAGEMENT"
+            log_message "INFO" "  macOS: brew install yq jq" "CONFIG_MANAGEMENT"
+            log_message "INFO" "  Ubuntu: apt-get install yq jq" "CONFIG_MANAGEMENT"
+            log_message "INFO" "  Or: pip3 install PyYAML" "CONFIG_MANAGEMENT"
+        else
+            echo "Install with:" >&2
+            echo "  macOS: brew install yq jq" >&2
+            echo "  Ubuntu: apt-get install yq jq" >&2
+            echo "  Or: pip3 install PyYAML" >&2
+        fi
     fi
     
     if [[ ${#optional_tools[@]} -gt 0 ]]; then
-        if declare -f warning >/dev/null 2>&1; then
+        if command -v log_message >/dev/null 2>&1; then
+            log_message "WARN" "Optional tools missing (some features may be limited): ${optional_tools[*]}" "CONFIG_MANAGEMENT"
+        elif declare -f warning >/dev/null 2>&1; then
             warning "Optional tools missing (some features may be limited): ${optional_tools[*]}"
         else
             echo "WARNING: Optional tools missing: ${optional_tools[*]}" >&2
@@ -187,12 +198,7 @@ validate_environment() {
     local env="$1"
     
     if [[ -z "$env" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Environment name cannot be empty"
-        else
-            echo "ERROR: Environment name cannot be empty" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Environment name cannot be empty"
     fi
     
     # Use associative array for validation
@@ -207,12 +213,7 @@ validate_environment() {
     done
     
     if [[ "$valid" != "true" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Invalid environment: $env. Valid options: $valid_environments"
-        else
-            echo "ERROR: Invalid environment: $env. Valid options: $valid_environments" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Invalid environment: $env. Valid options: $valid_environments"
     fi
     
     # Store validation result in cache
@@ -242,12 +243,7 @@ validate_deployment_type() {
     done
     
     if [[ "$valid" != "true" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Invalid deployment type: $type. Valid options: $valid_deployment_types"
-        else
-            echo "ERROR: Invalid deployment type: $type. Valid options: $valid_deployment_types" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Invalid deployment type: $type. Valid options: $valid_deployment_types"
     fi
     
     # Store validation result and get deployment metadata
@@ -287,21 +283,12 @@ validate_aws_region() {
     local region="$1"
     
     if [[ -z "$region" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "AWS region cannot be empty"
-        else
-            echo "ERROR: AWS region cannot be empty" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "AWS region cannot be empty"
     fi
     
     # Basic AWS region format validation
     if [[ ! "$region" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
-        if declare -f warning >/dev/null 2>&1; then
-            warning "AWS region format may be invalid: $region"
-        else
-            echo "WARNING: AWS region format may be invalid: $region" >&2
-        fi
+        throw_error $ERROR_CONFIG_VALIDATION "AWS region format may be invalid: $region"
     fi
     
     return 0
@@ -312,31 +299,16 @@ validate_stack_name() {
     local stack_name="$1"
     
     if [[ -z "$stack_name" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Stack name cannot be empty"
-        else
-            echo "ERROR: Stack name cannot be empty" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Stack name cannot be empty"
     fi
     
     # CloudFormation stack name validation
     if [[ ${#stack_name} -gt 128 ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Stack name too long (max 128 characters): $stack_name"
-        else
-            echo "ERROR: Stack name too long: $stack_name" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Stack name too long (max 128 characters): $stack_name"
     fi
     
     if [[ ! "$stack_name" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Invalid stack name format. Must start with letter, contain only alphanumeric and hyphens: $stack_name"
-        else
-            echo "ERROR: Invalid stack name format: $stack_name" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_VALIDATION "Invalid stack name format. Must start with letter, contain only alphanumeric and hyphens: $stack_name"
     fi
     
     return 0
@@ -347,32 +319,17 @@ validate_configuration_file() {
     local config_file="$1"
     
     if [[ ! -f "$config_file" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Configuration file not found: $config_file"
-        else
-            echo "ERROR: Configuration file not found: $config_file" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_MISSING "Configuration file not found: $config_file"
     fi
     
     # Check file is readable
     if [[ ! -r "$config_file" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Configuration file not readable: $config_file"
-        else
-            echo "ERROR: Configuration file not readable: $config_file" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_INVALID "Configuration file not readable: $config_file"
     fi
     
     # Check file is not empty
     if [[ ! -s "$config_file" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Configuration file is empty: $config_file"
-        else
-            echo "ERROR: Configuration file is empty: $config_file" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_INVALID "Configuration file is empty: $config_file"
     fi
     
     # Validate YAML syntax first
@@ -397,12 +354,7 @@ validate_configuration_file() {
     fi
     
     if [ "$yaml_valid" = "false" ]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Configuration file has invalid YAML syntax: $config_file"
-        else
-            echo "ERROR: Configuration file has invalid YAML syntax: $config_file" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_PARSE "Configuration file has invalid YAML syntax: $config_file"
     fi
     
     # Check for required sections (bash 3.x compatible)
@@ -420,13 +372,7 @@ validate_configuration_file() {
     done
     
     if [ -n "$missing_sections" ]; then
-        if declare -f warning >/dev/null 2>&1; then
-            warning "Configuration file missing recommended sections: $missing_sections"
-            warning "Some features may not work as expected"
-        else
-            echo "WARNING: Configuration file missing sections: $missing_sections" >&2
-        fi
-        # Don't fail for missing sections, just warn
+        throw_error $ERROR_CONFIG_MISSING "Configuration file missing recommended sections: $missing_sections"
     fi
     
     return 0
@@ -478,12 +424,7 @@ load_config() {
     config_file=$(get_config_file_path "$env")
     
     if [[ ! -f "$config_file" ]]; then
-        if declare -f error >/dev/null 2>&1; then
-            error "Configuration file not found: $config_file"
-        else
-            echo "ERROR: Configuration file not found: $config_file" >&2
-        fi
-        return 1
+        throw_error $ERROR_CONFIG_MISSING "Configuration file not found: $config_file"
     fi
     
     # Load configuration using associative arrays

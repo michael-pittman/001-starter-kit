@@ -1,23 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Comprehensive Improvements Validation
-# Validates all improvements made to the GeuseMaker
+# Improvements Validation Tool
+# Validates and tests improvements to the deployment system
 # =============================================================================
 
 set -euo pipefail
 
-# Source common functions
+# Standard library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-fi
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-if [ -f "$PROJECT_ROOT/lib/error-handling.sh" ]; then
-    source "$PROJECT_ROOT/lib/error-handling.sh"
-    init_error_handling "resilient"
-fi
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
+
+# Initialize error handling
+init_error_handling "resilient"
 
 # =============================================================================
 # VALIDATION CATEGORIES
@@ -177,8 +178,8 @@ validate_infrastructure_code() {
     
     # Check unified deployment script
     info "Checking unified deployment script..."
-    if [ -f "$PROJECT_ROOT/scripts/aws-deployment-unified.sh" ]; then
-        if grep -q "deployment_type" "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"; then
+    if [ -f "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh" ]; then
+        if grep -q "deployment_type" "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"; then
             success "Unified deployment script contains proper functionality"
         else
             log_warning "Unified deployment script missing key features"
@@ -343,8 +344,8 @@ validate_error_handling() {
     
     # Check error handling integration
     info "Checking error handling integration..."
-    if [ -f "$PROJECT_ROOT/scripts/aws-deployment-unified.sh" ]; then
-        if grep -q "error-handling.sh" "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"; then
+    if [ -f "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh" ]; then
+        if grep -q "error-handling.sh" "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"; then
             success "Error handling integrated in unified deployment script"
         else
             log_warning "Error handling not integrated in deployment script"

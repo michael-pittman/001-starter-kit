@@ -1,12 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Test ALB and CloudFront Deployment Flags
 # This script tests the new ALB and CloudFront functionality without actual deployment
 
-set -euo pipefail
 
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment-unified.sh"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-alb-cloudfront.sh" "core/variables" "core/logging"
+
+MAIN_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment-modular.sh"
 SIMPLE_SCRIPT="$SCRIPT_DIR/../scripts/aws-deployment-simple.sh"
 
 # Colors for output
@@ -350,16 +358,16 @@ main() {
         echo ""
         echo "🌐 Usage Examples:"
         echo "  # Deploy with ALB only"
-        echo "  ./scripts/aws-deployment-unified.sh --setup-alb"
+        echo "  ./scripts/aws-deployment-modular.sh --alb"
         echo ""
         echo "  # Deploy with CloudFront only (requires ALB)"
-        echo "  ./scripts/aws-deployment-unified.sh --setup-alb --setup-cloudfront"
+        echo "  ./scripts/aws-deployment-modular.sh --alb --cloudfront"
         echo ""
         echo "  # Deploy with both (convenience flag)"
-        echo "  ./scripts/aws-deployment-unified.sh --setup-cdn"
+        echo "  ./scripts/aws-deployment-modular.sh --cdn"
         echo ""
         echo "  # Full deployment with cross-region and CDN"
-        echo "  ./scripts/aws-deployment-unified.sh --setup-cdn --cross-region"
+        echo "  ./scripts/aws-deployment-modular.sh --cdn --type spot"
         echo ""
         echo "⚠️  Important Notes:"
         echo "  • ALB requires at least 2 availability zones"

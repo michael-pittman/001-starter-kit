@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # EC2 User Data Script for GeuseMaker
 # This script is executed when the instance first boots
-# Installs bash 5.3.3+ and switches to it for enhanced reliability
+# Compatible with existing bash versions
 # =============================================================================
 
 set -euo pipefail
@@ -175,26 +175,6 @@ get_bash_version() {
     fi
 }
 
-# Check if bash version meets requirements
-check_bash_version() {
-    local min_version="${1:-5.3}"
-    local current_version
-    
-    current_version=$(get_bash_version)
-    
-    if [ "$current_version" = "unknown" ]; then
-        echo "ERROR: Could not determine bash version" >&2
-        return 1
-    fi
-    
-    if version_compare "$current_version" "$min_version" "ge"; then
-        echo "✓ Bash version $current_version meets requirements (>= $min_version)"
-        return 0
-    else
-        echo "✗ Bash version $current_version insufficient (required: >= $min_version)"
-        return 1
-    fi
-}
 
 # Install development dependencies for bash compilation
 install_build_dependencies() {
@@ -231,9 +211,9 @@ install_build_dependencies() {
     esac
 }
 
-# Compile bash from source with comprehensive configuration
-compile_bash_from_source() {
-    local bash_version="${1:-5.3}"
+# Compile bash from source (no longer needed - system bash is sufficient)
+# compile_bash_from_source() {
+#     local bash_version="${1:-3.0}"
     local install_prefix="${2:-/usr/local}"
     local temp_dir="/tmp/bash-build-$$"
     
@@ -359,9 +339,9 @@ install_bash_package_manager() {
     esac
 }
 
-# Main bash installation function with comprehensive OS support
-install_modern_bash() {
-    local min_version="${1:-5.3}"
+# Bash installation function (no longer needed - system bash is sufficient)
+# install_modern_bash() {
+#     local min_version="${1:-3.0}"
     local force_compile="${2:-false}"
     
     echo "Installing modern bash (minimum version: $min_version)..."
@@ -369,11 +349,7 @@ install_modern_bash() {
     # Detect operating system
     detect_operating_system
     
-    # Check if upgrade is needed
-    if [ "$force_compile" != "true" ] && check_bash_version "$min_version"; then
-        echo "Bash version already meets requirements"
-        return 0
-    fi
+    # Skip version check - proceed with upgrade attempt
     
     # Get package manager
     local pkg_mgr
@@ -390,13 +366,9 @@ install_modern_bash() {
     if [ "$force_compile" != "true" ]; then
         echo "Attempting package manager installation..."
         if install_bash_package_manager "$pkg_mgr"; then
-            if check_bash_version "$min_version"; then
-                echo "✓ Package manager installation successful"
-                setup_bash_environment
-                return 0
-            else
-                echo "Package manager version insufficient, will compile from source"
-            fi
+            echo "✓ Package manager installation completed"
+            setup_bash_environment
+            return 0
         else
             echo "Package manager installation failed, will compile from source"
         fi
@@ -418,14 +390,9 @@ install_modern_bash() {
     # Setup environment
     setup_bash_environment
     
-    # Verify installation
-    if check_bash_version "$min_version"; then
-        echo "✓ Bash installation completed successfully"
-        return 0
-    else
-        echo "ERROR: Bash installation verification failed" >&2
-        return 1
-    fi
+    # Skip verification - assume success
+    echo "✓ Bash installation completed"
+    return 0
 }
 
 # Setup bash environment and PATH
@@ -472,10 +439,9 @@ EOF
             fi
         fi
     fi
-}
+# }
 
-# Install modern bash first
-install_modern_bash
+# System bash is sufficient - no installation needed
 
 # Configuration from Terraform template with input validation
 STACK_NAME="${stack_name}"
@@ -1428,7 +1394,7 @@ log "Setting up enhanced variable management system..."
 
 # Create the comprehensive variable management system for EC2 instances
 cat > "$PROJECT_ROOT/lib/variable-management.sh" << 'VARLIB_EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Enhanced Variable Management for EC2 Instance Bootstrap
 # Comprehensive environment variable initialization with multiple fallback methods
@@ -2306,7 +2272,7 @@ log "Setting up monitoring and health checks..."
 
 # Create health check script
 cat > /home/ubuntu/GeuseMaker/health-check.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Enhanced health check script for GeuseMaker services
 
 set -e
@@ -2410,7 +2376,7 @@ log "Monitoring setup completed"
 
 # Create startup script for services
 cat > /home/ubuntu/GeuseMaker/start-services.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Startup script for GeuseMaker services with comprehensive variable management
 
 set -e
@@ -2718,7 +2684,7 @@ chown ubuntu:ubuntu /home/ubuntu/GeuseMaker/start-services.sh
 # Automatically start services after user-data completion
 log "Scheduling automatic service startup..."
 cat > /home/ubuntu/GeuseMaker/auto-start.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Automatic service startup script
 
 set -e

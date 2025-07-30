@@ -2,27 +2,21 @@
 # =============================================================================
 # AWS CLI v2 Integration Tests
 # Comprehensive testing for AWS CLI v2 enhancements
-# Requires: bash 5.3.3+, AWS CLI v2
+# Compatible with bash 3.x+, AWS CLI v2
 # =============================================================================
 
 # Get script directory and project root
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load required libraries
-source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
-require_bash_533 "test-aws-cli-v2.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-source "$PROJECT_ROOT/lib/aws-cli-v2.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+# Initialize script with required modules
+initialize_script "test-aws-cli-v2.sh" "core/variables" "core/logging"
 
-set -euo pipefail
-
-# =============================================================================
-# TEST CONFIGURATION
-# =============================================================================
-
-# Test results tracking
 TEST_RESULTS_FILE="${PROJECT_ROOT}/test-reports/aws-cli-v2-test-results-$(date +%Y%m%d-%H%M%S).json"
 TEST_SUMMARY_FILE="${PROJECT_ROOT}/test-reports/aws-cli-v2-test-summary.html"
 mkdir -p "$(dirname "$TEST_RESULTS_FILE")"

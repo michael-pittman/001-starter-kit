@@ -4,20 +4,29 @@
 # Tests all potential failure paths and validation phases
 # =============================================================================
 
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
+
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
 # Get script directory and project root
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load test framework
-source "$PROJECT_ROOT/tests/lib/shell-test-framework.sh"
-source "$PROJECT_ROOT/lib/error-handling.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-set -euo pipefail
-
-# =============================================================================
-# TEST CONFIGURATION
-# =============================================================================
+# Initialize script with required modules
+initialize_script "test-deploy-spot-cdn-comprehensive.sh" "core/variables" "core/logging"
 
 TEST_NAME="deploy-spot-cdn-comprehensive"
 STACK_NAME="test-geuse002"
@@ -32,23 +41,7 @@ declare -A RECOVERY_SUGGESTIONS
 # TEST FUNCTIONS
 # =============================================================================
 
-# Test 1: Bash Version Validation
-test_bash_version_validation() {
-    local test_name="bash_version_validation"
-    log "Running test: $test_name"
-    
-    if ! bash -c 'source lib/modules/core/bash_version.sh && check_bash_version_enhanced'; then
-        TEST_RESULTS["$test_name"]="FAILED"
-        FAILURE_PATHS["$test_name"]="Bash version check failed"
-        RECOVERY_SUGGESTIONS["$test_name"]="Upgrade bash to 5.3+ or fix bash version module"
-        return 1
-    fi
-    
-    TEST_RESULTS["$test_name"]="PASSED"
-    success "✓ Bash version validation passed"
-}
-
-# Test 2: Security Validation
+# Test 1: Security Validation
 test_security_validation() {
     local test_name="security_validation"
     log "Running test: $test_name"
@@ -64,7 +57,7 @@ test_security_validation() {
     success "✓ Security validation passed"
 }
 
-# Test 3: AWS CLI Installation Check
+# Test 2: AWS CLI Installation Check
 test_aws_cli_installation() {
     local test_name="aws_cli_installation"
     log "Running test: $test_name"
@@ -90,7 +83,7 @@ test_aws_cli_installation() {
     success "✓ AWS CLI v2 installation check passed ($aws_version)"
 }
 
-# Test 4: AWS Credentials Validation
+# Test 3: AWS Credentials Validation
 test_aws_credentials() {
     local test_name="aws_credentials"
     log "Running test: $test_name"
@@ -106,24 +99,24 @@ test_aws_credentials() {
     success "✓ AWS credentials validation passed"
 }
 
-# Test 5: AWS CLI Demo Script Functionality
+# Test 4: AWS CLI Demo Script Functionality
 test_aws_cli_demo_script() {
     local test_name="aws_cli_demo_script"
     log "Running test: $test_name"
     
-    # Test if the script exists and is executable
-    if [[ ! -x "$PROJECT_ROOT/scripts/aws-cli-v2-demo.sh" ]]; then
+    # Test if the script exists and is executable (now in archive)
+    if [[ ! -x "$PROJECT_ROOT/archive/demos/aws-cli-v2-demo.sh" ]]; then
         TEST_RESULTS["$test_name"]="FAILED"
         FAILURE_PATHS["$test_name"]="AWS CLI demo script not executable"
-        RECOVERY_SUGGESTIONS["$test_name"]="Run 'chmod +x scripts/aws-cli-v2-demo.sh'"
+        RECOVERY_SUGGESTIONS["$test_name"]="Run 'chmod +x archive/demos/aws-cli-v2-demo.sh'"
         return 1
     fi
     
     # Test script syntax
-    if ! bash -n "$PROJECT_ROOT/scripts/aws-cli-v2-demo.sh"; then
+    if ! bash -n "$PROJECT_ROOT/archive/demos/aws-cli-v2-demo.sh"; then
         TEST_RESULTS["$test_name"]="FAILED"
         FAILURE_PATHS["$test_name"]="AWS CLI demo script has syntax errors"
-        RECOVERY_SUGGESTIONS["$test_name"]="Fix syntax errors in aws-cli-v2-demo.sh"
+        RECOVERY_SUGGESTIONS["$test_name"]="Fix syntax errors in archive/demos/aws-cli-v2-demo.sh"
         return 1
     fi
     
@@ -131,7 +124,7 @@ test_aws_cli_demo_script() {
     success "✓ AWS CLI demo script validation passed"
 }
 
-# Test 6: Deployment Script Validation
+# Test 5: Deployment Script Validation
 test_deployment_script() {
     local test_name="deployment_script"
     log "Running test: $test_name"
@@ -155,7 +148,7 @@ test_deployment_script() {
     success "✓ Deployment script validation passed"
 }
 
-# Test 7: Required Libraries Check
+# Test 6: Required Libraries Check
 test_required_libraries() {
     local test_name="required_libraries"
     log "Running test: $test_name"
@@ -164,7 +157,6 @@ test_required_libraries() {
         "lib/error-handling.sh"
         "lib/aws-deployment-common.sh"
         "lib/aws-cli-v2.sh"
-        "lib/modules/core/bash_version.sh"
         "lib/deployment-validation.sh"
     )
     
@@ -189,7 +181,7 @@ test_required_libraries() {
     success "✓ Required libraries check passed"
 }
 
-# Test 8: Makefile Target Validation
+# Test 7: Makefile Target Validation
 test_makefile_target() {
     local test_name="makefile_target"
     log "Running test: $test_name"
@@ -205,7 +197,7 @@ test_makefile_target() {
     success "✓ Makefile target validation passed"
 }
 
-# Test 9: AWS Service Quotas Check
+# Test 8: AWS Service Quotas Check
 test_aws_service_quotas() {
     local test_name="aws_service_quotas"
     log "Running test: $test_name"
@@ -222,7 +214,7 @@ test_aws_service_quotas() {
     success "✓ AWS service quotas check passed"
 }
 
-# Test 10: Network Connectivity
+# Test 9: Network Connectivity
 test_network_connectivity() {
     local test_name="network_connectivity"
     log "Running test: $test_name"
@@ -312,7 +304,6 @@ main() {
     echo
     
     # Run all tests
-    test_bash_version_validation
     test_security_validation
     test_aws_cli_installation
     test_aws_credentials

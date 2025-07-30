@@ -1,26 +1,46 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Instance Status Check and Recovery Script
 # Helps diagnose issues with launched instances
 # =============================================================================
 
-set -euo pipefail
-
 # Load shared libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIB_DIR="$PROJECT_ROOT/lib"
 
-source "$LIB_DIR/error-handling.sh"
-source "$LIB_DIR/aws-deployment-common.sh"
-source "$LIB_DIR/aws-config.sh"
+# Source the library loader
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+else
+    echo "ERROR: Cannot find lib-loader.sh in $PROJECT_ROOT/lib/" >&2
+    exit 1
+fi
 
-# Load the new centralized configuration management system
-if [ -f "$LIB_DIR/config-management.sh" ]; then
-    source "$LIB_DIR/config-management.sh"
+# Enable error handling
+set -euo pipefail
+
+# Load required libraries
+declare -a REQUIRED_LIBS=(
+    "error-handling.sh"
+    "aws-deployment-common.sh"
+    "aws-config.sh"
+)
+
+# Optional libraries
+declare -a OPTIONAL_LIBS=(
+    "config-management.sh"
+)
+
+if ! load_libraries "${REQUIRED_LIBS[@]}"; then
+    echo "ERROR: Failed to load required libraries" >&2
+    exit 1
+fi
+
+# Load optional libraries with availability check
+CONFIG_MANAGEMENT_AVAILABLE=false
+if load_optional_library "config-management.sh"; then
     CONFIG_MANAGEMENT_AVAILABLE=true
 else
-    CONFIG_MANAGEMENT_AVAILABLE=false
     warning "Centralized configuration management not available, using legacy mode"
 fi
 

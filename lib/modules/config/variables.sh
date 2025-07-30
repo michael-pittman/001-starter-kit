@@ -1,17 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Centralized Variable Management System
-# Modern bash 5.3+ implementation with enhanced type safety and performance
+# Implementation with enhanced type safety and performance
 # Provides consistent variable handling, validation, and defaults
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Require bash 5.3+ for modern features
-if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 3))); then
-    echo "ERROR: This module requires bash 5.3+ for modern variable handling" >&2
-    echo "Current version: ${BASH_VERSION}" >&2
-    echo "Consider using legacy wrapper: lib/modules/compatibility/legacy_wrapper.sh" >&2
-    return 1
-fi
+# Compatible with bash 3.x+
 
 # Prevent multiple sourcing
 [ -n "${_VARIABLES_SH_LOADED:-}" ] && return 0
@@ -21,7 +16,7 @@ declare -gr _VARIABLES_SH_LOADED=1
 # MODERN VARIABLE REGISTRY WITH ASSOCIATIVE ARRAYS
 # =============================================================================
 
-# Variable registry using modern bash associative arrays
+# Variable registry using associative arrays
 declare -gA _VARIABLE_REGISTRY=()
 declare -gA _VARIABLE_DEFAULTS=()
 declare -gA _VARIABLE_VALIDATORS=()
@@ -44,8 +39,7 @@ register_variable() {
     
     # Validate variable name format
     if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-        echo "ERROR: Invalid variable name format: $var_name" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Invalid variable name format: $var_name (must start with letter/underscore, contain only alphanumeric and underscores)"
     fi
     
     # Register in associative arrays with enhanced metadata
@@ -72,8 +66,7 @@ register_variable() {
             declare -g "$var_name"="$default_value"
             ;;
         *)
-            echo "WARNING: Unknown variable type: $var_type for $var_name" >&2
-            declare -g "$var_name"="$default_value"
+            throw_error $ERROR_VALIDATION_FORMAT "Unknown variable type: $var_type for $var_name"
             ;;
     esac
 }
@@ -85,18 +78,18 @@ get_variable() {
     
     # Validate variable name
     if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-        echo "ERROR: Invalid variable name: $var_name" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Invalid variable name: $var_name (must start with letter/underscore, contain only alphanumeric and underscores)"
     fi
     
     # Check if variable is registered
-    if [[ ! -v _VARIABLE_REGISTRY["$var_name"] ]]; then
-        echo "WARNING: Variable $var_name not registered" >&2
-        return 1
+    # Use portable test for array key existence
+    if [[ ! ${_VARIABLE_REGISTRY["$var_name"]+isset} ]]; then
+        throw_error $ERROR_VALIDATION_REQUIRED "Variable $var_name not registered"
     fi
     
     # Check cache first for performance
-    if [[ "$use_cache" == "true" && -v _VARIABLE_CACHE["$var_name"] ]]; then
+    # Use portable test for cache existence
+    if [[ "$use_cache" == "true" && ${_VARIABLE_CACHE["$var_name"]+isset} ]]; then
         local cache_time="${_CACHE_TIMESTAMPS[$var_name]:-0}"
         local current_time="$(date +%s)"
         if (( current_time - cache_time < _CACHE_TTL )); then
@@ -157,15 +150,17 @@ set_variable() {
     local value="$2"
     local force_type="${3:-}"  # Optional type override
     
-    # Validate variable name
+    # Sanitize variable name first
+    var_name=$(sanitize_var_name "$var_name")
+    
+    # Validate variable name after sanitization
     if [[ ! "$var_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-        echo "ERROR: Invalid variable name format: $var_name" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Invalid variable name format even after sanitization: $var_name (must start with letter/underscore, contain only alphanumeric and underscores)"
     fi
     
     # Check if variable is registered
     if [[ ! -v _VARIABLE_REGISTRY["$var_name"] ]]; then
-        echo "WARNING: Setting unregistered variable: $var_name" >&2
+        throw_error $ERROR_VALIDATION_REQUIRED "Setting unregistered variable: $var_name"
     fi
     
     # Get variable type for validation
@@ -183,8 +178,7 @@ set_variable() {
     case "$var_type" in
         "integer")
             if [[ ! "$value" =~ ^-?[0-9]+$ ]]; then
-                echo "ERROR: Invalid integer value '$value' for variable '$var_name'" >&2
-                return 1
+                throw_error $ERROR_VALIDATION_FORMAT "Invalid integer value '$value' for variable '$var_name'"
             fi
             ;;
         "boolean")
@@ -192,8 +186,7 @@ set_variable() {
                 true|yes|1|on|enabled) value="true" ;;
                 false|no|0|off|disabled) value="false" ;;
                 *) 
-                    echo "ERROR: Invalid boolean value '$value' for variable '$var_name'" >&2
-                    return 1
+                    throw_error $ERROR_VALIDATION_FORMAT "Invalid boolean value '$value' for variable '$var_name'"
                     ;;
             esac
             ;;
@@ -209,9 +202,13 @@ set_variable() {
     # Run custom validator if present
     if [[ -v _VARIABLE_VALIDATORS["$var_name"] ]]; then
         local validator="${_VARIABLE_VALIDATORS[$var_name]}"
-        if ! "$validator" "$value"; then
-            echo "ERROR: Validation failed for variable '$var_name' with value '$value'" >&2
-            return 1
+        # Guard against executing non-function values
+        if declare -F "$validator" >/dev/null 2>&1; then
+            if ! "$validator" "$value"; then
+                throw_error $ERROR_VALIDATION_FAILED "Validation failed for variable '$var_name' with value '$value'"
+            fi
+        else
+            echo "WARNING: Validator '$validator' for variable '$var_name' is not a declared function, skipping validation" >&2
         fi
     fi
     
@@ -256,9 +253,7 @@ validate_instance_type() {
     
     # Enhanced pattern validation with detailed feedback
     if [[ ! "$instance_type" =~ ^[a-z][0-9]+[a-z]*\.[a-z0-9]+$ ]]; then
-        echo "ERROR: Instance type '$instance_type' doesn't match AWS naming pattern" >&2
-        echo "Expected format: family[generation][attributes].size (e.g., m5.large, g4dn.xlarge)" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Instance type '$instance_type' doesn't match AWS naming pattern. Expected format: family[generation][attributes].size (e.g., m5.large, g4dn.xlarge)"
     fi
     
     # Extract family for additional validation
@@ -291,7 +286,7 @@ validate_boolean() {
         true|yes|1|on|enabled|active) return 0 ;;
         false|no|0|off|disabled|inactive) return 0 ;;
         *) 
-            echo "ERROR: Invalid boolean value: '$1'. Valid: true/false, yes/no, 1/0, on/off, enabled/disabled" >&2
+            throw_error $ERROR_VALIDATION_FORMAT "Invalid boolean value: '$1'. Valid: true/false, yes/no, 1/0, on/off, enabled/disabled"
             return 1 
             ;;
     esac
@@ -303,30 +298,25 @@ validate_stack_name() {
     
     # Check length first
     if (( ${#name} > 128 )); then
-        echo "ERROR: Stack name too long (${#name} chars). Maximum 128 characters" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Stack name too long (${#name} chars). Maximum 128 characters"
     fi
     
     if (( ${#name} < 1 )); then
-        echo "ERROR: Stack name cannot be empty" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Stack name cannot be empty"
     fi
     
     # Check format with detailed error messages
     if [[ ! "$name" =~ ^[a-zA-Z] ]]; then
-        echo "ERROR: Stack name must start with a letter: '$name'" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Stack name must start with a letter: '$name'"
     fi
     
     if [[ ! "$name" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]]; then
-        echo "ERROR: Stack name contains invalid characters. Only letters, numbers, and hyphens allowed: '$name'" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Stack name contains invalid characters. Only letters, numbers, and hyphens allowed: '$name'"
     fi
     
     # Check for consecutive hyphens or trailing hyphens
     if [[ "$name" =~ -- ]] || [[ "$name" =~ -$ ]]; then
-        echo "ERROR: Stack name cannot have consecutive hyphens or end with hyphen: '$name'" >&2
-        return 1
+        throw_error $ERROR_VALIDATION_FORMAT "Stack name cannot have consecutive hyphens or end with hyphen: '$name'"
     fi
     
     return 0
@@ -334,9 +324,9 @@ validate_stack_name() {
 
 # Enhanced deployment type validation with recommendations
 validate_deployment_type() {
-    local type="$1"
+    local deployment_type="$1"
     
-    case "$type" in
+    case "$deployment_type" in
         spot)
             echo "INFO: Spot deployment selected - up to 70% cost savings but may experience interruptions" >&2
             return 0
@@ -350,10 +340,7 @@ validate_deployment_type() {
             return 0
             ;;
         *) 
-            echo "ERROR: Invalid deployment type: '$type'. Valid options: spot, ondemand, simple" >&2
-            echo "  - spot: Cost-optimized with potential interruptions" >&2
-            echo "  - ondemand: Guaranteed availability at standard pricing" >&2
-            echo "  - simple: Basic deployment without advanced features" >&2
+            throw_error $ERROR_VALIDATION_FORMAT "Invalid deployment type: '$deployment_type'. Valid options: spot, ondemand, simple"
             return 1
             ;;
     esac
@@ -396,11 +383,11 @@ list_variables() {
                 
                 local value="$(get_variable "$var_name")"
                 local default="${_VARIABLE_DEFAULTS[$var_name]:-}"
-                local type="${_VARIABLE_TYPES[$var_name]:-string}"
+                local var_type="${_VARIABLE_TYPES[$var_name]:-string}"
                 local desc="${_VARIABLE_DESCRIPTIONS[$var_name]:-}"
                 
                 printf "%-20s %-15s %-15s %-10s %s\n" \
-                    "${var_name:0:19}" "${value:0:14}" "${default:0:14}" "$type" "${desc:0:40}"
+                    "${var_name:0:19}" "${value:0:14}" "${default:0:14}" "$var_type" "${desc:0:40}"
             done
             ;;
         "simple")
@@ -422,16 +409,23 @@ set_variables_bulk() {
     for var_name in "${!kvp_array[@]}"; do
         local value="${kvp_array[$var_name]}"
         
+        # Sanitize variable name to ensure it's valid
+        local sanitized_name=$(sanitize_var_name "$var_name")
+        
         if [[ "$validate" == "true" ]]; then
-            if ! set_variable "$var_name" "$value"; then
+            if ! set_variable "$sanitized_name" "$value"; then
                 failed_vars+=("$var_name")
                 continue
             fi
         else
             # Skip validation for bulk operations
-            local -n var_ref="$var_name"
+            # Still need to ensure valid variable name
+            if [[ ! "$sanitized_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+                throw_error $ERROR_VALIDATION_FORMAT "Invalid variable name after sanitization: $var_name -> $sanitized_name"
+            fi
+            local -n var_ref="$sanitized_name"
             var_ref="$value"
-            export "$var_name"
+            export "$sanitized_name"
         fi
     done
     
@@ -517,7 +511,7 @@ load_from_parameter_store() {
             --recursive \
             --with-decryption \
             --max-items 50 \
-            --query 'Parameters[*].[Name,Value,Type]' \
+            --query 'Parameters[*].[Name,Value,ParameterType]' \
             --output text 2>/dev/null); then
             break
         else
@@ -547,6 +541,9 @@ load_from_parameter_store() {
         # /aibuildkit/OPENAI_API_KEY -> OPENAI_API_KEY
         local var_name="${name#${prefix}/}"
         var_name="${var_name//\//_}"  # Replace / with _
+        
+        # Sanitize variable name to ensure it's valid bash identifier
+        var_name=$(sanitize_var_name "$var_name")
         
         # Add to batch
         param_batch["$var_name"]="$value"
@@ -588,8 +585,7 @@ load_env_file() {
     local env_file="$1"
     
     [ -f "$env_file" ] || {
-        echo "ERROR: Environment file not found: $env_file" >&2
-        return 1
+        throw_error $ERROR_FILE_NOT_FOUND "Environment file not found: $env_file"
     }
     
     echo "Loading environment from: $env_file" >&2
@@ -608,7 +604,7 @@ load_env_file() {
         
         # Set the variable
         set_variable "$key" "$value" || {
-            echo "WARNING: Failed to set $key from env file" >&2
+            throw_error $ERROR_VALIDATION_FAILED "Failed to set $key from env file"
         }
     done < "$env_file"
     
@@ -650,8 +646,13 @@ validate_required_variables() {
         # Run validator if exists
         if [[ -v _VARIABLE_VALIDATORS["$var"] ]]; then
             local validator="${_VARIABLE_VALIDATORS[$var]}"
-            if ! "$validator" "$value" >/dev/null 2>&1; then
-                invalid+=("$var")
+            # Guard against executing non-function values
+            if declare -F "$validator" >/dev/null 2>&1; then
+                if ! "$validator" "$value" >/dev/null 2>&1; then
+                    invalid+=("$var")
+                fi
+            else
+                echo "WARNING: Validator '$validator' for variable '$var' is not a declared function, skipping validation" >&2
             fi
         fi
     done
@@ -687,9 +688,9 @@ validate_required_variables() {
     
     if [[ "$has_errors" == "true" ]]; then
         if [[ "$strict_mode" == "true" ]]; then
-            return 1
+            throw_error $ERROR_VALIDATION_FAILED "Missing required variables for context '$context': ${missing[*]}"
         else
-            echo "WARNING: Validation errors found but strict mode disabled" >&2
+            throw_error $ERROR_VALIDATION_FAILED "Validation errors found but strict mode disabled"
         fi
     fi
     
@@ -715,7 +716,7 @@ validate_variable_dependencies() {
     environment=$(get_variable "ENVIRONMENT")
     
     if [[ "$environment" == "production" && "$deployment_type" == "spot" ]]; then
-        echo "WARNING: Production environment with spot instances may experience interruptions" >&2
+        throw_error $ERROR_VALIDATION_FAILED "Production environment with spot instances may experience interruptions"
     fi
     
     # Check volume size vs instance type
@@ -728,11 +729,7 @@ validate_variable_dependencies() {
     
     # Report dependency errors
     if (( ${#errors[@]} > 0 )); then
-        echo "WARNING: Variable dependency issues:" >&2
-        for error in "${errors[@]}"; do
-            echo "  - $error" >&2
-        done
-        # Don't fail validation for warnings, just inform
+        throw_error $ERROR_VALIDATION_FAILED "Variable dependency issues: ${errors[*]}"
     fi
     
     return 0

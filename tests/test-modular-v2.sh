@@ -1,17 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Test Suite for Modular Deployment System v2
 # Comprehensive testing of all modular components
 
-set -euo pipefail
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
 
-# =============================================================================
-# TEST SETUP
-# =============================================================================
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
 
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Test configuration
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-modular-v2.sh" \
+    "core/variables" \
+    "core/logging" \
+    "core/registry" \
+    "core/errors" \
+    "errors/error_types" \
+    "compute/provisioner" \
+    "compute/spot_optimizer"
+
 readonly TEST_STACK_NAME="test-modular-$(date +%s)"
 readonly TEST_REGION="us-east-1"
 readonly TEST_INSTANCE_TYPE="t3.micro"  # Use small instance for testing
@@ -75,7 +94,6 @@ run_test() {
 # =============================================================================
 
 test_variable_sanitization() {
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
     
     # Test invalid variable names
     local result
@@ -92,7 +110,6 @@ test_variable_sanitization() {
 }
 
 test_variable_validation() {
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
     
     # Test built-in validators
     validate_aws_region "us-east-1" || { echo "Failed: us-east-1 should be valid"; return 1; }
@@ -108,7 +125,6 @@ test_variable_validation() {
 }
 
 test_variable_registration() {
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
     
     # Clear any existing variables
     VARIABLE_REGISTRY_KEYS=""
@@ -134,7 +150,6 @@ test_variable_registration() {
 # =============================================================================
 
 test_resource_registry() {
-    source "$PROJECT_ROOT/lib/modules/core/registry.sh"
     
     # Initialize test registry
     RESOURCE_REGISTRY_FILE="/tmp/test-registry-$$.json"
@@ -158,7 +173,6 @@ test_resource_registry() {
 }
 
 test_resource_dependencies() {
-    source "$PROJECT_ROOT/lib/modules/core/registry.sh"
     
     # Initialize registries
     initialize_registry "test-stack"
@@ -174,8 +188,17 @@ test_resource_dependencies() {
     # Check that resources were registered
     grep -q "vpc-1" "$RESOURCE_REGISTRY_FILE" || { echo "VPC not found in registry"; return 1; }
     
-    # TODO: Implement dependency tracking in the registry module
-    # For now, just pass the test since basic registration works
+    # Test dependency tracking - subnet depends on VPC
+    local vpc_entry=$(grep "vpc-1" "$RESOURCE_REGISTRY_FILE" | head -1)
+    local subnet_entry=$(grep "subnet-1" "$RESOURCE_REGISTRY_FILE" | head -1)
+    
+    # Check that subnet has vpc-1 as dependency
+    if echo "$subnet_entry" | grep -q '"dependencies": "vpc-1"'; then
+        echo "✓ Dependency tracking working correctly"
+    else
+        echo "✗ Dependency tracking not found in registry"
+        return 1
+    fi
     
     echo "Resource dependencies tests passed"
 }
@@ -185,7 +208,6 @@ test_resource_dependencies() {
 # =============================================================================
 
 test_error_types() {
-    source "$PROJECT_ROOT/lib/modules/errors/error_types.sh"
     
     # Clear error tracking
     ERROR_COUNT=()
@@ -217,8 +239,6 @@ test_error_types() {
 # =============================================================================
 
 test_compute_validation() {
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
-    source "$PROJECT_ROOT/lib/modules/compute/provisioner.sh"
     
     # Set up test variables
     set_variable "STACK_NAME" "$TEST_STACK_NAME"
@@ -238,14 +258,6 @@ test_compute_validation() {
 }
 
 test_fallback_logic() {
-    # Source prerequisites first
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
-    source "$PROJECT_ROOT/lib/modules/core/errors.sh"
-    source "$PROJECT_ROOT/lib/modules/core/registry.sh"
-    
-    # Then source compute modules
-    source "$PROJECT_ROOT/lib/modules/compute/provisioner.sh"
-    source "$PROJECT_ROOT/lib/modules/compute/spot_optimizer.sh"
     
     # Test that fallback selection function exists
     type -t launch_spot_instance_with_failover >/dev/null || { echo "Fallback function not found"; return 1; }
@@ -275,11 +287,12 @@ test_orchestrator_syntax() {
 }
 
 test_module_loading() {
-    # Test that all modules can be sourced without errors
-    source "$PROJECT_ROOT/lib/modules/core/variables.sh"
-    source "$PROJECT_ROOT/lib/modules/core/registry.sh"
-    source "$PROJECT_ROOT/lib/modules/errors/error_types.sh"
-    source "$PROJECT_ROOT/lib/modules/compute/provisioner.sh"
+    # Test that all modules have been loaded
+    # Check for key functions from each module
+    type -t sanitize_variable_name >/dev/null || { echo "Variables module not loaded"; return 1; }
+    type -t initialize_registry >/dev/null || { echo "Registry module not loaded"; return 1; }
+    type -t error_ec2_insufficient_capacity >/dev/null || { echo "Error types module not loaded"; return 1; }
+    type -t check_instance_type_availability >/dev/null || { echo "Provisioner module not loaded"; return 1; }
     
     echo "Module loading tests passed"
 }

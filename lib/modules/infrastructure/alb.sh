@@ -1,620 +1,748 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Application Load Balancer Infrastructure Module
-# Manages ALB, target groups, and CloudFront distributions
+# ALB Infrastructure Module
+# Uniform Application Load Balancer creation and management
 # =============================================================================
 
 # Prevent multiple sourcing
-[ -n "${_ALB_SH_LOADED:-}" ] && return 0
-_ALB_SH_LOADED=1
-
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../core/registry.sh"
-source "${SCRIPT_DIR}/../core/errors.sh"
+[ -n "${_INFRASTRUCTURE_ALB_SH_LOADED:-}" ] && return 0
+_INFRASTRUCTURE_ALB_SH_LOADED=1
 
 # =============================================================================
-# APPLICATION LOAD BALANCER MANAGEMENT
+# ALB CONFIGURATION
 # =============================================================================
 
-# Create Application Load Balancer
-create_application_load_balancer() {
-    local stack_name="${1:-$STACK_NAME}"
-    local subnets_json="$2"  # JSON array of subnet objects
-    local security_group_id="$3"
-    local scheme="${4:-internet-facing}"  # internet-facing or internal
-    
-    with_error_context "create_application_load_balancer" \
-        _create_application_load_balancer_impl "$stack_name" "$subnets_json" "$security_group_id" "$scheme"
-}
+# ALB configuration defaults
+ALB_DEFAULT_SCHEME="internet-facing"
+ALB_DEFAULT_TYPE="application"
+ALB_DEFAULT_IP_ADDRESS_TYPE="ipv4"
+ALB_DEFAULT_DELETION_PROTECTION=false
 
-_create_application_load_balancer_impl() {
+# Target group configuration defaults
+TARGET_GROUP_DEFAULT_PROTOCOL="HTTP"
+TARGET_GROUP_DEFAULT_PORT=80
+TARGET_GROUP_DEFAULT_TARGET_TYPE="instance"
+TARGET_GROUP_DEFAULT_HEALTH_CHECK_PROTOCOL="HTTP"
+TARGET_GROUP_DEFAULT_HEALTH_CHECK_PORT="traffic-port"
+TARGET_GROUP_DEFAULT_HEALTH_CHECK_PATH="/health"
+TARGET_GROUP_DEFAULT_HEALTH_CHECK_INTERVAL=30
+TARGET_GROUP_DEFAULT_HEALTH_CHECK_TIMEOUT=5
+TARGET_GROUP_DEFAULT_HEALTHY_THRESHOLD=2
+TARGET_GROUP_DEFAULT_UNHEALTHY_THRESHOLD=2
+
+# Listener configuration defaults
+LISTENER_DEFAULT_PROTOCOL="HTTP"
+LISTENER_DEFAULT_PORT=80
+LISTENER_DEFAULT_ACTION_TYPE="forward"
+
+# =============================================================================
+# ALB CREATION FUNCTIONS
+# =============================================================================
+
+# Create ALB with target group and listener
+create_alb_with_target_group() {
     local stack_name="$1"
-    local subnets_json="$2"
-    local security_group_id="$3"
-    local scheme="$4"
+    local vpc_id="$2"
+    local subnets="$3"
+    local security_groups="${4:-}"
     
-    echo "Creating Application Load Balancer for: $stack_name" >&2
+    log_info "Creating ALB with target group for stack: $stack_name" "ALB"
     
-    # Check if ALB already exists
-    local existing_alb
-    existing_alb=$(aws elbv2 describe-load-balancers \
-        --query "LoadBalancers[?LoadBalancerName=='${stack_name}-alb'].LoadBalancerArn | [0]" \
-        --output text 2>/dev/null || true)
-    
-    if [ -n "$existing_alb" ] && [ "$existing_alb" != "None" ] && [ "$existing_alb" != "null" ]; then
-        echo "ALB already exists: $existing_alb" >&2
-        echo "$existing_alb"
-        return 0
-    fi
-    
-    # Extract subnet IDs
-    local subnet_ids
-    subnet_ids=($(echo "$subnets_json" | jq -r '.[].id'))
-    
-    if [ ${#subnet_ids[@]} -lt 2 ]; then
-        throw_error $ERROR_INVALID_ARGUMENT "ALB requires at least 2 subnets in different AZs"
-    fi
+    # Generate ALB name
+    local alb_name
+    alb_name=$(generate_resource_name "alb" "$stack_name")
     
     # Create ALB
     local alb_arn
-    alb_arn=$(aws elbv2 create-load-balancer \
-        --name "${stack_name}-alb" \
-        --subnets "${subnet_ids[@]}" \
-        --security-groups "$security_group_id" \
-        --scheme "$scheme" \
-        --type application \
-        --ip-address-type ipv4 \
-        --tags $(tags_to_cli_format "$(generate_tags "$stack_name" '{"Service": "ALB"}')") \
-        --query 'LoadBalancers[0].LoadBalancerArn' \
-        --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create Application Load Balancer"
-    }
+    alb_arn=$(create_alb "$alb_name" "$vpc_id" "$subnets" "$security_groups")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create ALB: $alb_name" "ALB"
+        return 1
+    fi
     
-    # Wait for ALB to be active
-    echo "Waiting for ALB to become active..." >&2
-    aws elbv2 wait load-balancer-active --load-balancer-arns "$alb_arn" || {
-        throw_error $ERROR_TIMEOUT "ALB did not become active"
-    }
+    # Store ALB ARN
+    set_variable "ALB_ARN" "$alb_arn" "$VARIABLE_SCOPE_STACK"
     
-    # Register ALB
-    register_resource "load_balancers" "$alb_arn" \
-        "{\"name\": \"${stack_name}-alb\", \"scheme\": \"$scheme\", \"type\": \"application\"}"
+    # Get ALB DNS name
+    local alb_dns_name
+    alb_dns_name=$(get_alb_dns_name "$alb_arn")
+    if [[ $? -eq 0 ]]; then
+        set_variable "ALB_DNS_NAME" "$alb_dns_name" "$VARIABLE_SCOPE_STACK"
+    fi
     
+    # Create target group
+    local target_group_arn
+    target_group_arn=$(create_target_group "$stack_name" "$vpc_id")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create target group" "ALB"
+        # Rollback ALB creation
+        delete_alb "$alb_arn"
+        return 1
+    fi
+    
+    # Store target group ARN
+    set_variable "TARGET_GROUP_ARN" "$target_group_arn" "$VARIABLE_SCOPE_STACK"
+    
+    # Create listener
+    local listener_arn
+    listener_arn=$(create_listener "$alb_arn" "$target_group_arn")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create listener" "ALB"
+        # Rollback target group creation
+        delete_target_group "$target_group_arn"
+        delete_alb "$alb_arn"
+        return 1
+    fi
+    
+    # Store listener ARN
+    set_variable "LISTENER_ARN" "$listener_arn" "$VARIABLE_SCOPE_STACK"
+    
+    log_info "ALB creation completed successfully: $alb_arn" "ALB"
+    return 0
+}
+
+# Create ALB
+create_alb() {
+    local alb_name="$1"
+    local vpc_id="$2"
+    local subnets="$3"
+    local security_groups="$4"
+    
+    log_info "Creating ALB: $alb_name" "ALB"
+    
+    # Validate ALB name
+    if ! validate_resource_name "$alb_name" "alb"; then
+        return 1
+    fi
+    
+    # Validate VPC ID
+    if [[ -z "$vpc_id" ]]; then
+        log_error "VPC ID is required for ALB creation" "ALB"
+        return 1
+    fi
+    
+    # Validate subnets
+    if [[ -z "$subnets" ]]; then
+        log_error "Subnets are required for ALB creation" "ALB"
+        return 1
+    fi
+    
+    # Parse subnets
+    local subnet_array=()
+    IFS=' ' read -ra SUBNET_ARRAY <<< "$subnets"
+    subnet_array=("${SUBNET_ARRAY[@]}")
+    
+    # Build ALB creation command
+    local alb_cmd="aws elbv2 create-load-balancer"
+    alb_cmd="$alb_cmd --name $alb_name"
+    alb_cmd="$alb_cmd --subnets ${subnet_array[*]}"
+    alb_cmd="$alb_cmd --scheme $ALB_DEFAULT_SCHEME"
+    alb_cmd="$alb_cmd --type $ALB_DEFAULT_TYPE"
+    alb_cmd="$alb_cmd --ip-address-type $ALB_DEFAULT_IP_ADDRESS_TYPE"
+    
+    # Add security groups if provided
+    if [[ -n "$security_groups" ]]; then
+        alb_cmd="$alb_cmd --security-groups $security_groups"
+    fi
+    
+    # Add tags
+    alb_cmd="$alb_cmd --tags Key=Name,Value=$alb_name"
+    alb_cmd="$alb_cmd --tags Key=Stack,Value=$STACK_NAME"
+    alb_cmd="$alb_cmd --tags Key=Environment,Value=$ENVIRONMENT"
+    
+    # Add output format
+    alb_cmd="$alb_cmd --output json"
+    alb_cmd="$alb_cmd --query 'LoadBalancers[0].LoadBalancerArn'"
+    alb_cmd="$alb_cmd --region $AWS_REGION"
+    alb_cmd="$alb_cmd --profile $AWS_PROFILE"
+    
+    # Create ALB
+    local alb_output
+    alb_output=$(eval "$alb_cmd" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create ALB: $alb_output" "ALB"
+        return 1
+    fi
+    
+    local alb_arn
+    alb_arn=$(echo "$alb_output" | tr -d '"')
+    
+    # Wait for ALB to be available
+    log_info "Waiting for ALB to be available: $alb_arn" "ALB"
+    aws elbv2 wait load-balancer-available \
+        --load-balancer-arns "$alb_arn" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE"
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "ALB failed to become available: $alb_arn" "ALB"
+        return 1
+    fi
+    
+    log_info "ALB created successfully: $alb_arn" "ALB"
     echo "$alb_arn"
+    return 0
 }
 
 # Get ALB DNS name
 get_alb_dns_name() {
     local alb_arn="$1"
     
-    aws elbv2 describe-load-balancers \
+    log_info "Getting ALB DNS name: $alb_arn" "ALB"
+    
+    local dns_name
+    dns_name=$(aws elbv2 describe-load-balancers \
         --load-balancer-arns "$alb_arn" \
         --query 'LoadBalancers[0].DNSName' \
-        --output text
+        --output text \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to get ALB DNS name: $dns_name" "ALB"
+        return 1
+    fi
+    
+    log_info "ALB DNS name: $dns_name" "ALB"
+    echo "$dns_name"
+    return 0
 }
 
 # =============================================================================
-# TARGET GROUP MANAGEMENT
+# TARGET GROUP FUNCTIONS
 # =============================================================================
 
-# Create target group for specific service
+# Create target group
 create_target_group() {
-    local stack_name="${1:-$STACK_NAME}"
-    local service_name="$2"  # n8n, ollama, qdrant, etc.
-    local port="$3"
-    local vpc_id="$4"
-    local health_check_path="${5:-/}"
-    local protocol="${6:-HTTP}"
-    
-    with_error_context "create_target_group" \
-        _create_target_group_impl "$stack_name" "$service_name" "$port" "$vpc_id" "$health_check_path" "$protocol"
-}
-
-_create_target_group_impl() {
     local stack_name="$1"
-    local service_name="$2"
-    local port="$3"
-    local vpc_id="$4"
-    local health_check_path="$5"
-    local protocol="$6"
+    local vpc_id="$2"
     
-    # Validate required parameters
-    if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ] || [ "$vpc_id" = "null" ]; then
-        throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for target group creation"
-    fi
+    log_info "Creating target group for stack: $stack_name" "ALB"
     
-    if [ -z "$port" ]; then
-        throw_error $ERROR_INVALID_ARGUMENT "Port is required for target group creation"
-    fi
+    # Generate target group name
+    local target_group_name
+    target_group_name=$(generate_resource_name "target-group" "$stack_name")
     
-    local tg_name="${stack_name}-${service_name}-tg"
-    
-    echo "Creating target group: $tg_name" >&2
-    
-    # Check if target group already exists
-    local existing_tg
-    existing_tg=$(aws elbv2 describe-target-groups \
-        --names "$tg_name" \
-        --query 'TargetGroups[0].TargetGroupArn' \
-        --output text 2>/dev/null || true)
-    
-    if [ -n "$existing_tg" ] && [ "$existing_tg" != "None" ] && [ "$existing_tg" != "null" ]; then
-        echo "Target group already exists: $existing_tg" >&2
-        echo "$existing_tg"
-        return 0
+    # Validate target group name
+    if ! validate_resource_name "$target_group_name" "target-group"; then
+        return 1
     fi
     
     # Create target group
-    local tg_arn
-    tg_arn=$(aws elbv2 create-target-group \
-        --name "$tg_name" \
-        --protocol "$protocol" \
-        --port "$port" \
+    local target_group_output
+    target_group_output=$(aws elbv2 create-target-group \
+        --name "$target_group_name" \
+        --protocol "$TARGET_GROUP_DEFAULT_PROTOCOL" \
+        --port "$TARGET_GROUP_DEFAULT_PORT" \
         --vpc-id "$vpc_id" \
-        --target-type instance \
-        --health-check-enabled \
-        --health-check-protocol "$protocol" \
-        --health-check-port "$port" \
-        --health-check-path "$health_check_path" \
-        --health-check-interval-seconds 30 \
-        --health-check-timeout-seconds 5 \
-        --healthy-threshold-count 2 \
-        --unhealthy-threshold-count 3 \
-        --tags $(tags_to_cli_format "$(generate_tags "$stack_name" "{\"Service\": \"$service_name\"}")") \
+        --target-type "$TARGET_GROUP_DEFAULT_TARGET_TYPE" \
+        --health-check-protocol "$TARGET_GROUP_DEFAULT_HEALTH_CHECK_PROTOCOL" \
+        --health-check-port "$TARGET_GROUP_DEFAULT_HEALTH_CHECK_PORT" \
+        --health-check-path "$TARGET_GROUP_DEFAULT_HEALTH_CHECK_PATH" \
+        --health-check-interval-seconds "$TARGET_GROUP_DEFAULT_HEALTH_CHECK_INTERVAL" \
+        --health-check-timeout-seconds "$TARGET_GROUP_DEFAULT_HEALTH_CHECK_TIMEOUT" \
+        --healthy-threshold-count "$TARGET_GROUP_DEFAULT_HEALTHY_THRESHOLD" \
+        --unhealthy-threshold-count "$TARGET_GROUP_DEFAULT_UNHEALTHY_THRESHOLD" \
+        --tags "Key=Name,Value=$target_group_name" \
+        --tags "Key=Stack,Value=$stack_name" \
+        --tags "Key=Environment,Value=$ENVIRONMENT" \
+        --output json \
         --query 'TargetGroups[0].TargetGroupArn' \
-        --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create target group"
-    }
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
     
-    # Register target group
-    register_resource "target_groups" "$tg_arn" \
-        "{\"name\": \"$tg_name\", \"service\": \"$service_name\", \"port\": $port}"
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create target group: $target_group_output" "ALB"
+        return 1
+    fi
     
-    echo "$tg_arn"
+    local target_group_arn
+    target_group_arn=$(echo "$target_group_output" | tr -d '"')
+    
+    log_info "Target group created successfully: $target_group_arn" "ALB"
+    echo "$target_group_arn"
+    return 0
 }
 
-# Register instance with target group
-register_target() {
+# Register targets with target group
+register_targets() {
     local target_group_arn="$1"
-    local instance_id="$2"
-    local port="${3:-80}"
+    local instance_ids="$2"
     
-    echo "Registering instance $instance_id with target group" >&2
+    log_info "Registering targets with target group: $target_group_arn" "ALB"
     
-    aws elbv2 register-targets \
-        --target-group-arn "$target_group_arn" \
-        --targets "Id=$instance_id,Port=$port" || {
-        throw_error $ERROR_AWS_API "Failed to register target"
-    }
+    # Validate target group ARN
+    if [[ -z "$target_group_arn" ]]; then
+        log_error "Target group ARN is required" "ALB"
+        return 1
+    fi
     
-    # Wait for target to be healthy
-    echo "Waiting for target to become healthy..." >&2
-    aws elbv2 wait target-in-service \
-        --target-group-arn "$target_group_arn" \
-        --targets "Id=$instance_id,Port=$port" || {
-        echo "WARNING: Target did not become healthy within timeout" >&2
-    }
-}
-
-# Create multiple target groups for AI services
-create_ai_service_target_groups() {
-    local stack_name="${1:-$STACK_NAME}"
-    local vpc_id="$2"
+    # Validate instance IDs
+    if [[ -z "$instance_ids" ]]; then
+        log_error "Instance IDs are required" "ALB"
+        return 1
+    fi
     
-    echo "Creating target groups for AI services" >&2
+    # Parse instance IDs
+    local instance_array=()
+    IFS=' ' read -ra INSTANCE_ARRAY <<< "$instance_ids"
+    instance_array=("${INSTANCE_ARRAY[@]}")
     
-    # Define services with their ports and health check paths
-    local services=(
-        "n8n:5678:/healthz"
-        "ollama:11434:/api/tags"
-        "qdrant:6333:/health"
-        "crawl4ai:11235:/health"
-    )
-    
-    local target_groups_json="[]"
-    
-    for service_def in "${services[@]}"; do
-        local service_name port health_path
-        IFS=':' read -r service_name port health_path <<< "$service_def"
-        
-        local tg_arn
-        tg_arn=$(create_target_group "$stack_name" "$service_name" "$port" "$vpc_id" "$health_path") || {
-            echo "WARNING: Failed to create target group for $service_name" >&2
-            continue
-        }
-        
-        # Add to JSON array
-        local tg_info
-        tg_info=$(cat <<EOF
-{
-    "service": "$service_name",
-    "port": $port,
-    "target_group_arn": "$tg_arn",
-    "health_path": "$health_path"
-}
-EOF
-)
-        target_groups_json=$(echo "$target_groups_json" | jq ". += [$tg_info]")
-        
-        echo "Created target group for $service_name: $tg_arn" >&2
+    # Build targets parameter
+    local targets_param=""
+    for instance_id in "${instance_array[@]}"; do
+        if [[ -n "$targets_param" ]]; then
+            targets_param="$targets_param Id=$instance_id"
+        else
+            targets_param="Id=$instance_id"
+        fi
     done
     
-    echo "$target_groups_json"
+    # Register targets
+    local register_output
+    register_output=$(aws elbv2 register-targets \
+        --target-group-arn "$target_group_arn" \
+        --targets $targets_param \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to register targets: $register_output" "ALB"
+        return 1
+    fi
+    
+    log_info "Targets registered successfully: ${instance_array[*]}" "ALB"
+    return 0
+}
+
+# Deregister targets from target group
+deregister_targets() {
+    local target_group_arn="$1"
+    local instance_ids="$2"
+    
+    log_info "Deregistering targets from target group: $target_group_arn" "ALB"
+    
+    # Validate target group ARN
+    if [[ -z "$target_group_arn" ]]; then
+        log_error "Target group ARN is required" "ALB"
+        return 1
+    fi
+    
+    # Validate instance IDs
+    if [[ -z "$instance_ids" ]]; then
+        log_error "Instance IDs are required" "ALB"
+        return 1
+    fi
+    
+    # Parse instance IDs
+    local instance_array=()
+    IFS=' ' read -ra INSTANCE_ARRAY <<< "$instance_ids"
+    instance_array=("${INSTANCE_ARRAY[@]}")
+    
+    # Build targets parameter
+    local targets_param=""
+    for instance_id in "${instance_array[@]}"; do
+        if [[ -n "$targets_param" ]]; then
+            targets_param="$targets_param Id=$instance_id"
+        else
+            targets_param="Id=$instance_id"
+        fi
+    done
+    
+    # Deregister targets
+    local deregister_output
+    deregister_output=$(aws elbv2 deregister-targets \
+        --target-group-arn "$target_group_arn" \
+        --targets $targets_param \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to deregister targets: $deregister_output" "ALB"
+        return 1
+    fi
+    
+    log_info "Targets deregistered successfully: ${instance_array[*]}" "ALB"
+    return 0
 }
 
 # =============================================================================
-# LISTENER MANAGEMENT
+# LISTENER FUNCTIONS
 # =============================================================================
 
-# Create ALB listener with rules
-create_alb_listeners() {
+# Create listener
+create_listener() {
     local alb_arn="$1"
-    local target_groups_json="$2"
-    local enable_https="${3:-false}"
-    local certificate_arn="${4:-}"
+    local target_group_arn="$2"
     
-    echo "Creating ALB listeners" >&2
+    log_info "Creating listener for ALB: $alb_arn" "ALB"
     
-    # Create HTTP listener
-    local http_listener_arn
-    http_listener_arn=$(create_http_listener "$alb_arn" "$target_groups_json") || {
-        throw_error $ERROR_AWS_API "Failed to create HTTP listener"
-    }
-    
-    # Create HTTPS listener if enabled
-    local https_listener_arn=""
-    if [ "$enable_https" = "true" ] && [ -n "$certificate_arn" ]; then
-        https_listener_arn=$(create_https_listener "$alb_arn" "$target_groups_json" "$certificate_arn") || {
-            echo "WARNING: Failed to create HTTPS listener" >&2
-        }
+    # Validate ALB ARN
+    if [[ -z "$alb_arn" ]]; then
+        log_error "ALB ARN is required" "ALB"
+        return 1
     fi
     
-    # Return listener information
-    cat <<EOF
-{
-    "http_listener_arn": "$http_listener_arn",
-    "https_listener_arn": "$https_listener_arn"
-}
-EOF
-}
-
-# Create HTTP listener
-create_http_listener() {
-    local alb_arn="$1"
-    local target_groups_json="$2"
-    
-    # Get default target group (n8n)
-    local default_tg_arn
-    default_tg_arn=$(echo "$target_groups_json" | jq -r '.[] | select(.service == "n8n") | .target_group_arn')
-    
-    if [ -z "$default_tg_arn" ] || [ "$default_tg_arn" = "null" ]; then
-        default_tg_arn=$(echo "$target_groups_json" | jq -r '.[0].target_group_arn')
+    # Validate target group ARN
+    if [[ -z "$target_group_arn" ]]; then
+        log_error "Target group ARN is required" "ALB"
+        return 1
     fi
     
-    # Create HTTP listener
-    local listener_arn
-    listener_arn=$(aws elbv2 create-listener \
+    # Create listener
+    local listener_output
+    listener_output=$(aws elbv2 create-listener \
         --load-balancer-arn "$alb_arn" \
-        --protocol HTTP \
-        --port 80 \
-        --default-actions Type=forward,TargetGroupArn="$default_tg_arn" \
+        --protocol "$LISTENER_DEFAULT_PROTOCOL" \
+        --port "$LISTENER_DEFAULT_PORT" \
+        --default-actions "Type=$LISTENER_DEFAULT_ACTION_TYPE,TargetGroupArn=$target_group_arn" \
+        --output json \
         --query 'Listeners[0].ListenerArn' \
-        --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create HTTP listener"
-    }
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
     
-    # Create listener rules for different services
-    create_listener_rules "$listener_arn" "$target_groups_json"
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create listener: $listener_output" "ALB"
+        return 1
+    fi
     
+    local listener_arn
+    listener_arn=$(echo "$listener_output" | tr -d '"')
+    
+    log_info "Listener created successfully: $listener_arn" "ALB"
     echo "$listener_arn"
+    return 0
 }
 
-# Create HTTPS listener
+# Create HTTPS listener with certificate
 create_https_listener() {
     local alb_arn="$1"
-    local target_groups_json="$2"
+    local target_group_arn="$2"
     local certificate_arn="$3"
     
-    # Get default target group (n8n)
-    local default_tg_arn
-    default_tg_arn=$(echo "$target_groups_json" | jq -r '.[] | select(.service == "n8n") | .target_group_arn')
+    log_info "Creating HTTPS listener for ALB: $alb_arn" "ALB"
     
-    if [ -z "$default_tg_arn" ] || [ "$default_tg_arn" = "null" ]; then
-        default_tg_arn=$(echo "$target_groups_json" | jq -r '.[0].target_group_arn')
+    # Validate ALB ARN
+    if [[ -z "$alb_arn" ]]; then
+        log_error "ALB ARN is required" "ALB"
+        return 1
+    fi
+    
+    # Validate target group ARN
+    if [[ -z "$target_group_arn" ]]; then
+        log_error "Target group ARN is required" "ALB"
+        return 1
+    fi
+    
+    # Validate certificate ARN
+    if [[ -z "$certificate_arn" ]]; then
+        log_error "Certificate ARN is required for HTTPS listener" "ALB"
+        return 1
     fi
     
     # Create HTTPS listener
-    local listener_arn
-    listener_arn=$(aws elbv2 create-listener \
+    local listener_output
+    listener_output=$(aws elbv2 create-listener \
         --load-balancer-arn "$alb_arn" \
-        --protocol HTTPS \
+        --protocol "HTTPS" \
         --port 443 \
-        --certificates CertificateArn="$certificate_arn" \
-        --default-actions Type=forward,TargetGroupArn="$default_tg_arn" \
+        --certificates "CertificateArn=$certificate_arn" \
+        --default-actions "Type=forward,TargetGroupArn=$target_group_arn" \
+        --output json \
         --query 'Listeners[0].ListenerArn' \
-        --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create HTTPS listener"
-    }
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
     
-    # Create listener rules for different services
-    create_listener_rules "$listener_arn" "$target_groups_json"
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create HTTPS listener: $listener_output" "ALB"
+        return 1
+    fi
     
+    local listener_arn
+    listener_arn=$(echo "$listener_output" | tr -d '"')
+    
+    log_info "HTTPS listener created successfully: $listener_arn" "ALB"
     echo "$listener_arn"
-}
-
-# Create listener rules for path-based routing
-create_listener_rules() {
-    local listener_arn="$1"
-    local target_groups_json="$2"
-    
-    # Create rules for each service (skip n8n as it's default)
-    local priority=100
-    echo "$target_groups_json" | jq -c '.[]' | while read -r service_obj; do
-        local service_name port target_group_arn
-        service_name=$(echo "$service_obj" | jq -r '.service')
-        port=$(echo "$service_obj" | jq -r '.port')
-        target_group_arn=$(echo "$service_obj" | jq -r '.target_group_arn')
-        
-        # Skip n8n as it's the default
-        [ "$service_name" = "n8n" ] && continue
-        
-        # Create path-based rule
-        local path_pattern="/${service_name}*"
-        
-        aws elbv2 create-rule \
-            --listener-arn "$listener_arn" \
-            --priority "$priority" \
-            --conditions "Field=path-pattern,Values=$path_pattern" \
-            --actions "Type=forward,TargetGroupArn=$target_group_arn" || {
-            echo "WARNING: Failed to create rule for $service_name" >&2
-        }
-        
-        priority=$((priority + 10))
-    done
+    return 0
 }
 
 # =============================================================================
-# MAIN ALB INFRASTRUCTURE SETUP
+# SECURITY GROUP FUNCTIONS
 # =============================================================================
 
-# Setup comprehensive ALB infrastructure with graceful error handling
-setup_alb_infrastructure() {
-    local stack_name="${1:-$STACK_NAME}"
-    local subnets_json="$2"  # JSON array of subnet objects
-    local security_group_id="$3"
-    local vpc_id="$4"
-    local enable_https="${5:-false}"
-    local certificate_arn="${6:-}"
-    local allow_failure="${7:-false}"  # If true, returns empty result on failure instead of exiting
+# Create ALB security group
+create_alb_security_group() {
+    local stack_name="$1"
+    local vpc_id="$2"
     
-    echo "Setting up ALB infrastructure for: $stack_name" >&2
+    log_info "Creating ALB security group for stack: $stack_name" "ALB"
     
-    # Validate inputs
-    if [ -z "$subnets_json" ] || [ -z "$security_group_id" ] || [ -z "$vpc_id" ]; then
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: Missing required parameters for ALB setup" >&2
-            echo "{}"
-            return 0
-        else
-            throw_error $ERROR_INVALID_ARGUMENT "setup_alb_infrastructure requires subnets_json, security_group_id, and vpc_id"
-        fi
+    # Generate security group name
+    local security_group_name
+    security_group_name=$(generate_resource_name "security-group" "$stack_name" "alb")
+    
+    # Validate security group name
+    if ! validate_resource_name "$security_group_name" "security-group"; then
+        return 1
     fi
     
-    # Check subnet count for ALB requirement
-    local subnet_count
-    subnet_count=$(echo "$subnets_json" | jq 'length')
-    if [ "$subnet_count" -lt 2 ]; then
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: ALB requires at least 2 subnets in different AZs (found: $subnet_count)" >&2
-            echo "{}"
-            return 0
-        else
-            echo "ERROR: ALB requires at least 2 subnets in different AZs" >&2
-            return 1
-        fi
+    # Create security group
+    local security_group_output
+    security_group_output=$(aws ec2 create-security-group \
+        --group-name "$security_group_name" \
+        --description "Security group for ALB $stack_name" \
+        --vpc-id "$vpc_id" \
+        --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=$security_group_name}]" \
+        --output json \
+        --query 'GroupId' \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create ALB security group: $security_group_output" "ALB"
+        return 1
     fi
     
-    # Create Application Load Balancer
-    local alb_arn
-    alb_arn=$(create_application_load_balancer "$stack_name" "$subnets_json" "$security_group_id" 2>&1) || {
-        local exit_code=$?
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: Failed to create ALB: $alb_arn" >&2
-            echo "{}"
-            return 0
-        else
-            echo "ERROR: Failed to create ALB: $alb_arn" >&2
-            return $exit_code
-        fi
-    }
-    echo "ALB created: $alb_arn" >&2
+    local security_group_id
+    security_group_id=$(echo "$security_group_output" | tr -d '"')
     
-    # Get ALB DNS name
-    local alb_dns
-    alb_dns=$(get_alb_dns_name "$alb_arn" 2>&1) || {
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: Failed to get ALB DNS name" >&2
-            echo "{}"
-            return 0
-        else
-            return 1
-        fi
-    }
-    echo "ALB DNS: $alb_dns" >&2
+    # Add inbound rules
+    if ! add_alb_inbound_rules "$security_group_id"; then
+        log_error "Failed to add ALB inbound rules" "ALB"
+        # Cleanup security group
+        delete_security_group "$security_group_id"
+        return 1
+    fi
     
-    # Create target groups for AI services
-    local target_groups_json
-    target_groups_json=$(create_ai_service_target_groups "$stack_name" "$vpc_id" 2>&1) || {
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: Failed to create target groups" >&2
-            # Return partial result with ALB info only
-            cat <<EOF
-{
-    "alb_arn": "$alb_arn",
-    "alb_dns": "$alb_dns",
-    "target_groups": [],
-    "listeners": {}
-}
-EOF
-            return 0
-        else
-            return 1
-        fi
-    }
-    echo "Target groups created" >&2
-    
-    # Create listeners
-    local listeners_info
-    listeners_info=$(create_alb_listeners "$alb_arn" "$target_groups_json" "$enable_https" "$certificate_arn" 2>&1) || {
-        if [ "$allow_failure" = "true" ]; then
-            echo "WARNING: Failed to create listeners" >&2
-            # Return partial result without listeners
-            cat <<EOF
-{
-    "alb_arn": "$alb_arn",
-    "alb_dns": "$alb_dns",
-    "target_groups": $target_groups_json,
-    "listeners": {}
-}
-EOF
-            return 0
-        else
-            return 1
-        fi
-    }
-    echo "Listeners created" >&2
-    
-    # Return ALB information
-    cat <<EOF
-{
-    "alb_arn": "$alb_arn",
-    "alb_dns": "$alb_dns",
-    "target_groups": $target_groups_json,
-    "listeners": $listeners_info
-}
-EOF
+    log_info "ALB security group created successfully: $security_group_id" "ALB"
+    echo "$security_group_id"
+    return 0
 }
 
-# Setup ALB infrastructure with retries
-setup_alb_infrastructure_with_retries() {
-    local stack_name="${1:-$STACK_NAME}"
-    local subnets_json="$2"
-    local security_group_id="$3"
-    local vpc_id="$4"
-    local max_retries="${5:-3}"
-    local retry_delay="${6:-10}"
+# Add ALB inbound rules
+add_alb_inbound_rules() {
+    local security_group_id="$1"
     
-    echo "Setting up ALB infrastructure with retry capability" >&2
+    log_info "Adding ALB inbound rules to security group: $security_group_id" "ALB"
     
-    local attempt=1
-    while [ $attempt -le $max_retries ]; do
-        echo "ALB setup attempt $attempt of $max_retries..." >&2
-        
-        local result
-        result=$(setup_alb_infrastructure "$stack_name" "$subnets_json" "$security_group_id" "$vpc_id" "false" "" "true")
-        
-        # Check if we got a valid result
-        if [ -n "$result" ] && [ "$result" != "{}" ]; then
-            local alb_arn
-            alb_arn=$(echo "$result" | jq -r '.alb_arn // empty')
-            if [ -n "$alb_arn" ]; then
-                echo "ALB setup succeeded on attempt $attempt" >&2
-                echo "$result"
-                return 0
-            fi
-        fi
-        
-        if [ $attempt -lt $max_retries ]; then
-            echo "Waiting ${retry_delay}s before retry..." >&2
-            sleep $retry_delay
-            ((attempt++))
-        else
-            echo "All ALB setup attempts failed" >&2
-            echo "{}"
-            return 1
-        fi
-    done
-}
-
-# =============================================================================
-# ALB UTILITIES
-# =============================================================================
-
-# Get ALB health status
-get_alb_health_status() {
-    local alb_arn="$1"
+    # Add HTTP rule
+    local http_rule_output
+    http_rule_output=$(aws ec2 authorize-security-group-ingress \
+        --group-id "$security_group_id" \
+        --protocol tcp \
+        --port 80 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
     
-    # Get all target groups for this ALB
-    local target_groups
-    target_groups=$(aws elbv2 describe-target-groups \
-        --load-balancer-arn "$alb_arn" \
-        --query 'TargetGroups[*].TargetGroupArn' \
-        --output text)
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to add HTTP rule: $http_rule_output" "ALB"
+        return 1
+    fi
     
-    # Check health of each target group
-    for tg_arn in $target_groups; do
-        local health_status
-        health_status=$(aws elbv2 describe-target-health \
-            --target-group-arn "$tg_arn" \
-            --query 'TargetHealthDescriptions[*].{Target:Target.Id,Health:TargetHealth.State}' \
-            --output json)
-        
-        echo "Target Group: $tg_arn"
-        echo "$health_status" | jq -r '.[] | "\(.Target): \(.Health)"'
-        echo ""
-    done
+    # Add HTTPS rule
+    local https_rule_output
+    https_rule_output=$(aws ec2 authorize-security-group-ingress \
+        --group-id "$security_group_id" \
+        --protocol tcp \
+        --port 443 \
+        --cidr 0.0.0.0/0 \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to add HTTPS rule: $https_rule_output" "ALB"
+        return 1
+    fi
+    
+    log_info "ALB inbound rules added successfully" "ALB"
+    return 0
 }
 
 # =============================================================================
 # CLEANUP FUNCTIONS
 # =============================================================================
 
-# Cleanup ALB infrastructure
-cleanup_alb_infrastructure() {
-    local stack_name="${1:-$STACK_NAME}"
+# Delete ALB
+delete_alb() {
+    local alb_arn="$1"
     
-    echo "Cleaning up ALB infrastructure for: $stack_name" >&2
+    log_info "Deleting ALB: $alb_arn" "ALB"
     
-    # Get ALB ARN
-    local alb_arn
-    alb_arn=$(aws elbv2 describe-load-balancers \
-        --query "LoadBalancers[?LoadBalancerName=='${stack_name}-alb'].LoadBalancerArn | [0]" \
-        --output text 2>/dev/null || true)
-    
-    if [ -n "$alb_arn" ] && [ "$alb_arn" != "None" ] && [ "$alb_arn" != "null" ]; then
-        # Delete listeners first
-        local listeners
-        listeners=$(aws elbv2 describe-listeners \
-            --load-balancer-arn "$alb_arn" \
-            --query 'Listeners[*].ListenerArn' \
-            --output text 2>/dev/null || echo "")
-        
-        for listener_arn in $listeners; do
-            if [ -n "$listener_arn" ] && [ "$listener_arn" != "None" ]; then
-                aws elbv2 delete-listener --listener-arn "$listener_arn" || true
-                echo "Deleted listener: $listener_arn" >&2
-            fi
-        done
-        
-        # Delete target groups
-        local target_groups
-        target_groups=$(aws elbv2 describe-target-groups \
-            --load-balancer-arn "$alb_arn" \
-            --query 'TargetGroups[*].TargetGroupArn' \
-            --output text 2>/dev/null || echo "")
-        
-        for tg_arn in $target_groups; do
-            if [ -n "$tg_arn" ] && [ "$tg_arn" != "None" ]; then
-                aws elbv2 delete-target-group --target-group-arn "$tg_arn" || true
-                echo "Deleted target group: $tg_arn" >&2
-            fi
-        done
-        
-        # Delete ALB
-        aws elbv2 delete-load-balancer --load-balancer-arn "$alb_arn" || true
-        echo "Deleted ALB: $alb_arn" >&2
+    if ! aws elbv2 delete-load-balancer \
+        --load-balancer-arn "$alb_arn" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+        log_error "Failed to delete ALB: $alb_arn" "ALB"
+        return 1
     fi
     
-    echo "ALB cleanup completed" >&2
+    log_info "ALB deleted successfully: $alb_arn" "ALB"
+    return 0
+}
+
+# Delete target group
+delete_target_group() {
+    local target_group_arn="$1"
+    
+    log_info "Deleting target group: $target_group_arn" "ALB"
+    
+    if ! aws elbv2 delete-target-group \
+        --target-group-arn "$target_group_arn" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+        log_error "Failed to delete target group: $target_group_arn" "ALB"
+        return 1
+    fi
+    
+    log_info "Target group deleted successfully: $target_group_arn" "ALB"
+    return 0
+}
+
+# Delete listener
+delete_listener() {
+    local listener_arn="$1"
+    
+    log_info "Deleting listener: $listener_arn" "ALB"
+    
+    if ! aws elbv2 delete-listener \
+        --listener-arn "$listener_arn" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+        log_error "Failed to delete listener: $listener_arn" "ALB"
+        return 1
+    fi
+    
+    log_info "Listener deleted successfully: $listener_arn" "ALB"
+    return 0
+}
+
+# Delete security group
+delete_security_group() {
+    local security_group_id="$1"
+    
+    log_info "Deleting security group: $security_group_id" "ALB"
+    
+    if ! aws ec2 delete-security-group \
+        --group-id "$security_group_id" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+        log_error "Failed to delete security group: $security_group_id" "ALB"
+        return 1
+    fi
+    
+    log_info "Security group deleted successfully: $security_group_id" "ALB"
+    return 0
+}
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+# Get ALB information
+get_alb_info() {
+    local alb_arn="$1"
+    
+    log_info "Getting ALB information: $alb_arn" "ALB"
+    
+    local alb_info
+    alb_info=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$alb_arn" \
+        --output json \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to get ALB information: $alb_info" "ALB"
+        return 1
+    fi
+    
+    echo "$alb_info"
+    return 0
+}
+
+# Get target group information
+get_target_group_info() {
+    local target_group_arn="$1"
+    
+    log_info "Getting target group information: $target_group_arn" "ALB"
+    
+    local target_group_info
+    target_group_info=$(aws elbv2 describe-target-groups \
+        --target-group-arns "$target_group_arn" \
+        --output json \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to get target group information: $target_group_info" "ALB"
+        return 1
+    fi
+    
+    echo "$target_group_info"
+    return 0
+}
+
+# Get target health
+get_target_health() {
+    local target_group_arn="$1"
+    
+    log_info "Getting target health for target group: $target_group_arn" "ALB"
+    
+    local target_health
+    target_health=$(aws elbv2 describe-target-health \
+        --target-group-arn "$target_group_arn" \
+        --output json \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to get target health: $target_health" "ALB"
+        return 1
+    fi
+    
+    echo "$target_health"
+    return 0
+}
+
+# Wait for targets to be healthy
+wait_for_targets_healthy() {
+    local target_group_arn="$1"
+    local timeout="${2:-300}"
+    
+    log_info "Waiting for targets to be healthy: $target_group_arn" "ALB"
+    
+    local start_time
+    start_time=$(date +%s)
+    
+    while true; do
+        local current_time
+        current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+        
+        if [[ $elapsed -gt $timeout ]]; then
+            log_error "Timeout waiting for targets to be healthy" "ALB"
+            return 1
+        fi
+        
+        local target_health
+        target_health=$(get_target_health "$target_group_arn")
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to get target health" "ALB"
+            return 1
+        fi
+        
+        # Check if all targets are healthy
+        local unhealthy_count
+        unhealthy_count=$(echo "$target_health" | jq -r '.TargetHealthDescriptions[] | select(.TargetHealth.State != "healthy") | .Target.Id' | wc -l)
+        
+        if [[ $unhealthy_count -eq 0 ]]; then
+            log_info "All targets are healthy" "ALB"
+            return 0
+        fi
+        
+        log_info "Waiting for targets to be healthy... ($unhealthy_count unhealthy)" "ALB"
+        sleep 10
+    done
 }

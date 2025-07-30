@@ -5,67 +5,40 @@
 # =============================================================================
 # Provides common security validation functions for deployment scripts
 # Created as part of security improvements identified in heuristic review
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
-
-# Get script directory for bash version validation
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Validate bash version before proceeding
-source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
-require_bash_533 "security-validation.sh"
 
 set -euo pipefail
 
-# Colors for output (only define if not already set)
-if [[ -z "${RED:-}" ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    NC='\033[0m'
-fi
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "security-validation.sh" "core/variables" "core/logging" "config/variables"
 
 # =============================================================================
 # CONFIGURATION SECURITY INTEGRATION
 # =============================================================================
-
-# Load configuration management library if available
-load_config_management_for_security() {
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local project_root="$(cd "$script_dir/.." && pwd)"
-    local config_lib="$project_root/lib/config-management.sh"
-    
-    if [[ -f "$config_lib" ]]; then
-        source "$config_lib"
-        return 0
-    else
-        echo -e "${YELLOW}Warning: Configuration management library not found, using legacy validation${NC}" >&2
-        return 1
-    fi
-}
 
 # Validate configuration-based security settings
 validate_config_security() {
     local environment="${1:-${ENVIRONMENT:-development}}"
     local deployment_type="${2:-${DEPLOYMENT_TYPE:-simple}}"
     
-    # Load configuration management if available
-    if load_config_management_for_security; then
-        # Use centralized configuration validation
-        if declare -f init_config >/dev/null 2>&1; then
-            init_config "$environment" "$deployment_type" || {
-                echo -e "${RED}Error: Failed to initialize configuration for security validation${NC}" >&2
-                return 1
-            }
-        fi
-        
-        # Validate security-specific configuration
-        validate_security_config_values "$environment" || return 1
-    else
-        # Fallback to basic validation
-        echo -e "${YELLOW}Warning: Using basic security validation without configuration management${NC}" >&2
+    # Use centralized configuration validation
+    if declare -f init_config >/dev/null 2>&1; then
+        init_config "$environment" "$deployment_type" || {
+            error "Failed to initialize configuration for security validation"
+            return 1
+        }
     fi
+    
+    # Validate security-specific configuration
+    validate_security_config_values "$environment" || return 1
     
     return 0
 }
@@ -79,7 +52,7 @@ validate_security_config_values() {
     container_security_enabled=$(get_security_config "container_security.run_as_non_root" "true" 2>/dev/null || echo "true")
     
     if [[ "$environment" == "production" && "$container_security_enabled" != "true" ]]; then
-        echo -e "${RED}Error: Container security must be enabled in production environment${NC}" >&2
+        error "Container security must be enabled in production environment"
         return 1
     fi
     
@@ -88,7 +61,7 @@ validate_security_config_values() {
     secrets_manager_enabled=$(get_security_config "secrets_management.use_aws_secrets_manager" "true" 2>/dev/null || echo "true")
     
     if [[ "$environment" == "production" && "$secrets_manager_enabled" != "true" ]]; then
-        echo -e "${RED}Error: AWS Secrets Manager must be enabled in production environment${NC}" >&2
+        error "AWS Secrets Manager must be enabled in production environment"
         return 1
     fi
     
@@ -97,7 +70,7 @@ validate_security_config_values() {
     encryption_at_rest=$(get_security_config "secrets_management.encryption_at_rest" "true" 2>/dev/null || echo "true")
     
     if [[ "$environment" == "production" && "$encryption_at_rest" != "true" ]]; then
-        echo -e "${RED}Error: Encryption at rest must be enabled in production environment${NC}" >&2
+        error "Encryption at rest must be enabled in production environment"
         return 1
     fi
     
@@ -106,7 +79,7 @@ validate_security_config_values() {
     cors_strict_mode=$(get_security_config "network_security.cors_strict_mode" "true" 2>/dev/null || echo "true")
     
     if [[ "$environment" == "production" && "$cors_strict_mode" != "true" ]]; then
-        echo -e "${RED}Error: CORS strict mode must be enabled in production environment${NC}" >&2
+        error "CORS strict mode must be enabled in production environment"
         return 1
     fi
     

@@ -2,29 +2,15 @@
 # =============================================================================
 # Modern Resource Registry
 # Advanced resource tracking with associative arrays and dependency management
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Require bash 5.3+ for modern features
-if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 3))); then
-    echo "ERROR: This module requires bash 5.3+ for modern resource tracking" >&2
-    echo "Current version: ${BASH_VERSION}" >&2
-    echo "Consider using legacy wrapper: lib/modules/compatibility/legacy_wrapper.sh" >&2
-    return 1
-fi
+# Compatible with bash 3.x+
 
 # Prevent multiple sourcing
 [ -n "${_REGISTRY_SH_LOADED:-}" ] && return 0
 declare -gr _REGISTRY_SH_LOADED=1
 
-# Bash version validation for modules (non-exiting)
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/bash_version.sh"
-    if ! bash_533_available; then
-        echo "WARNING: core/registry.sh requires bash 5.3.3+ but found $(get_current_bash_version)" >&2
-    fi
-fi
 
 # =============================================================================
 # MODERN RESOURCE TRACKING WITH ASSOCIATIVE ARRAYS
@@ -33,7 +19,7 @@ fi
 # Resource registry file
 RESOURCE_REGISTRY_FILE="${RESOURCE_REGISTRY_FILE:-/tmp/deployment-registry-$$.json}"
 
-# Modern resource tracking with associative arrays for performance
+# Resource tracking with associative arrays
 declare -gA RESOURCE_METADATA=()      # resource_id -> JSON metadata
 declare -gA RESOURCE_STATUS=()        # resource_id -> status
 declare -gA RESOURCE_DEPENDENCIES=()  # resource_id -> space-separated dependencies
@@ -790,7 +776,7 @@ generate_cleanup_script() {
     }
     
     cat > "$output_file" <<'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Auto-generated cleanup script
 set -euo pipefail
 

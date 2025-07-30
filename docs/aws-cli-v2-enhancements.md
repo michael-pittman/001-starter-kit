@@ -172,7 +172,7 @@ aws_service_health_check "ec2" "elbv2" "efs" "ssm"
 - Performance and reliability validation
 - HTML and JSON test reporting
 
-#### `scripts/aws-cli-v2-demo.sh`
+#### `archive/demos/aws-cli-v2-demo.sh`
 - Interactive demonstration of all features
 - Performance benchmarking
 - Real-world usage examples
@@ -280,13 +280,13 @@ make aws-cli-demo
 ### Manual Testing
 ```bash
 # Test basic functionality
-./scripts/aws-cli-v2-demo.sh --mode basic
+./archive/demos/aws-cli-v2-demo.sh --mode basic
 
 # Test advanced features
-./scripts/aws-cli-v2-demo.sh --mode advanced
+./archive/demos/aws-cli-v2-demo.sh --mode advanced
 
 # Full feature demonstration
-./scripts/aws-cli-v2-demo.sh --mode full
+./archive/demos/aws-cli-v2-demo.sh --mode full
 ```
 
 ### Performance Testing
@@ -380,7 +380,7 @@ record_circuit_breaker_result "service-name" "true"
 ### Debug Commands
 ```bash
 # Test AWS CLI v2 environment
-./scripts/aws-cli-v2-demo.sh --mode basic --verbose
+./archive/demos/aws-cli-v2-demo.sh --mode basic --verbose
 
 # Run comprehensive tests
 ./tests/test-aws-cli-v2.sh
@@ -523,4 +523,4 @@ export DEBUG=true
 
 **Last Updated**: January 2025  
 **Version**: 2.0.0  
-**Compatibility**: AWS CLI v2.0.0+, Bash 5.3.3+
+**Compatibility**: AWS CLI v2.0.0+, Bash 3.x+

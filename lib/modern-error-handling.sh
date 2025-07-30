@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Modern Error Handling Extensions
-# Advanced bash 5.3+ error handling patterns and utilities
-# Requires: bash 5.3.3+
+# Advanced error handling patterns and utilities
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation - critical for modern features
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    # Get the directory of this script for sourcing bash_version module
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "modern-error-handling.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # =============================================================================
 # ADVANCED ERROR RECOVERY AND ANALYTICS
@@ -69,7 +61,7 @@ get_error_recovery_suggestion() {
     esac
 }
 
-# Enhanced stack trace generation with modern bash features
+# Enhanced stack trace generation - compatible with bash 3.x+
 generate_enhanced_stack_trace() {
     local function_stack="$1"
     local source_stack="$2"
@@ -82,7 +74,7 @@ generate_enhanced_stack_trace() {
     fi
     
     if [[ -n "$function_stack" && -n "$source_stack" && -n "$line_stack" ]]; then
-        # Parse the stacks using bash 5.3+ features
+        # Parse the stacks - compatible with bash 3.x+
         IFS=' ' read -ra func_array <<< "$function_stack"
         IFS=' ' read -ra source_array <<< "$source_stack"
         IFS=' ' read -ra line_array <<< "$line_stack"
@@ -134,7 +126,7 @@ generate_enhanced_stack_trace() {
     fi
 }
 
-# Check for error patterns and recurring issues using modern bash
+# Check for error patterns and recurring issues - compatible with bash 3.x+
 check_error_patterns() {
     local error_type="$1"
     local command="$2"
@@ -144,7 +136,7 @@ check_error_patterns() {
     command_signature=$(echo "$command" | sed -E 's/[[:space:]]+/ /g' | cut -d' ' -f1-3)
     local pattern_key="${error_type}_$(echo "$command_signature" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-50)"
     
-    # Use modern bash features for pattern storage
+    # Pattern storage - compatible with bash 3.x+
     local pattern_file="/tmp/error_patterns_$$"
     local count=1
     
@@ -447,7 +439,7 @@ parse_aws_error() {
     local command="$2"
     local exit_code="$3"
     
-    # Modern error type detection using bash 5.3+ features
+    # Error type detection - compatible with bash 3.x+
     local error_type="AWS"
     local error_subtype="UNKNOWN"
     local recovery_action=""
@@ -614,7 +606,7 @@ aws_retry_with_intelligence() {
 # MODERN BASH SAFETY AND DEBUGGING FEATURES
 # =============================================================================
 
-# Enhanced script safety with modern bash features
+# Enhanced script safety - compatible with bash 3.x+
 enable_enhanced_safety() {
     # Enable all safety features
     set -euo pipefail

@@ -43,6 +43,17 @@ aws-config/
 *.log
 logs/
 
+# Archive directories - historical documentation and test results
+archive/
+archive/reports/
+archive/summaries/  
+archive/test-results/
+archive/validation-reports/
+archive/legacy-scripts/
+archive/logs/
+archive/scripts/
+archive/docker/
+
 # Temporary documentation files
 **/HEURISTIC_REVIEW*.md
 **/COMPREHENSIVE_*.md
@@ -54,6 +65,8 @@ logs/
 *VARIABLE_MANAGEMENT_SOLUTION*.md
 cleanup-plan.md
 docs/archive/
+docs/stories/
+docs/prd/
 
 # Docker and build artifacts
 .docker/
@@ -81,3 +94,9 @@ terraform.tfvars
 # Local development overrides
 *local*
 *dev-override*
+
+# Agent Files
+web-bundles/
+.bmad-core/
+.claude/
+.cursor/

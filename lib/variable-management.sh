@@ -2,16 +2,9 @@
 # =============================================================================
 # Variable Management Library 
 # Unified environment variable initialization and management system
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "variable-management.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 # This library provides a robust, unified system for setting and managing
 # environment variables across all deployment scripts and instances.
 # 
@@ -64,40 +57,59 @@ readonly AWS_REGIONS="us-east-1 us-west-2 eu-west-1"
 # Internal logging function (fallback if main logging not available)
 var_log() {
     local level="$1"
-    shift
-    local message="$*"
-    local timestamp=$(date +'%Y-%m-%d %H:%M:%S')
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    case "$level" in
-        ERROR)
-            if declare -f error >/dev/null 2>&1; then
-                error "$message"
-            else
-                echo "[$timestamp] ERROR: $message" >&2
-            fi
-            ;;
-        WARN|WARNING)
-            if declare -f warning >/dev/null 2>&1; then
-                warning "$message"
-            else
-                echo "[$timestamp] WARNING: $message" >&2
-            fi
-            ;;
-        SUCCESS)
-            if declare -f success >/dev/null 2>&1; then
-                success "$message"
-            else
-                echo "[$timestamp] SUCCESS: $message"
-            fi
-            ;;
-        *)
-            if declare -f log >/dev/null 2>&1; then
-                log "$message"
-            else
-                echo "[$timestamp] INFO: $message"
-            fi
-            ;;
-    esac
+    # Use standardized logging if available
+    if command -v log_message >/dev/null 2>&1; then
+        case "$level" in
+            ERROR)
+                log_message "ERROR" "$message" "VARIABLE_MANAGEMENT"
+                ;;
+            WARN|WARNING)
+                log_message "WARN" "$message" "VARIABLE_MANAGEMENT"
+                ;;
+            SUCCESS)
+                log_message "INFO" "$message" "VARIABLE_MANAGEMENT"  # Use INFO level for success
+                ;;
+            *)
+                log_message "INFO" "$message" "VARIABLE_MANAGEMENT"
+                ;;
+        esac
+    else
+        # Fallback to legacy logging
+        case "$level" in
+            ERROR)
+                if declare -f error >/dev/null 2>&1; then
+                    error "$message"
+                else
+                    echo "[$timestamp] ERROR: $message" >&2
+                fi
+                ;;
+            WARN|WARNING)
+                if declare -f warning >/dev/null 2>&1; then
+                    warning "$message"
+                else
+                    echo "[$timestamp] WARNING: $message" >&2
+                fi
+                ;;
+            SUCCESS)
+                if declare -f success >/dev/null 2>&1; then
+                    success "$message"
+                else
+                    echo "[$timestamp] SUCCESS: $message"
+                fi
+                ;;
+            *)
+                if declare -f log >/dev/null 2>&1; then
+                    log "$message"
+                else
+                    echo "[$timestamp] INFO: $message"
+                fi
+                ;;
+        esac
+    fi
 }
 
 # =============================================================================

@@ -135,7 +135,7 @@ Comprehensive system validation:
 
 ### Simple Demo Testing
 ```bash
-./scripts/simple-demo.sh
+./archive/demos/simple-demo.sh
 ```
 Tests core logic without AWS:
 - Spot instance selection algorithms
@@ -145,7 +145,7 @@ Tests core logic without AWS:
 
 ### Intelligent Selection Testing
 ```bash
-./scripts/test-intelligent-selection.sh
+./archive/demos/test-intelligent-selection.sh
 ```
 Validates selection logic:
 - Multi-region analysis
@@ -411,7 +411,7 @@ bash -x ./tests/test-modular-v2.sh
 ### Benchmarking
 ```bash
 # Measure spot pricing performance
-time ./scripts/simple-demo.sh
+time ./archive/demos/simple-demo.sh
 
 # Profile module loading
 time for i in {1..10}; do

@@ -1,12 +1,26 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
+# =============================================================================
 # Simple Docker Image Version Updater
 # Updates Docker Compose files to use latest tags
-
-set -euo pipefail
+# =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Source the library loader
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+else
+    echo "ERROR: Cannot find lib-loader.sh in $PROJECT_ROOT/lib/" >&2
+    exit 1
+fi
+
+# Enable error handling
+set -euo pipefail
+
+# Load required modules through the library system
+load_module "aws-deployment-common"
+
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.gpu-optimized.yml"
 
 # Detect Docker Compose command (modern vs legacy)
@@ -20,8 +34,9 @@ else
 fi
 
 # Source unified logging if available
-if [[ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+    load_module "aws-deployment-common"
 else
     # Fallback logging functions with basic formatting
     GREEN='\033[0;32m'

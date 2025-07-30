@@ -1,17 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Configuration Management Test Suite
 # Comprehensive testing for centralized configuration management system
 # =============================================================================
 
-set -euo pipefail
 
-# =============================================================================
-# TEST CONFIGURATION
-# =============================================================================
-
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-config-management.sh" "core/variables" "core/logging"
+
 LIB_DIR="$PROJECT_ROOT/lib"
 CONFIG_DIR="$PROJECT_ROOT/config"
 
@@ -563,17 +566,8 @@ EOF
 # CROSS-PLATFORM COMPATIBILITY TESTS
 # =============================================================================
 
-test_bash_compatibility() {
-    log_test "Testing bash compatibility..."
-    
-    # Test bash version compatibility
-    local bash_version=$(bash --version | head -n1 | cut -d' ' -f4 | cut -d'.' -f1)
-    
-    if [ "$bash_version" -ge 3 ]; then
-        pass_test "Bash version $bash_version is compatible"
-    else
-        fail_test "Bash version $bash_version is not compatible (minimum: 3)"
-    fi
+test_cross_platform_compatibility() {
+    log_test "Testing cross-platform compatibility..."
     
     # Test array syntax compatibility
     local test_array=("item1" "item2" "item3")
@@ -647,7 +641,7 @@ run_all_tests() {
     # Run compatibility tests
     echo
     echo "Running compatibility tests..."
-    test_bash_compatibility
+    test_cross_platform_compatibility
     
     # Run performance tests
     echo

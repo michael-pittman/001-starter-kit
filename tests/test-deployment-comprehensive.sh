@@ -1,32 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # test-deployment-comprehensive.sh - Comprehensive test suite for deployment improvements
 # Tests all failure paths, recovery mechanisms, dependency validation, and compatibility
 
-set -euo pipefail
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
 
-# Get script directory and project root
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Source test framework first
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Source test helpers
-source "$SCRIPT_DIR/lib/deployment-test-helpers.sh"
+# Initialize script with required modules
+initialize_script "test-deployment-comprehensive.sh" "core/variables" "core/logging"
 
-# Source deployment libraries
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-source "$PROJECT_ROOT/lib/error-handling.sh"
-source "$PROJECT_ROOT/lib/associative-arrays.sh"
-source "$PROJECT_ROOT/lib/modern-error-handling.sh"
-source "$PROJECT_ROOT/lib/aws-resource-manager.sh"
-source "$PROJECT_ROOT/lib/deployment-health.sh"
-source "$PROJECT_ROOT/lib/deployment-state-manager.sh"
-source "$PROJECT_ROOT/lib/aws-quota-checker.sh"
-source "$PROJECT_ROOT/lib/error-recovery.sh"
-source "$PROJECT_ROOT/lib/deployment-validation.sh"
-
-# Test configuration
 declare -g TEST_MODE="simulation"  # simulation or live
 declare -g VERBOSE_OUTPUT="${VERBOSE_OUTPUT:-false}"
 declare -g TEST_REPORT_FILE="$PROJECT_ROOT/test-reports/deployment-comprehensive-$(date +%Y%m%d-%H%M%S).html"
@@ -560,34 +557,6 @@ test_cleanup_on_failure() {
 # 3. Dependency Validation Tests
 # ------------------------------
 
-test_bash_version_check() {
-    echo "Testing bash version validation..."
-    
-    # Test current version
-    local current_version="${BASH_VERSION}"
-    echo "  Current bash version: $current_version"
-    
-    # Test version comparison
-    if version_ge "$current_version" "5.3.0"; then
-        echo "✓ Bash version meets requirements"
-    else
-        echo "WARNING: Bash version below 5.3.0"
-    fi
-    
-    # Test version parsing
-    local major minor patch
-    parse_version "$current_version" major minor patch
-    echo "  Parsed: major=$major, minor=$minor, patch=$patch"
-    
-    if [[ -n "$major" ]] && [[ -n "$minor" ]]; then
-        echo "✓ Version parsing successful"
-    else
-        echo "ERROR: Version parsing failed"
-        return 1
-    fi
-    
-    return 0
-}
 
 test_aws_cli_validation() {
     echo "Testing AWS CLI validation..."
@@ -1169,8 +1138,7 @@ main() {
     echo -e "\n${YELLOW}3. DEPENDENCY VALIDATION TESTS${NC}"
     add_to_report "Dependencies" "Category" "info" "Testing prerequisite validation"
     
-    run_test "Bash Version Check" test_bash_version_check "Tests bash version validation"
-    run_test "AWS CLI Validation" test_aws_cli_validation "Tests AWS CLI presence and version"
+    run_test "AWS CLI Validation" test_aws_cli_validation "Tests AWS CLI presence and functionality"
     run_test "Required Tools Check" test_required_tools_check "Tests for required tools"
     run_test "IAM Permissions Check" test_iam_permissions_check "Tests IAM permission validation"
     

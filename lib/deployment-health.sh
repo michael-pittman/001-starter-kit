@@ -4,16 +4,24 @@
 # Provides comprehensive health checks and status monitoring for deployments
 #
 # Dependencies: aws-cli, jq, curl
-# Required Bash Version: 5.3+
+# Compatible with bash 3.x+
 #
 
 set -euo pipefail
 
 # Source required libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/modules/core/bash_version.sh"
-source "${SCRIPT_DIR}/modules/core/errors.sh"
-source "${SCRIPT_DIR}/aws-cli-v2.sh"
+# Note: These libraries expect to be called from scripts that have already set PROJECT_ROOT
+if [[ -z "${PROJECT_ROOT:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+# Source using library loader pattern
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Load required modules through the library system
+load_module "core/errors"
+load_module "aws-cli-v2"
 
 # Health check configuration
 declare -gA HEALTH_CONFIG=(

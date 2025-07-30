@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2025-07-30T13:13:22Z",
+    "last_modified": "2025-07-30T13:13:22Z"
+  },
+  "deployments": {},
+  "stacks": {
+    "geusemaker-spot-alb-cdn": {
+      "name": "geusemaker-spot-alb-cdn",
+      "status": "initializing",
+      "created": "2025-07-30T13:13:22Z",
+      "last_modified": "2025-07-30T13:13:22Z",
+      "resources": {},
+      "deployments": [],
+      "variables": {}
+    }
+  },
+  "resources": {},
+  "history": []
+}

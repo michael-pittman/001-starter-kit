@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Service Configuration Module
 # Generates docker-compose configurations, manages environment variables,
@@ -1060,7 +1060,7 @@ EOF
             --path "$parameter_prefix" \
             --recursive \
             --with-decryption \
-            --query 'Parameters[*].[Name,Value,Type]' \
+            --query 'Parameters[*].[Name,Value,ParameterType]' \
             --output text 2>/dev/null) || {
             echo "WARNING: Failed to load from Parameter Store" >&2
         }
@@ -1070,13 +1070,13 @@ EOF
             echo "" >> "$output_file"
             echo "# Parameters from AWS Systems Manager" >> "$output_file"
             
-            echo "$params" | while IFS=$'\t' read -r name value type; do
+            echo "$params" | while IFS=$'\t' read -r name value param_type; do
                 # Convert parameter name to environment variable
                 local var_name="${name#${parameter_prefix}/}"
                 var_name="${var_name//\//_}"  # Replace / with _
                 
                 # Skip secrets if not including them
-                if [ "$include_secrets" != "true" ] && [ "$type" = "SecureString" ]; then
+                if [ "$include_secrets" != "true" ] && [ "$param_type" = "SecureString" ]; then
                     echo "# ${var_name}=<SecureString - set manually>" >> "$output_file"
                 else
                     echo "${var_name}=${value}" >> "$output_file"

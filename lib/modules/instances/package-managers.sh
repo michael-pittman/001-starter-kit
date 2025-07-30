@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Platform-Specific Package Management Handlers
 # Comprehensive package installation and management across different OS platforms
@@ -10,7 +10,6 @@ _PACKAGE_MANAGERS_SH_LOADED=1
 
 # Source dependencies
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/os-compatibility.sh"
 
 # =============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -27,6 +26,29 @@ readonly BUILD_PACKAGES="gcc make build-essential"
 readonly NETWORK_PACKAGES="net-tools netstat-nat"
 readonly MONITORING_PACKAGES="htop iotop sysstat"
 readonly SECURITY_PACKAGES="fail2ban ufw"
+
+# =============================================================================
+# PACKAGE MANAGER DETECTION
+# =============================================================================
+
+# Get package manager for current OS
+get_package_manager() {
+    # Check for common package managers
+    if command -v apt >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "zypper"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    else
+        echo "unknown"
+        return 1
+    fi
+}
 
 # =============================================================================
 # GENERIC PACKAGE MANAGER INTERFACE

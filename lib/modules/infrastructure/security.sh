@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Security Infrastructure Module
 # Manages security groups, IAM roles, and key pairs
@@ -6,12 +6,14 @@
 
 # Prevent multiple sourcing
 [ -n "${_SECURITY_SH_LOADED:-}" ] && return 0
-_SECURITY_SH_LOADED=1
+declare -gr _SECURITY_SH_LOADED=1
 
-# Source dependencies
+# Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../core/registry.sh"
-source "${SCRIPT_DIR}/../core/errors.sh"
+
+# Source dependencies using dependency groups
+source "${SCRIPT_DIR}/../core/dependency-groups.sh"
+load_dependency_group "INFRASTRUCTURE" "$SCRIPT_DIR/.."
 
 # =============================================================================
 # SECURITY GROUP MANAGEMENT

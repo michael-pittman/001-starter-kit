@@ -1,22 +1,18 @@
-#!/bin/bash
-# =============================================================================
-# Unit Tests for error-handling.sh
-# Tests for error logging, handling modes, and cleanup functions
-# =============================================================================
+#!/usr/bin/env bash
+# Test library helper script
 
 set -euo pipefail
 
-# Get script directory for sourcing
+# Establish project root and library directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source the test framework
-source "$SCRIPT_DIR/shell-test-framework.sh"
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Source the library under test (disable strict mode temporarily)
-set +e
-source "$PROJECT_ROOT/lib/error-handling.sh"
-set -e
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
 
 # =============================================================================
 # TEST SETUP AND TEARDOWN
@@ -66,7 +62,9 @@ test_default_configuration_values() {
     
     # Reset to defaults by unsetting variables
     unset ERROR_HANDLING_MODE ERROR_LOG_FILE ERROR_NOTIFICATION_ENABLED ERROR_CLEANUP_ENABLED
-    source "$PROJECT_ROOT/lib/error-handling.sh"
+    
+    # Re-initialize error handling to test defaults
+    init_error_handling "$ERROR_MODE_STRICT" "/tmp/GeuseMaker-errors.log"
     
     assert_equals "$ERROR_MODE_STRICT" "$ERROR_HANDLING_MODE" "Default mode should be strict"
     assert_equals "/tmp/GeuseMaker-errors.log" "$ERROR_LOG_FILE" "Default log file should be set"
@@ -210,8 +208,8 @@ test_color_codes_fallback() {
     local original_red="$RED"
     unset RED GREEN YELLOW BLUE PURPLE CYAN NC
     
-    # Re-source the error handling library
-    source "$PROJECT_ROOT/lib/error-handling.sh"
+    # Re-initialize error handling to test fallback color definitions
+    init_error_handling "$ERROR_MODE_STRICT" "/tmp/GeuseMaker-errors.log"
     
     assert_not_empty "$RED" "RED color should be defined as fallback"
     assert_not_empty "$GREEN" "GREEN color should be defined as fallback"
@@ -228,8 +226,8 @@ test_color_codes_not_redefined() {
     local custom_red='\033[1;91m'
     RED="$custom_red"
     
-    # Re-source the error handling library
-    source "$PROJECT_ROOT/lib/error-handling.sh"
+    # Re-initialize error handling to test color preservation
+    init_error_handling "$ERROR_MODE_STRICT" "/tmp/GeuseMaker-errors.log"
     
     assert_equals "$custom_red" "$RED" "RED color should not be overridden"
 }

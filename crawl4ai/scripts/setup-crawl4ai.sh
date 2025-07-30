@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Crawl4AI Container Setup Script
 # This script runs during container initialization to configure Crawl4AI
@@ -80,7 +80,7 @@ fi
 
 # Create health check script
 cat > /app/health-check.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Crawl4AI Health Check
 
 # Check if the main service is responding

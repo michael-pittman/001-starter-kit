@@ -1,5 +1,4 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =============================================================================
 # Security Check Script for GeuseMaker
 # =============================================================================
@@ -7,16 +6,38 @@
 # Run this before deployment to identify security issues
 # =============================================================================
 
+# Setup directories and paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Source the library loader
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+else
+    echo "ERROR: Cannot find lib-loader.sh in $PROJECT_ROOT/lib/" >&2
+    exit 1
+fi
+
+# Enable error handling
 set -euo pipefail
 
-# Load security validation library
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Load security validation library (in same directory)
 if [[ -f "$SCRIPT_DIR/security-validation.sh" ]]; then
     source "$SCRIPT_DIR/security-validation.sh"
 else
-    echo "Error: Security validation library not found at $SCRIPT_DIR/security-validation.sh"
+    echo "Error: Security validation library not found at $SCRIPT_DIR/security-validation.sh" >&2
     exit 1
 fi
+
+# Load optional libraries for logging and utilities
+declare -a OPTIONAL_LIBS=(
+    "aws-deployment-common.sh"
+)
+
+# Try to load optional libraries but don't fail if not available
+for lib in "${OPTIONAL_LIBS[@]}"; do
+    load_optional_library "$lib" || true
+done
 
 # Colors for output
 RED='\033[0;31m'

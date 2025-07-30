@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Enhanced Error Handling Test Suite
-# Comprehensive tests for modern bash 5.3+ error handling patterns
+# Comprehensive tests for bash 3.x+ compatible error handling patterns
 # =============================================================================
 
 # Test framework setup
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Source the libraries we're testing
-source "$PROJECT_ROOT/lib/error-handling.sh"
-source "$PROJECT_ROOT/lib/modern-error-handling.sh" 2>/dev/null || echo "Modern error handling not available"
-source "$PROJECT_ROOT/lib/aws-api-error-handling.sh" 2>/dev/null || echo "AWS error handling not available"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Test framework variables
+# Initialize script with required modules
+initialize_script "test-enhanced-error-handling.sh" "core/variables" "core/logging"
+
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -371,24 +373,6 @@ test_cleanup_functions() {
 # COMPATIBILITY TESTS
 # =============================================================================
 
-test_bash_version_compatibility() {
-    echo "🧪 Testing Bash Version Compatibility..."
-    
-    # Test bash version detection
-    if declare -f bash_533_available >/dev/null 2>&1; then
-        if bash_533_available; then
-            echo "✅ INFO: Running on bash 5.3.3+ - modern features available"
-            assert_function_exists "init_modern_error_handling" "Modern error handling available on bash 5.3.3+"
-        else
-            echo "ℹ️  INFO: Running on bash < 5.3.3 - using compatibility mode"
-            echo "✅ PASS: Compatibility mode detection working"
-            TESTS_PASSED=$((TESTS_PASSED + 1))
-            TESTS_RUN=$((TESTS_RUN + 1))
-        fi
-    else
-        echo "⚠️  SKIP: Bash version detection function not available"
-    fi
-}
 
 test_associative_array_fallbacks() {
     echo "🧪 Testing Associative Array Fallbacks..."
@@ -501,7 +485,6 @@ run_all_tests() {
     test_aws_retry_logic
     test_error_handling_integration
     test_cleanup_functions
-    test_bash_version_compatibility
     test_associative_array_fallbacks
     test_high_volume_error_handling
     test_concurrent_error_handling
@@ -565,9 +548,6 @@ EOF
         echo "        <li class=\"fail\">Review failed tests and fix underlying issues</li>" >> "$report_file"
     fi
     
-    if ! declare -f bash_533_available >/dev/null 2>&1 || ! bash_533_available; then
-        echo "        <li class=\"skip\">Consider upgrading to bash 5.3.3+ for modern features</li>" >> "$report_file"
-    fi
     
     cat >> "$report_file" << EOF
         <li>Regular testing recommended after error handling modifications</li>

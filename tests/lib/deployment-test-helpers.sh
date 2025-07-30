@@ -1,6 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # deployment-test-helpers.sh - Helper functions for deployment testing
 # Provides simulation utilities, mock functions, and test helpers
+
+set -euo pipefail
+
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "deployment-test-helpers.sh" "core/variables" "core/logging"
 
 # Guard against multiple inclusion
 [[ -n "${_DEPLOYMENT_TEST_HELPERS_LOADED:-}" ]] && return 0
@@ -546,9 +558,11 @@ validate_deployment_prerequisites() {
     # Simulate prerequisite validation
     log_test "Validating deployment prerequisites"
     
-    # Check bash version
-    if ! version_ge "${BASH_VERSION}" "5.3.0"; then
-        log_test "Warning: Bash version below 5.3.0"
+    # Check bash version for enhanced features
+    if ! version_ge "${BASH_VERSION}" "4.0.0"; then
+        log_test "Info: Using bash 3.x compatibility mode"
+    else
+        log_test "Info: Enhanced bash features available"
     fi
     
     return 0

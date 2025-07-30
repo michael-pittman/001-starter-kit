@@ -1,22 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Performance and Load Testing Framework
 # Comprehensive performance testing with benchmarking and regression analysis
 # =============================================================================
 
-set -euo pipefail
 
-# Source the enhanced test framework
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# =============================================================================
-# PERFORMANCE TESTING CONFIGURATION
-# =============================================================================
+# Initialize script with required modules
+initialize_script "test-performance-load-testing.sh" "core/variables" "core/logging"
 
-# Enable performance features
 export TEST_VERBOSE="${TEST_VERBOSE:-true}"
 export TEST_PARALLEL="${TEST_PARALLEL:-true}"
 export TEST_MAX_PARALLEL="${TEST_MAX_PARALLEL:-4}"
@@ -167,7 +165,8 @@ test_performance_script_syntax_validation() {
     
     syntax_check_batch() {
         local scripts=(
-            "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"
+            "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"
+            "$PROJECT_ROOT/scripts/aws-deployment-modular.sh"
             "$PROJECT_ROOT/scripts/setup-parameter-store.sh"
             "$PROJECT_ROOT/lib/aws-deployment-common.sh"
             "$PROJECT_ROOT/lib/error-handling.sh"
@@ -188,7 +187,8 @@ test_performance_help_function_execution() {
     
     help_execution_test() {
         local scripts=(
-            "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"
+            "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"
+            "$PROJECT_ROOT/scripts/aws-deployment-modular.sh"
             "$PROJECT_ROOT/tools/test-runner.sh"
         )
         

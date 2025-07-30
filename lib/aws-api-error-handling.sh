@@ -2,23 +2,15 @@
 # =============================================================================
 # AWS API Error Handling Module
 # Intelligent retry mechanisms and comprehensive AWS error categorization
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
 
-# Bash version validation - critical for modern features
-if [[ -z "${BASH_VERSION_VALIDATED:-}" ]]; then
-    # Get the directory of this script for sourcing bash_version module
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    source "$SCRIPT_DIR/modules/core/bash_version.sh"
-    require_bash_533 "aws-api-error-handling.sh"
-    export BASH_VERSION_VALIDATED=true
-fi
 
 # =============================================================================
 # AWS ERROR CATEGORIZATION AND ANALYSIS
 # =============================================================================
 
-# Comprehensive AWS error patterns with modern bash features
+# Comprehensive AWS error patterns - compatible with bash 3.x+
 if [[ -z "${AWS_ERROR_PATTERNS_DEFINED:-}" ]]; then
     declare -A AWS_ERROR_PATTERNS=(
         # Authentication & Authorization

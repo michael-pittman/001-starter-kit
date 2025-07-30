@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Docker Manager Module
 # Handles Docker and Docker Compose installation, NVIDIA runtime setup,
@@ -7,13 +7,14 @@
 
 # Prevent multiple sourcing
 [ -n "${_DOCKER_MANAGER_SH_LOADED:-}" ] && return 0
-_DOCKER_MANAGER_SH_LOADED=1
+declare -gr _DOCKER_MANAGER_SH_LOADED=1
 
-# Source dependencies
+# Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../core/registry.sh"
-source "${SCRIPT_DIR}/../core/errors.sh"
-source "${SCRIPT_DIR}/../config/variables.sh"
+
+# Source dependencies using dependency groups
+source "${SCRIPT_DIR}/../core/dependency-groups.sh"
+load_dependency_group "APPLICATION" "$SCRIPT_DIR/.."
 
 # =============================================================================
 # DOCKER INSTALLATION AND SETUP

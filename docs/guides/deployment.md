@@ -5,10 +5,10 @@ This guide covers all deployment methods for the GeuseMaker AI infrastructure pl
 ## Prerequisites
 
 - AWS Account with appropriate permissions
-- AWS CLI configured (`aws configure`)
+- AWS CLI v2 configured (`aws configure`)
 - Docker installed locally
 - Make installed
-- Bash 3.x+ (macOS) or 4.x+ (Linux)
+- Bash 3.x+ (compatible with all major systems)
 
 ## Quick Start
 
@@ -17,39 +17,27 @@ This guide covers all deployment methods for the GeuseMaker AI infrastructure pl
 make setup
 
 # Deploy development environment
-make deploy-simple STACK_NAME=dev
+make deploy-spot ENV=dev STACK_NAME=dev
 
 # Deploy production with spot instances
-make deploy-spot STACK_NAME=prod
+make deploy-spot ENV=prod STACK_NAME=prod
 ```
 
 ## Deployment Methods
 
-### 1. Simple Development Deployment
+### 1. Spot Instance Deployment (Recommended)
 
-For quick development environments with minimal configuration:
-
-```bash
-make deploy-simple STACK_NAME=my-dev
-# or
-./scripts/aws-deployment-v2-simple.sh my-dev
-```
-
-**Features:**
-- Single EC2 instance
-- Basic networking (default VPC)
-- All AI services on one instance
-- No load balancer or CDN
-- Cost: ~$0.10-0.20/hour
-
-### 2. Production Spot Instance Deployment
-
-For cost-optimized production environments:
+For cost-optimized environments with automatic failover:
 
 ```bash
-make deploy-spot STACK_NAME=prod
-# or
-./scripts/aws-deployment-modular.sh --spot prod
+# Development deployment
+make deploy-spot ENV=dev STACK_NAME=my-dev
+
+# Production deployment
+make deploy-spot ENV=prod STACK_NAME=my-prod
+
+# Or use direct script
+./deploy.sh --spot --env dev --stack-name my-stack
 ```
 
 **Features:**
@@ -59,25 +47,59 @@ make deploy-spot STACK_NAME=prod
 - EFS for persistent storage
 - Cost: ~$0.05-0.10/hour
 
-### 3. Enterprise Multi-AZ Deployment
+### 2. ALB Deployment (Load Balancer)
 
-For high-availability production environments:
+For environments requiring load balancing:
 
 ```bash
-./scripts/aws-deployment-modular.sh \
-  --multi-az \
-  --private-subnets \
-  --nat-gateway \
-  --alb \
-  --spot \
-  STACK_NAME
+# Deploy with ALB
+make deploy-alb ENV=staging STACK_NAME=my-stack
+
+# Or use direct script
+./deploy.sh --alb --env staging --stack-name my-stack
 ```
 
 **Features:**
-- Multi-AZ deployment
-- Private subnets with NAT Gateway
 - Application Load Balancer
-- CloudFront CDN option
+- Health checks and auto-scaling ready
+- SSL termination support
+- Cost: ~$0.15-0.25/hour
+
+### 3. CDN Deployment (CloudFront)
+
+For global content distribution:
+
+```bash
+# Deploy with CDN
+make deploy-cdn ENV=prod STACK_NAME=my-stack
+
+# Or use direct script
+./deploy.sh --cdn --env prod --stack-name my-stack
+```
+
+**Features:**
+- CloudFront CDN distribution
+- Global edge locations
+- Caching optimization
+- Cost: ~$0.10-0.20/hour
+
+### 4. Full Stack Deployment
+
+For complete infrastructure with all components:
+
+```bash
+# Deploy complete stack
+make deploy-full ENV=prod STACK_NAME=my-stack
+
+# Or use direct script
+./deploy.sh --full --env prod --stack-name my-stack
+```
+
+**Features:**
+- VPC with public/private subnets
+- EC2 instances with spot optimization
+- Application Load Balancer
+- CloudFront CDN
 - Auto-scaling ready
 - Cost: ~$0.20-0.40/hour
 
@@ -88,8 +110,9 @@ For high-availability production environments:
 Default: `g4dn.xlarge` (4 vCPUs, 16GB RAM, T4 GPU)
 
 ```bash
-# Specify custom instance type
-./scripts/aws-deployment-modular.sh -t g5.xlarge prod
+# Specify custom instance type via environment variable
+export EC2_INSTANCE_TYPE=g5.xlarge
+make deploy-spot ENV=dev STACK_NAME=my-stack
 
 # Available GPU instances:
 # - g4dn.xlarge: T4 GPU, best value
@@ -104,38 +127,32 @@ Default: `us-east-1`
 
 ```bash
 # Deploy to specific region
-./scripts/aws-deployment-modular.sh -r us-west-2 prod
+export AWS_REGION=us-west-2
+make deploy-spot ENV=dev STACK_NAME=my-stack
 
 # Automatic fallback regions:
 # us-east-1 → us-east-2 → us-west-2
 # eu-west-1 → eu-west-2 → eu-central-1
 ```
 
-### Advanced Options
+### Environment Variables
 
-```bash
-# All available options
-./scripts/aws-deployment-modular.sh \
-  --instance-type g4dn.xlarge \    # EC2 instance type
-  --region us-east-1 \              # AWS region
-  --spot \                          # Use spot instances
-  --multi-az \                      # Multi-AZ deployment
-  --private-subnets \               # Use private subnets
-  --nat-gateway \                   # Create NAT Gateway
-  --alb \                          # Create Load Balancer
-  --no-efs \                       # Skip EFS creation
-  --environment production \        # Environment tag
-  --skip-validation \              # Skip pre-checks
-  STACK_NAME
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENV` | Environment name (dev/staging/prod) | `dev` |
+| `PROFILE` | AWS profile to use | `$ENV` |
+| `REGION` | AWS region | `us-east-1` |
+| `STACK_NAME` | Stack name | `geusemaker-$ENV` |
+| `EC2_INSTANCE_TYPE` | EC2 instance type | `g4dn.xlarge` |
+| `VPC_CIDR` | VPC CIDR block | `10.0.0.0/16` |
 
 ## Service Access
 
 After deployment, access your services:
 
 ```bash
-# Get instance IP
-make status STACK_NAME=prod
+# Get instance IP and service URLs
+make status ENV=dev STACK_NAME=my-stack
 
 # Service URLs (replace YOUR_IP):
 # n8n:      http://YOUR_IP:5678
@@ -150,7 +167,7 @@ make status STACK_NAME=prod
 
 ```bash
 # Setup required secrets
-./scripts/setup-parameter-store.sh
+./archive/legacy/setup-parameter-store.sh
 
 # Required parameters:
 # /aibuildkit/OPENAI_API_KEY
@@ -171,14 +188,13 @@ The deployment automatically configures:
 
 ```bash
 # Basic health check
-make health-check STACK_NAME=prod
+make health ENV=dev STACK_NAME=my-stack
 
 # Advanced diagnostics
-make health-check-advanced STACK_NAME=prod
+./lib/modules/monitoring/health.sh --stack-name my-stack
 
 # View logs
-ssh -i ~/.ssh/aibuildkit-prod.pem ubuntu@YOUR_IP
-docker compose logs -f
+make logs ENV=dev STACK_NAME=my-stack
 ```
 
 ## Cost Optimization
@@ -193,9 +209,10 @@ docker compose logs -f
 
 | Deployment Type | Hourly Cost | Monthly Cost |
 |----------------|-------------|--------------|
-| Simple (on-demand) | $0.52 | $380 |
 | Spot (single AZ) | $0.15 | $110 |
-| Enterprise (multi-AZ) | $0.40 | $290 |
+| ALB (with spot) | $0.25 | $180 |
+| CDN (with spot) | $0.20 | $145 |
+| Full Stack | $0.40 | $290 |
 
 ## Troubleshooting
 
@@ -217,10 +234,10 @@ docker compose logs -f
 
 ```bash
 # Check deployment status
-./scripts/check-instance-status.sh STACK_NAME
+make status ENV=dev STACK_NAME=my-stack
 
-# Fix deployment issues
-./scripts/fix-deployment-issues.sh STACK_NAME REGION
+# Run diagnostics
+make troubleshoot ENV=dev STACK_NAME=my-stack
 
 # Validate environment
 ./scripts/validate-environment.sh
@@ -230,10 +247,10 @@ docker compose logs -f
 
 ```bash
 # Destroy all resources
-make destroy STACK_NAME=prod
+make destroy ENV=dev STACK_NAME=my-stack
 
 # Cleanup failed deployments
-./scripts/cleanup-consolidated.sh --stack STACK_NAME
+./lib/modules/cleanup/resources.sh --stack-name my-stack
 ```
 
 ## Next Steps

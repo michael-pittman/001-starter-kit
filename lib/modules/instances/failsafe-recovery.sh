@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Failsafe Recovery and Rollback Mechanisms
 # Comprehensive error recovery and system restoration capabilities
@@ -10,7 +10,6 @@ _FAILSAFE_RECOVERY_SH_LOADED=1
 
 # Source dependencies
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/os-compatibility.sh"
 
 # =============================================================================
 # CONSTANTS AND CONFIGURATION

@@ -4,14 +4,13 @@
 # Validates AWS service quotas before deployment to prevent failures
 #
 # Dependencies: aws-cli, jq
-# Required Bash Version: 5.3+
+# Compatible with bash 3.x+
 #
 
 set -euo pipefail
 
 # Source required libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/modules/core/bash_version.sh"
 source "${SCRIPT_DIR}/aws-cli-v2.sh"
 
 # Quota tracking

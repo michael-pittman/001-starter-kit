@@ -6,16 +6,33 @@
 
 set -euo pipefail
 
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
+
+# Source the errors module
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
+# Source the library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Source dependencies
-source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
-require_bash_533 "deploy-spot-cdn-enhanced.sh"
 
-source "$PROJECT_ROOT/lib/error-handling.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-source "$PROJECT_ROOT/lib/modules/core/errors.sh"
+# Initialize script with required modules
+initialize_script "deploy-spot-cdn-enhanced.sh" \
+    "core/variables" \
+    "core/errors" \
+    "core/registry" \
+    "infrastructure/vpc" \
+    "infrastructure/ec2" \
+    "infrastructure/alb" \
+    "infrastructure/cloudfront"
 
 # Initialize enhanced error handling
 if declare -f init_enhanced_error_handling >/dev/null 2>&1; then
@@ -170,21 +187,59 @@ check_aws_permissions() {
     
     log_info "Checking permissions for $service..."
     
-    if aws $service $test_action --dry-run >/dev/null 2>&1; then
-        log_success "✓ Permissions verified for $service"
-        return 0
-    else
-        # Check if it's just a dry-run error (which means we have permissions)
-        local error_output
-        error_output=$(aws $service $test_action --dry-run 2>&1 || true)
-        if echo "$error_output" | grep -q "DryRunOperation"; then
-            log_success "✓ Permissions verified for $service"
-            return 0
-        else
-            log_error "✗ Insufficient permissions for $service"
-            return 1
-        fi
+    # Use more robust permission checks that don't rely on --dry-run
+    local error_output
+    case $service in
+        iam)
+            # For IAM: Use list-roles with max-items
+            if error_output=$(aws iam list-roles --max-items 1 2>&1); then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+        elbv2)
+            # For ELBV2: Use describe-load-balancers with max-items
+            if error_output=$(aws elbv2 describe-load-balancers --max-items 1 2>&1); then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+        cloudformation)
+            # For CloudFormation: Use list-stacks with max-items
+            if error_output=$(aws cloudformation list-stacks --max-items 1 2>&1); then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+        ec2)
+            # For EC2: Keep describe-instances approach
+            if error_output=$(aws ec2 describe-instances --max-items 1 2>&1); then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+        cloudfront)
+            # For CloudFront: Use list-distributions with max-items
+            if error_output=$(aws cloudfront list-distributions --max-items 1 2>&1); then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+        *)
+            # Default fallback for other services
+            if aws $service $test_action >/dev/null 2>&1; then
+                log_success "✓ Permissions verified for $service"
+                return 0
+            fi
+            ;;
+    esac
+    
+    # If we get here, the permission check failed
+    log_error "✗ Insufficient permissions for $service"
+    if [ -n "$error_output" ]; then
+        log_error "Error: $error_output"
     fi
+    return 1
 }
 
 validate_dependencies() {
@@ -530,35 +585,59 @@ main() {
 # LOGGING HELPERS
 # =============================================================================
 
-log_header() {
-    echo ""
-    echo "=============================================================="
-    echo "$1"
-    echo "=============================================================="
-    echo ""
-}
-
-log_section() {
-    echo ""
-    echo ">>> $1"
-    echo "--------------------------------------------------------------"
-}
-
-log_info() {
-    echo "ℹ️  $1"
-}
-
-log_success() {
-    echo "✅ $1"
-}
-
-log_warning() {
-    echo "⚠️  $1"
-}
-
-log_error() {
-    echo "❌ $1" >&2
-}
+# Use standardized logging if available, otherwise fallback to custom functions
+if command -v log_message >/dev/null 2>&1; then
+    # Use standardized logging functions
+    log_header() {
+        echo ""
+        echo "=============================================================="
+        echo "$1"
+        echo "=============================================================="
+        echo ""
+    }
+    
+    log_section() {
+        echo ""
+        echo ">>> $1"
+        echo "--------------------------------------------------------------"
+    }
+    
+    log_info() { log_message "INFO" "$1" "DEPLOYMENT"; }
+    log_success() { log_message "INFO" "$1" "DEPLOYMENT"; }  # Use INFO level for success
+    log_warning() { log_message "WARN" "$1" "DEPLOYMENT"; }
+    log_error() { log_message "ERROR" "$1" "DEPLOYMENT"; }
+else
+    # Fallback to custom logging functions
+    log_header() {
+        echo ""
+        echo "=============================================================="
+        echo "$1"
+        echo "=============================================================="
+        echo ""
+    }
+    
+    log_section() {
+        echo ""
+        echo ">>> $1"
+        echo "--------------------------------------------------------------"
+    }
+    
+    log_info() {
+        echo "ℹ️  $1"
+    }
+    
+    log_success() {
+        echo "✅ $1"
+    }
+    
+    log_warning() {
+        echo "⚠️  $1"
+    }
+    
+    log_error() {
+        echo "❌ $1" >&2
+    }
+fi
 
 clear_line() {
     printf "\033[2K\r"

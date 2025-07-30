@@ -1,22 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Enhanced AWS Integration Testing
 # Comprehensive AWS service testing with mocking and simulation capabilities
 # =============================================================================
 
-set -euo pipefail
 
-# Source the enhanced test framework
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# =============================================================================
-# AWS TESTING CONFIGURATION
-# =============================================================================
+# Initialize script with required modules
+initialize_script "test-aws-integration-enhanced.sh" "core/variables" "core/logging"
 
-# Test configuration
 export TEST_VERBOSE="${TEST_VERBOSE:-true}"
 export TEST_PARALLEL="${TEST_PARALLEL:-false}"
 export TEST_COVERAGE_ENABLED="${TEST_COVERAGE_ENABLED:-true}"
@@ -93,7 +91,6 @@ mock_aws_ssm_get_parameters() {
     # This will be called for SSM operations
     local mock_script="/tmp/${TEST_SESSION_ID}-aws-ssm"
     cat > "$mock_script" << 'EOF'
-#!/bin/bash
 if [[ "$*" == *"ssm get-parameters"* ]]; then
     echo '{
         "Parameters": [
@@ -503,7 +500,8 @@ test_aws_retry_mechanisms() {
 test_project_script_aws_integration() {
     # Test integration with project's AWS scripts
     local aws_scripts=(
-        "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"
+        "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"
+        "$PROJECT_ROOT/scripts/aws-deployment-modular.sh"
         "$PROJECT_ROOT/scripts/setup-parameter-store.sh"
         "$PROJECT_ROOT/lib/aws-deployment-common.sh"
     )

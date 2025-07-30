@@ -1,16 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # run-deployment-tests.sh - Simple runner for deployment tests
 
 set -euo pipefail
 
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "run-deployment-tests.sh" "core/variables" "core/logging"
 
 echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}Deployment Test Suite Runner${NC}"

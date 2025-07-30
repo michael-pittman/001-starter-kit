@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =============================================================================
 # Comprehensive Docker Compose Testing Script
@@ -7,13 +7,17 @@
 # functionality into a single comprehensive test suite
 # =============================================================================
 
-set -euo pipefail
 
-# Get script directory for consistent paths
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Color definitions for output
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-docker-compose.sh" "core/variables" "core/logging"
+
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[0;33m'
@@ -92,7 +96,6 @@ test_docker_compose_installation() {
     
     # Create a temporary test script with the installation logic
     cat > /tmp/test-docker-compose-install.sh << 'EOF'
-#!/bin/bash
 set -euo pipefail
 
 # Source shared library functions if available

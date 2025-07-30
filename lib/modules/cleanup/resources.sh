@@ -1,420 +1,228 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Resource Cleanup Module
-# Handles cleanup of all AWS resources
+# Comprehensive resource cleanup and management
 # =============================================================================
 
 # Prevent multiple sourcing
-[ -n "${_RESOURCES_CLEANUP_SH_LOADED:-}" ] && return 0
-_RESOURCES_CLEANUP_SH_LOADED=1
-
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../core/registry.sh"
-source "${SCRIPT_DIR}/../core/errors.sh"
+[ -n "${_CLEANUP_RESOURCES_SH_LOADED:-}" ] && return 0
+_CLEANUP_RESOURCES_SH_LOADED=1
 
 # =============================================================================
-# CLEANUP ORCHESTRATION
+# CLEANUP CONFIGURATION
 # =============================================================================
 
-# Main cleanup function
-cleanup_all_resources() {
-    local stack_name="${1:-$STACK_NAME}"
-    local force="${2:-false}"
-    
-    echo "=== Starting Resource Cleanup for Stack: $stack_name ==="
-    
-    # Load registry if exists
-    if [ ! -f "$RESOURCE_REGISTRY_FILE" ]; then
-        echo "No resource registry found, attempting tag-based cleanup..." >&2
-        cleanup_by_tags "$stack_name"
-        return
-    fi
-    
-    # Get cleanup order
-    local cleanup_order=($(get_cleanup_order))
-    
-    # Cleanup each resource type
-    for resource_type in "${cleanup_order[@]}"; do
-        cleanup_resource_type "$resource_type" "$force"
-    done
-    
-    echo "=== Cleanup Complete ==="
-}
+# Cleanup modes
+CLEANUP_MODE_AUTO="auto"
+CLEANUP_MODE_MANUAL="manual"
+CLEANUP_MODE_EMERGENCY="emergency"
+CLEANUP_MODE_DRY_RUN="dry_run"
 
-# Cleanup specific resource type
-cleanup_resource_type() {
-    local resource_type="$1"
-    local force="$2"
+# Resource types and their cleanup order
+declare -A RESOURCE_CLEANUP_ORDER=(
+    ["cloudfront"]=1
+    ["alb"]=2
+    ["efs"]=3
+    ["compute"]=4
+    ["security"]=5
+    ["vpc"]=6
+)
+
+# =============================================================================
+# CLEANUP FUNCTIONS
+# =============================================================================
+
+# Main cleanup orchestrator
+cleanup_resources() {
+    local stack_name="$1"
+    local cleanup_mode="${2:-$CLEANUP_MODE_AUTO}"
+    local force="${3:-false}"
     
-    # Get resources of this type
-    local resources=($(get_resources "$resource_type"))
+    log_info "Starting resource cleanup for stack: $stack_name (mode: $cleanup_mode)" "CLEANUP"
     
-    if [ ${#resources[@]} -eq 0 ]; then
-        return 0
+    # Initialize cleanup
+    if ! initialize_cleanup "$stack_name" "$cleanup_mode"; then
+        log_error "Failed to initialize cleanup" "CLEANUP"
+        return 1
     fi
     
-    echo "Cleaning up $resource_type (${#resources[@]} resources)..."
-    
-    case "$resource_type" in
-        spot_requests)
-            cleanup_spot_requests "${resources[@]}"
+    # Execute cleanup based on mode
+    case "$cleanup_mode" in
+        "$CLEANUP_MODE_AUTO")
+            execute_automatic_cleanup "$stack_name" "$force"
             ;;
-        instances)
-            cleanup_instances "${resources[@]}"
+        "$CLEANUP_MODE_MANUAL")
+            execute_manual_cleanup "$stack_name" "$force"
             ;;
-        elastic_ips)
-            cleanup_elastic_ips "${resources[@]}"
+        "$CLEANUP_MODE_EMERGENCY")
+            execute_emergency_cleanup "$stack_name"
             ;;
-        efs_mount_targets)
-            cleanup_efs_mount_targets "${resources[@]}"
-            ;;
-        efs_filesystems)
-            cleanup_efs_filesystems "${resources[@]}"
-            ;;
-        target_groups)
-            cleanup_target_groups "${resources[@]}"
-            ;;
-        load_balancers)
-            cleanup_load_balancers "${resources[@]}"
-            ;;
-        network_interfaces)
-            cleanup_network_interfaces "${resources[@]}"
-            ;;
-        security_groups)
-            cleanup_security_groups "${resources[@]}"
-            ;;
-        subnets)
-            cleanup_subnets "${resources[@]}"
-            ;;
-        internet_gateways)
-            cleanup_internet_gateways "${resources[@]}"
-            ;;
-        route_tables)
-            cleanup_route_tables "${resources[@]}"
-            ;;
-        vpc)
-            cleanup_vpcs "${resources[@]}"
-            ;;
-        iam_policies)
-            cleanup_iam_policies "${resources[@]}"
-            ;;
-        iam_roles)
-            cleanup_iam_roles "${resources[@]}"
-            ;;
-        key_pairs)
-            cleanup_key_pairs "${resources[@]}"
-            ;;
-        volumes)
-            cleanup_volumes "${resources[@]}"
+        "$CLEANUP_MODE_DRY_RUN")
+            execute_dry_run_cleanup "$stack_name"
             ;;
         *)
-            echo "Unknown resource type: $resource_type" >&2
+            log_error "Unknown cleanup mode: $cleanup_mode" "CLEANUP"
+            return 1
             ;;
     esac
+    
+    # Finalize cleanup
+    finalize_cleanup "$stack_name"
+    
+    log_info "Resource cleanup completed for stack: $stack_name" "CLEANUP"
 }
 
-# =============================================================================
-# INSTANCE CLEANUP
-# =============================================================================
+# Initialize cleanup
+initialize_cleanup() {
+    local stack_name="$1"
+    local cleanup_mode="$2"
+    
+    log_info "Initializing cleanup for stack: $stack_name" "CLEANUP"
+    
+    # Create cleanup state
+    create_cleanup_state "$stack_name" "$cleanup_mode"
+    
+    # Load resource inventory
+    if ! load_resource_inventory "$stack_name"; then
+        log_error "Failed to load resource inventory" "CLEANUP"
+        return 1
+    fi
+    
+    # Validate cleanup prerequisites
+    if ! validate_cleanup_prerequisites "$stack_name"; then
+        log_error "Cleanup prerequisites not met" "CLEANUP"
+        return 1
+    fi
+    
+    log_info "Cleanup initialization completed" "CLEANUP"
+    return 0
+}
 
-cleanup_instances() {
-    local instances=("$@")
+# Execute automatic cleanup
+execute_automatic_cleanup() {
+    local stack_name="$1"
+    local force="$2"
     
-    for instance_id in "${instances[@]}"; do
-        echo "Terminating instance: $instance_id"
-        
-        aws ec2 terminate-instances \
-            --instance-ids "$instance_id" 2>/dev/null || {
-            echo "Failed to terminate instance: $instance_id" >&2
-        }
-        
-        unregister_resource "instances" "$instance_id"
-    done
+    log_info "Executing automatic cleanup for stack: $stack_name" "CLEANUP"
     
-    # Wait for termination
-    if [ ${#instances[@]} -gt 0 ]; then
-        echo "Waiting for instances to terminate..."
-        aws ec2 wait instance-terminated \
-            --instance-ids "${instances[@]}" 2>/dev/null || true
+    # Get resources in cleanup order
+    local resources
+    resources=$(get_resources_in_cleanup_order "$stack_name")
+    
+    # Cleanup each resource type
+    local cleanup_success=true
+    while IFS= read -r resource_type; do
+        if [[ -n "$resource_type" ]]; then
+            log_info "Cleaning up resource type: $resource_type" "CLEANUP"
+            
+            if ! cleanup_resource_type "$stack_name" "$resource_type" "$force"; then
+                log_error "Failed to cleanup resource type: $resource_type" "CLEANUP"
+                cleanup_success=false
+                
+                # Continue with other resources unless force is false
+                if [[ "$force" != "true" ]]; then
+                    break
+                fi
+            fi
+        fi
+    done <<< "$resources"
+    
+    if [[ "$cleanup_success" == "true" ]]; then
+        log_info "Automatic cleanup completed successfully" "CLEANUP"
+        return 0
+    else
+        log_error "Automatic cleanup completed with errors" "CLEANUP"
+        return 1
     fi
 }
 
-cleanup_spot_requests() {
-    local requests=("$@")
+# Execute manual cleanup
+execute_manual_cleanup() {
+    local stack_name="$1"
+    local force="$2"
     
-    for request_id in "${requests[@]}"; do
-        echo "Cancelling spot request: $request_id"
-        
-        aws ec2 cancel-spot-instance-requests \
-            --spot-instance-request-ids "$request_id" 2>/dev/null || {
-            echo "Failed to cancel spot request: $request_id" >&2
-        }
-        
-        unregister_resource "spot_requests" "$request_id"
-    done
-}
-
-# =============================================================================
-# NETWORK CLEANUP
-# =============================================================================
-
-cleanup_security_groups() {
-    local groups=("$@")
+    log_info "Executing manual cleanup for stack: $stack_name" "CLEANUP"
     
-    for group_id in "${groups[@]}"; do
-        echo "Deleting security group: $group_id"
-        
-        # Remove all rules first
-        echo "Removing security group rules..."
-        aws ec2 revoke-security-group-ingress \
-            --group-id "$group_id" \
-            --ip-permissions "$(aws ec2 describe-security-groups \
-                --group-ids "$group_id" \
-                --query 'SecurityGroups[0].IpPermissions' 2>/dev/null)" \
-            2>/dev/null || true
-        
-        # Delete security group
-        aws ec2 delete-security-group \
-            --group-id "$group_id" 2>/dev/null || {
-            echo "Failed to delete security group: $group_id" >&2
-        }
-        
-        unregister_resource "security_groups" "$group_id"
-    done
-}
-
-cleanup_subnets() {
-    local subnets=("$@")
+    # Show available resources
+    show_available_resources "$stack_name"
     
-    for subnet_id in "${subnets[@]}"; do
-        echo "Deleting subnet: $subnet_id"
-        
-        aws ec2 delete-subnet \
-            --subnet-id "$subnet_id" 2>/dev/null || {
-            echo "Failed to delete subnet: $subnet_id" >&2
-        }
-        
-        unregister_resource "subnets" "$subnet_id"
-    done
-}
-
-cleanup_internet_gateways() {
-    local igws=("$@")
-    
-    for igw_id in "${igws[@]}"; do
-        echo "Deleting internet gateway: $igw_id"
-        
-        # Get attached VPCs
-        local vpcs
-        vpcs=$(aws ec2 describe-internet-gateways \
-            --internet-gateway-ids "$igw_id" \
-            --query 'InternetGateways[0].Attachments[*].VpcId' \
-            --output text 2>/dev/null)
-        
-        # Detach from VPCs
-        for vpc_id in $vpcs; do
-            echo "Detaching IGW from VPC: $vpc_id"
-            aws ec2 detach-internet-gateway \
-                --internet-gateway-id "$igw_id" \
-                --vpc-id "$vpc_id" 2>/dev/null || true
-        done
-        
-        # Delete IGW
-        aws ec2 delete-internet-gateway \
-            --internet-gateway-id "$igw_id" 2>/dev/null || {
-            echo "Failed to delete internet gateway: $igw_id" >&2
-        }
-        
-        unregister_resource "internet_gateways" "$igw_id"
-    done
-}
-
-cleanup_vpcs() {
-    local vpcs=("$@")
-    
-    for vpc_id in "${vpcs[@]}"; do
-        echo "Deleting VPC: $vpc_id"
-        
-        aws ec2 delete-vpc \
-            --vpc-id "$vpc_id" 2>/dev/null || {
-            echo "Failed to delete VPC: $vpc_id" >&2
-        }
-        
-        unregister_resource "vpc" "$vpc_id"
-    done
-}
-
-# =============================================================================
-# IAM CLEANUP
-# =============================================================================
-
-cleanup_iam_roles() {
-    local roles=("$@")
-    
-    for role_name in "${roles[@]}"; do
-        echo "Deleting IAM role: $role_name"
-        
-        # Remove from instance profiles
-        local profile_name="${role_name}-profile"
-        aws iam remove-role-from-instance-profile \
-            --instance-profile-name "$profile_name" \
-            --role-name "$role_name" 2>/dev/null || true
-        
-        aws iam delete-instance-profile \
-            --instance-profile-name "$profile_name" 2>/dev/null || true
-        
-        # Detach policies
-        local policies
-        policies=$(aws iam list-attached-role-policies \
-            --role-name "$role_name" \
-            --query 'AttachedPolicies[*].PolicyArn' \
-            --output text 2>/dev/null)
-        
-        for policy_arn in $policies; do
-            aws iam detach-role-policy \
-                --role-name "$role_name" \
-                --policy-arn "$policy_arn" 2>/dev/null || true
-        done
-        
-        # Delete role
-        aws iam delete-role \
-            --role-name "$role_name" 2>/dev/null || {
-            echo "Failed to delete IAM role: $role_name" >&2
-        }
-        
-        unregister_resource "iam_roles" "$role_name"
-    done
-}
-
-cleanup_iam_policies() {
-    local policies=("$@")
-    
-    for policy_name in "${policies[@]}"; do
-        echo "Deleting IAM policy: $policy_name"
-        
-        # Get policy ARN
-        local policy_arn
-        policy_arn=$(aws iam list-policies \
-            --query "Policies[?PolicyName=='$policy_name'].Arn | [0]" \
-            --output text 2>/dev/null)
-        
-        if [ -n "$policy_arn" ] && [ "$policy_arn" != "None" ]; then
-            aws iam delete-policy \
-                --policy-arn "$policy_arn" 2>/dev/null || {
-                echo "Failed to delete IAM policy: $policy_name" >&2
-            }
+    # Prompt for confirmation
+    if [[ "$force" != "true" ]]; then
+        echo ""
+        echo "Available resources for cleanup:"
+        list_resources_for_cleanup "$stack_name"
+        echo ""
+        read -p "Continue with cleanup? (yes/no): " confirm
+        if [[ "$confirm" != "yes" ]]; then
+            log_info "Cleanup cancelled by user" "CLEANUP"
+            return 0
         fi
-        
-        unregister_resource "iam_policies" "$policy_name"
-    done
-}
-
-# =============================================================================
-# STORAGE CLEANUP
-# =============================================================================
-
-cleanup_efs_filesystems() {
-    local filesystems=("$@")
+    fi
     
-    for fs_id in "${filesystems[@]}"; do
-        echo "Deleting EFS filesystem: $fs_id"
-        
-        # Delete mount targets first
-        local mount_targets
-        mount_targets=$(aws efs describe-mount-targets \
-            --file-system-id "$fs_id" \
-            --query 'MountTargets[*].MountTargetId' \
-            --output text 2>/dev/null)
-        
-        for mt_id in $mount_targets; do
-            echo "Deleting mount target: $mt_id"
-            aws efs delete-mount-target \
-                --mount-target-id "$mt_id" 2>/dev/null || true
-        done
-        
-        # Wait for mount targets to be deleted
-        if [ -n "$mount_targets" ]; then
-            echo "Waiting for mount targets to be deleted..."
-            sleep 30
-        fi
-        
-        # Delete filesystem
-        aws efs delete-file-system \
-            --file-system-id "$fs_id" 2>/dev/null || {
-            echo "Failed to delete EFS filesystem: $fs_id" >&2
-        }
-        
-        unregister_resource "efs_filesystems" "$fs_id"
-    done
+    # Execute automatic cleanup
+    execute_automatic_cleanup "$stack_name" "$force"
 }
 
-cleanup_volumes() {
-    local volumes=("$@")
-    
-    for volume_id in "${volumes[@]}"; do
-        echo "Deleting volume: $volume_id"
-        
-        aws ec2 delete-volume \
-            --volume-id "$volume_id" 2>/dev/null || {
-            echo "Failed to delete volume: $volume_id" >&2
-        }
-        
-        unregister_resource "volumes" "$volume_id"
-    done
-}
-
-# =============================================================================
-# KEY PAIR CLEANUP
-# =============================================================================
-
-cleanup_key_pairs() {
-    local key_pairs=("$@")
-    
-    for key_name in "${key_pairs[@]}"; do
-        echo "Deleting key pair: $key_name"
-        
-        aws ec2 delete-key-pair \
-            --key-name "$key_name" 2>/dev/null || {
-            echo "Failed to delete key pair: $key_name" >&2
-        }
-        
-        unregister_resource "key_pairs" "$key_name"
-    done
-}
-
-# =============================================================================
-# TAG-BASED CLEANUP
-# =============================================================================
-
-cleanup_by_tags() {
+# Execute emergency cleanup
+execute_emergency_cleanup() {
     local stack_name="$1"
     
-    echo "Performing tag-based cleanup for stack: $stack_name"
+    log_warn "Executing emergency cleanup for stack: $stack_name" "CLEANUP"
     
-    # Find and terminate instances
-    local instances
-    instances=$(aws ec2 describe-instances \
-        --filters "Name=tag:Stack,Values=$stack_name" \
-                  "Name=instance-state-name,Values=running,stopped" \
-        --query 'Reservations[*].Instances[*].InstanceId' \
-        --output text)
+    # Force cleanup all resources without dependency checks
+    local resources
+    resources=$(get_all_resources "$stack_name")
     
-    if [ -n "$instances" ]; then
-        cleanup_instances $instances
+    local cleanup_success=true
+    while IFS= read -r resource; do
+        if [[ -n "$resource" ]]; then
+            local resource_id
+            resource_id=$(echo "$resource" | cut -d'|' -f1)
+            local resource_type
+            resource_type=$(echo "$resource" | cut -d'|' -f2)
+            
+            log_warn "Emergency cleanup of resource: $resource_id ($resource_type)" "CLEANUP"
+            
+            if ! force_delete_resource "$resource_id" "$resource_type"; then
+                log_error "Failed to force delete resource: $resource_id" "CLEANUP"
+                cleanup_success=false
+            fi
+        fi
+    done <<< "$resources"
+    
+    if [[ "$cleanup_success" == "true" ]]; then
+        log_info "Emergency cleanup completed" "CLEANUP"
+        return 0
+    else
+        log_error "Emergency cleanup completed with errors" "CLEANUP"
+        return 1
     fi
+}
+
+# Execute dry run cleanup
+execute_dry_run_cleanup() {
+    local stack_name="$1"
     
-    # Find and delete security groups
-    local security_groups
-    security_groups=$(aws ec2 describe-security-groups \
-        --filters "Name=tag:Stack,Values=$stack_name" \
-        --query 'SecurityGroups[*].GroupId' \
-        --output text)
+    log_info "Executing dry run cleanup for stack: $stack_name" "CLEANUP"
     
-    if [ -n "$security_groups" ]; then
-        cleanup_security_groups $security_groups
-    fi
+    # Show what would be cleaned up
+    echo ""
+    echo "DRY RUN - Resources that would be cleaned up:"
+    echo "============================================="
     
-    # Continue with other resources...
-    echo "Tag-based cleanup complete"
+    local resources
+    resources=$(get_resources_in_cleanup_order "$stack_name")
+    
+    while IFS= read -r resource_type; do
+        if [[ -n "$resource_type" ]]; then
+            echo ""
+            echo "Resource Type: $resource_type"
+            echo "----------------------------"
+            list_resources_by_type "$stack_name" "$resource_type"
+        fi
+    done <<< "$resources"
+    
+    echo ""
+    echo "DRY RUN completed - no resources were actually deleted"
+    log_info "Dry run cleanup completed" "CLEANUP"
 }

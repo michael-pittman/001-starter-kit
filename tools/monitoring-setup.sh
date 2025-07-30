@@ -1,23 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
-# Monitoring and Observability Setup
-# Sets up comprehensive monitoring for GeuseMaker
+# Monitoring Setup Tool
+# Sets up monitoring and alerting for the deployment
 # =============================================================================
 
 set -euo pipefail
 
-# Source common functions
+# Standard library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ -f "$PROJECT_ROOT/lib/aws-deployment-common.sh" ]; then
-    source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-fi
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-if [ -f "$PROJECT_ROOT/lib/error-handling.sh" ]; then
-    source "$PROJECT_ROOT/lib/error-handling.sh"
-    init_error_handling "resilient"
-fi
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
+
+# Initialize error handling
+init_error_handling "resilient"
 
 # =============================================================================
 # CONFIGURATION
@@ -649,7 +650,7 @@ create_monitoring_scripts() {
     
     # Start monitoring script
     cat > "$MONITORING_DIR/start-monitoring.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 echo "Starting GeuseMaker monitoring stack..."
@@ -689,7 +690,7 @@ EOF
 
     # Stop monitoring script
     cat > "$MONITORING_DIR/stop-monitoring.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 echo "Stopping GeuseMaker monitoring stack..."
@@ -701,7 +702,7 @@ EOF
 
     # Monitoring status script
     cat > "$MONITORING_DIR/monitoring-status.sh" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 echo "GeuseMaker Monitoring Status"

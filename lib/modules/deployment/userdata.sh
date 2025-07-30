@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # User Data Generation Module
 # Creates cloud-init scripts for instance configuration
@@ -24,7 +24,7 @@ generate_user_data() {
     
     # Base64 encode the script
     base64 -w 0 <<'USERDATA_SCRIPT'
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # =============================================================================

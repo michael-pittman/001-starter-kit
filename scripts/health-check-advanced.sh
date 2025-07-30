@@ -1,10 +1,33 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Advanced Health Check Script for GeuseMaker
 # Performs comprehensive application-level health checks
 # =============================================================================
 
+# Setup directories and paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Source the library loader
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+else
+    echo "ERROR: Cannot find lib-loader.sh in $PROJECT_ROOT/lib/" >&2
+    exit 1
+fi
+
+# Enable error handling
 set -euo pipefail
+
+# Load optional libraries (this script defines its own logging)
+declare -a OPTIONAL_LIBS=(
+    "aws-deployment-common.sh"
+)
+
+# Try to load optional libraries but don't fail if not available
+for lib in "${OPTIONAL_LIBS[@]}"; do
+    load_optional_library "$lib" || true
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -18,10 +41,12 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 OVERALL_HEALTH=true
 HEALTH_REPORT=""
 
-# Logging function
-log() {
-    echo -e "$1" | tee -a "$LOG_FILE"
-}
+# Logging function (override if not available from libraries)
+if ! declare -f log >/dev/null 2>&1; then
+    log() {
+        echo -e "$1" | tee -a "$LOG_FILE"
+    }
+fi
 
 # Health check result formatter
 check_result() {

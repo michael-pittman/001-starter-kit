@@ -1,22 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Error Handling and Recovery Testing
 # Comprehensive testing of error conditions, recovery mechanisms, and failure scenarios
 # =============================================================================
 
-set -euo pipefail
 
-# Source the enhanced test framework
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# =============================================================================
-# ERROR TESTING CONFIGURATION
-# =============================================================================
+# Initialize script with required modules
+initialize_script "test-error-handling-recovery.sh" "core/variables" "core/logging"
 
-# Configure test framework for error testing
 export TEST_VERBOSE="${TEST_VERBOSE:-true}"
 export TEST_PARALLEL="${TEST_PARALLEL:-false}"  # Disable for error testing clarity
 export TEST_STOP_ON_FAILURE="${TEST_STOP_ON_FAILURE:-false}"  # Continue on failures
@@ -626,7 +624,8 @@ test_error_handling_project_scripts() {
     # Test error handling in project scripts
     
     local test_scripts=(
-        "$PROJECT_ROOT/scripts/aws-deployment-unified.sh"
+        "$PROJECT_ROOT/scripts/aws-deployment-v2-simple.sh"
+        "$PROJECT_ROOT/scripts/aws-deployment-modular.sh"
         "$PROJECT_ROOT/tools/test-runner.sh"
     )
     

@@ -1,20 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Enhanced Testing Framework Demonstration
 # Shows all new features of the modernized test framework
 # =============================================================================
 
-set -euo pipefail
 
-# Source the enhanced test framework
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# =============================================================================
-# TEST CONFIGURATION
-# =============================================================================
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Enable modern features for demonstration
+# Initialize script with required modules
+initialize_script "test-enhanced-framework-demo.sh" "core/variables" "core/logging"
+
 export TEST_VERBOSE="true"
 export TEST_PARALLEL="false"  # Disable for demo clarity
 export TEST_COVERAGE_ENABLED="true"

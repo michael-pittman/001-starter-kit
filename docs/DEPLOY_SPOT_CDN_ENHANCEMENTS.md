@@ -484,7 +484,6 @@ EOF
 
 ```
 Core Modules (Always Required):
-├── bash_version.sh     - Version validation
 ├── variables.sh        - Variable management
 ├── errors.sh          - Error handling
 └── registry.sh        - Resource tracking

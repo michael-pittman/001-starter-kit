@@ -1,6 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Shell-based tests for security validation functionality
 # Converts Python unittest to shell script format
+
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-security-validation.sh" "core/variables" "core/logging"
+
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

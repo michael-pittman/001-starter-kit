@@ -1,23 +1,48 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =============================================================================
 # Fix Deployment Issues Script
 # Addresses disk space, EFS mounting, and Parameter Store integration
 # =============================================================================
 
+# Setup directories and paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Source the library loader
+if [[ -f "$PROJECT_ROOT/lib/utils/library-loader.sh" ]]; then
+    source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+else
+    echo "ERROR: Cannot find lib-loader.sh in $PROJECT_ROOT/lib/" >&2
+    exit 1
+fi
+
+# Enable error handling
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Load optional libraries (this script defines its own logging functions)
+declare -a OPTIONAL_LIBS=(
+    "aws-deployment-common.sh"
+)
 
-log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
-error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
-warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
+# Try to load optional libraries but don't fail if not available
+for lib in "${OPTIONAL_LIBS[@]}"; do
+    load_optional_library "$lib" || true
+done
+
+# Define logging functions if not already available
+if ! declare -f log >/dev/null 2>&1; then
+    # Colors for output
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+
+    log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" >&2; }
+    error() { echo -e "${RED}[ERROR] $1${NC}" >&2; }
+    success() { echo -e "${GREEN}[SUCCESS] $1${NC}" >&2; }
+    warning() { echo -e "${YELLOW}[WARNING] $1${NC}" >&2; }
+fi
 
 # =============================================================================
 # DISK SPACE MANAGEMENT
@@ -254,7 +279,7 @@ setup_parameter_store_integration() {
     
     # Create parameter store retrieval script
     cat > /home/ubuntu/GeuseMaker/scripts/get-parameters.sh << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Parameter Store Integration Script
 set -euo pipefail

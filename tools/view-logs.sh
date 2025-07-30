@@ -1,34 +1,38 @@
-#!/bin/bash
-# View application logs for deployed stack
-set -e
+#!/usr/bin/env bash
+# View deployment logs
 
-STACK_NAME="${1:-}"
-if [ -z "$STACK_NAME" ]; then
-    echo "Usage: $0 <STACK_NAME>"
+set -euo pipefail
+
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "view-logs.sh" "core/variables" "core/logging"
+
+# Get log file from argument or use latest
+LOG_FILE="${1:-}"
+
+if [[ -z "$LOG_FILE" ]]; then
+    # Find the most recent log file
+    LOG_FILE=$(find "$PROJECT_ROOT/logs" -name "deployment-*.log" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+    
+    if [[ -z "$LOG_FILE" ]]; then
+        error "No deployment logs found in logs/ directory"
+        exit 1
+    fi
+fi
+
+if [[ ! -f "$LOG_FILE" ]]; then
+    error "Log file not found: $LOG_FILE"
     exit 1
 fi
 
-echo "Viewing logs for stack: $STACK_NAME"
+log "Viewing log file: $LOG_FILE"
+log "File size: $(du -h "$LOG_FILE" | cut -f1)"
 
-# Get instance IP from stack
-INSTANCE_IP=$(aws ec2 describe-instances \
-    --filters "Name=tag:Name,Values=${STACK_NAME}-instance" \
-              "Name=instance-state-name,Values=running" \
-    --query 'Reservations[0].Instances[0].PublicIpAddress' \
-    --output text 2>/dev/null || echo "")
-
-if [ -z "$INSTANCE_IP" ] || [ "$INSTANCE_IP" = "None" ]; then
-    echo "❌ No running instance found for stack: $STACK_NAME"
-    exit 1
-fi
-
-echo "📋 Connecting to instance: $INSTANCE_IP"
-
-# SSH into instance and show docker logs
-KEY_PATH="$HOME/.ssh/${STACK_NAME}-keypair.pem"
-if [ ! -f "$KEY_PATH" ]; then
-    KEY_PATH="$HOME/.ssh/id_rsa"
-fi
-
-ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no ubuntu@"$INSTANCE_IP" \
-    "docker compose -f docker-compose.gpu-optimized.yml logs --tail=50 --follow"
+# Display log contents with line numbers
+cat -n "$LOG_FILE"

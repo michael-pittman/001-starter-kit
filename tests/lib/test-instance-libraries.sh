@@ -1,28 +1,18 @@
-#!/bin/bash
-# =============================================================================
-# Unit Tests for ondemand-instance.sh and simple-instance.sh
-# Tests for instance launch functions and utilities
-# =============================================================================
+#!/usr/bin/env bash
+# Test library helper script
 
 set -euo pipefail
 
-# Get script directory for sourcing
+# Establish project root and library directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source the test framework
-source "$SCRIPT_DIR/shell-test-framework.sh"
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Source required dependencies
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-
-# Source the libraries under test
-source "$PROJECT_ROOT/lib/ondemand-instance.sh"
-source "$PROJECT_ROOT/lib/simple-instance.sh"
-
-# =============================================================================
-# TEST SETUP AND TEARDOWN
-# =============================================================================
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
 
 setup_test_environment() {
     # Store original AWS region

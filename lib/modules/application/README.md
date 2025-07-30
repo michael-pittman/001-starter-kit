@@ -146,7 +146,7 @@ Each module includes comprehensive testing:
 
 ```bash
 # Test Docker setup
-./scripts/simple-demo.sh
+./archive/demos/simple-demo.sh
 
 # Test AI services integration
 /shared/test-ai-integration.sh

@@ -1,24 +1,18 @@
-#!/bin/bash
-# =============================================================================
-# Unit Tests for docker-compose-installer.sh
-# Tests for Docker Compose installation functions and utilities
-# =============================================================================
+#!/usr/bin/env bash
+# Test library helper script
 
 set -euo pipefail
 
-# Get script directory for sourcing
+# Establish project root and library directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source the test framework
-source "$SCRIPT_DIR/shell-test-framework.sh"
+# Source the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-# Source the library under test
-source "$PROJECT_ROOT/lib/docker-compose-installer.sh"
-
-# =============================================================================
-# TEST SETUP AND TEARDOWN
-# =============================================================================
+# Load required modules through the library system
+load_module "aws-deployment-common"
+load_module "error-handling"
 
 setup_test_environment() {
     # Create temporary directories for testing

@@ -1,23 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Final Comprehensive Validation of Modular AWS Deployment System
 # Tests all components and integrations
 
 set -euo pipefail
 
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Color codes
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m'
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+# Initialize script with required modules
+initialize_script "final-validation.sh" "core/variables" "core/logging"
 
 # Test counters
 TESTS_RUN=0
@@ -29,14 +24,14 @@ run_test() {
     local test_function="$2"
     
     ((TESTS_RUN++))
-    log_info "Testing: $test_name"
+    log "Testing: $test_name"
     
     if $test_function >/dev/null 2>&1; then
         ((TESTS_PASSED++))
-        log_success "✓ $test_name"
+        success "✓ $test_name"
     else
         ((TESTS_FAILED++))
-        log_error "✗ $test_name"
+        error "✗ $test_name"
         # Show details
         $test_function 2>&1 | sed 's/^/    /'
     fi
@@ -59,7 +54,6 @@ test_module_structure() {
         "application/service_config.sh"
         "application/ai_services.sh"
         "application/health_monitor.sh"
-        "compatibility/legacy_wrapper.sh"
     )
     
     for module in "${expected_modules[@]}"; do
@@ -116,7 +110,7 @@ test_bash_compatibility() {
     # Test associative array alternatives for bash 3.x
     local test_script="/tmp/bash-compat-test-$$.sh"
     cat > "$test_script" <<'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Test variable sanitization (bash 3.x compatible)
@@ -187,30 +181,30 @@ test_deployment_validation() {
 
 # Test key features
 test_key_features() {
-    log_info "Testing key system features..."
+    log "Testing key system features..."
     
     # Test variable sanitization
     if [[ "$(echo 'efs-id' | sed 's/[^a-zA-Z0-9_]/_/g')" == "efs_id" ]]; then
-        log_info "  ✓ Variable sanitization working"
+        log "  ✓ Variable sanitization working"
     else
-        log_error "  ✗ Variable sanitization failed"
+        error "  ✗ Variable sanitization failed"
         return 1
     fi
     
     # Test spot instance fallback logic
     local fallbacks="g4dn.large g5.xlarge g4dn.2xlarge"
     if [[ -n "$fallbacks" ]]; then
-        log_info "  ✓ Fallback strategies defined"
+        log "  ✓ Fallback strategies defined"
     else
-        log_error "  ✗ Fallback strategies missing"
+        error "  ✗ Fallback strategies missing"
         return 1
     fi
     
     # Test error handling structure
     if [[ -f "$PROJECT_ROOT/lib/modules/errors/error_types.sh" ]]; then
-        log_info "  ✓ Error handling system present"
+        log "  ✓ Error handling system present"
     else
-        log_error "  ✗ Error handling system missing"
+        error "  ✗ Error handling system missing"
         return 1
     fi
     
@@ -219,26 +213,26 @@ test_key_features() {
 
 # Print system summary
 print_system_summary() {
-    log_info "=== MODULAR DEPLOYMENT SYSTEM SUMMARY ==="
+    log "=== MODULAR DEPLOYMENT SYSTEM SUMMARY ==="
     echo
     
     # Module count
     local module_count
     module_count=$(find "$PROJECT_ROOT/lib/modules" -name "*.sh" -type f | wc -l)
-    log_info "📦 Modules created: $module_count"
+    log "📦 Modules created: $module_count"
     
     # Script count
     local script_count
     script_count=$(find "$PROJECT_ROOT/scripts" -name "aws-deployment-*.sh" -type f | wc -l)
-    log_info "🚀 Deployment scripts: $script_count"
+    log "🚀 Deployment scripts: $script_count"
     
     # Test count
     local test_count
     test_count=$(find "$PROJECT_ROOT/tests" -name "test-*.sh" -type f | wc -l)
-    log_info "🧪 Test suites: $test_count"
+    log "🧪 Test suites: $test_count"
     
     echo
-    log_info "=== KEY ACHIEVEMENTS ==="
+    log "=== KEY ACHIEVEMENTS ==="
     echo "✅ Monolithic structure replaced with modular architecture"
     echo "✅ Variable management issues resolved (sanitization)"
     echo "✅ EC2 provisioning failures eliminated (retry + fallback)"
@@ -251,7 +245,7 @@ print_system_summary() {
     echo "✅ Legacy function migration with backward compatibility"
     echo
     
-    log_info "=== USAGE ==="
+    log "=== USAGE ==="
     echo "# Simple deployment:"
     echo "./scripts/aws-deployment-v2-simple.sh my-stack"
     echo
@@ -265,7 +259,7 @@ print_system_summary() {
 
 # Main test execution
 main() {
-    log_info "Starting Final Validation of Modular AWS Deployment System"
+    log "Starting Final Validation of Modular AWS Deployment System"
     echo
     
     # Run all tests
@@ -278,18 +272,18 @@ main() {
     run_test "Key Features" test_key_features
     
     echo
-    log_info "=== VALIDATION SUMMARY ==="
-    log_info "Tests run: $TESTS_RUN"
-    log_info "Tests passed: $TESTS_PASSED"
-    log_info "Tests failed: $TESTS_FAILED"
+    log "=== VALIDATION SUMMARY ==="
+    log "Tests run: $TESTS_RUN"
+    log "Tests passed: $TESTS_PASSED"
+    log "Tests failed: $TESTS_FAILED"
     
     if [[ $TESTS_FAILED -eq 0 ]]; then
-        log_success "🎉 ALL TESTS PASSED! System is ready for production."
+        success "🎉 ALL TESTS PASSED! System is ready for production."
         echo
         print_system_summary
         return 0
     else
-        log_error "❌ $TESTS_FAILED tests failed. Please review issues above."
+        error "❌ $TESTS_FAILED tests failed. Please review issues above."
         return 1
     fi
 }

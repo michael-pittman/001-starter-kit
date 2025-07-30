@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # EFS Infrastructure Module
 # Manages EFS file systems, mount targets, and access points

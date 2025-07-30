@@ -1,16 +1,20 @@
-#!/usr/local/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Framework Validation Test
 # Simple test to validate the enhanced testing framework functionality
 # =============================================================================
 
-set -euo pipefail
 
-# Source the enhanced test framework
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/shell-test-framework.sh"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Simple validation tests
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
+
+# Initialize script with required modules
+initialize_script "test-framework-validation.sh" "core/variables" "core/logging"
+
 test_basic_assertions() {
     assert_equals "hello" "hello" "Basic string equality"
     assert_not_equals "hello" "world" "String inequality"

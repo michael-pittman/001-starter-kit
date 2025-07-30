@@ -2,46 +2,133 @@
 # =============================================================================
 # Modular AWS Deployment Orchestrator
 # Minimal orchestrator that leverages modular components
-# Requires: bash 5.3.3+
+# Compatible with bash 3.x+
 # =============================================================================
-
-# Bash version validation - critical for deployment safety
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Validate bash version before proceeding with deployment
-source "$PROJECT_ROOT/lib/modules/core/bash_version.sh"
-require_bash_533 "aws-deployment-modular.sh"
 
 set -euo pipefail
 
-# Source core modules
-source "$PROJECT_ROOT/lib/modules/config/variables.sh"
-source "$PROJECT_ROOT/lib/modules/core/registry.sh"
-source "$PROJECT_ROOT/lib/modules/core/errors.sh"
+# Initialize library loader for version checking
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
 
-# Load AWS CLI v2 enhancements
-source "$PROJECT_ROOT/lib/aws-cli-v2.sh"
+# Source the errors module
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
 
-# Source enhanced validation and recovery libraries
-source "$PROJECT_ROOT/lib/deployment-validation.sh"
-source "$PROJECT_ROOT/lib/error-recovery.sh"
-source "$PROJECT_ROOT/lib/aws-quota-checker.sh"
-source "$PROJECT_ROOT/lib/deployment-health.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
-source "$PROJECT_ROOT/lib/error-handling.sh"
+# Initialize library loader
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils/library-loader.sh" || {
+    echo "Error: Failed to load library loader" >&2
+    exit 1
+}
+
+# Initialize script with required modules
+initialize_script "aws-deployment-modular.sh" \
+    "config/variables" \
+    "core/registry" \
+    "core/errors" || {
+    echo "Error: Failed to initialize script" >&2
+    exit 1
+}
+
+# Load additional libraries
+safe_source "aws-cli-v2.sh" true "AWS CLI v2 enhancements"
+safe_source "deployment-validation.sh" false "Deployment validation"
+safe_source "error-recovery.sh" false "Error recovery"
+safe_source "aws-quota-checker.sh" false "AWS quota checker"
+safe_source "deployment-health.sh" false "Deployment health"
+
+# Load monitoring integration
+if safe_source "modules/monitoring/integration.sh" false "Monitoring integration"; then
+    echo "📊 Monitoring integration loaded"
+    MONITORING_AVAILABLE=true
+else
+    echo "⚠️  Monitoring integration not available"
+    MONITORING_AVAILABLE=false
+fi
 
 # Initialize enhanced error handling with modern features
 if declare -f init_enhanced_error_handling >/dev/null 2>&1; then
     init_enhanced_error_handling "auto" "true" "true"
     echo "🚀 Enhanced error handling initialized with modern features"
 else
-    init_error_handling "strict"
+    # Fallback to basic error trap
+    trap 'echo "Error occurred at line $LINENO. Exit code: $?" >&2' ERR
     echo "⚙️  Basic error handling initialized"
 fi
 
-# Source AWS error handling for intelligent retries
-source "$PROJECT_ROOT/lib/aws-api-error-handling.sh" 2>/dev/null || echo "⚠️  AWS error handling module not available"
+# Use standardized logging if available, otherwise fallback to custom functions
+if command -v log_message >/dev/null 2>&1; then
+    log_error() { log_message "ERROR" "$1" "DEPLOYMENT"; }
+    log_warning() { log_message "WARN" "$1" "DEPLOYMENT"; }
+    log_info() { log_message "INFO" "$1" "DEPLOYMENT"; }
+    log_debug() { log_message "DEBUG" "$1" "DEPLOYMENT"; }
+    log_success() { log_message "INFO" "$1" "DEPLOYMENT"; }  # Use INFO level for success
+else
+    # Fallback to custom logging functions
+    log_error() { echo "ERROR: $*" >&2; }
+    log_warning() { echo "WARNING: $*" >&2; }
+    log_info() { echo "INFO: $*"; }
+    log_debug() { [[ "${DEBUG:-}" == "true" ]] && echo "DEBUG: $*" >&2 || true; }
+    log_success() { echo "SUCCESS: $*"; }
+fi
+
+# COMPATIBILITY: Define fallback error handling if not available
+if ! declare -f handle_error >/dev/null 2>&1; then
+    handle_error() {
+        local exit_code="${1:-1}"
+        local error_msg="${2:-Unknown error}"
+        echo "ERROR: $error_msg (exit code: $exit_code)" >&2
+        return "$exit_code"
+    }
+fi
+
+# COMPATIBILITY: Define fallback retry function if not available
+if ! declare -f retry_with_backoff >/dev/null 2>&1; then
+    retry_with_backoff() {
+        local cmd="$1"
+        local description="${2:-Command}"
+        local max_attempts="${3:-3}"
+        local attempt=1
+        
+        while [ $attempt -le $max_attempts ]; do
+            echo "Attempt $attempt/$max_attempts: $description"
+            if $cmd; then
+                return 0
+            fi
+            if [ $attempt -lt $max_attempts ]; then
+                echo "Failed, retrying in $((attempt * 2)) seconds..."
+                sleep $((attempt * 2))
+            fi
+            ((attempt++))
+        done
+        
+        echo "ERROR: $description failed after $max_attempts attempts" >&2
+        return 1
+    }
+fi
+
+# COMPATIBILITY: Define fallback cleanup script generator if not available
+if ! declare -f generate_cleanup_script >/dev/null 2>&1; then
+    generate_cleanup_script() {
+        local script_path="${1:-/tmp/cleanup-script.sh}"
+        local stack_name="$(get_variable STACK_NAME)"
+        
+        cat > "$script_path" <<'EOF'
+#!/usr/bin/env bash
+echo "NOTICE: Cleanup script generation not available (error handling disabled)"
+echo "To manually clean up resources, use: make destroy STACK_NAME=${STACK_NAME}"
+EOF
+        chmod +x "$script_path"
+    }
+fi
+
+# Load AWS error handling for intelligent retries
+safe_source "aws-api-error-handling.sh" false "AWS API error handling"
 
 # =============================================================================
 # USAGE
@@ -75,6 +162,11 @@ Options:
     --no-cleanup-on-failure   Don't clean up resources if deployment fails
     --dry-run                 Show what would be deployed without creating resources
     
+    Monitoring Options:
+    --monitoring PROFILE      Enable monitoring with profile: minimal, standard, comprehensive, debug
+    --no-monitoring           Disable monitoring (monitoring is enabled by default)
+    --monitoring-dir DIR      Directory for monitoring output (default: /tmp/monitoring_$$)
+    
     Help:
     -h, --help               Show this help message
 
@@ -100,6 +192,18 @@ EOF
 # =============================================================================
 
 parse_arguments() {
+    # Register core deployment variables to prevent warnings
+    register_variable "DEPLOYMENT_TYPE" "string" "deployment" "Type of deployment (simple, spot, enterprise)"
+    register_variable "STACK_NAME" "string" "" "Name of the CloudFormation stack"
+    register_variable "AWS_REGION" "string" "us-east-1" "AWS region for deployment"
+    register_variable "INSTANCE_TYPE" "string" "g4dn.xlarge" "EC2 instance type"
+    register_variable "KEY_NAME" "string" "" "EC2 key pair name"
+    register_variable "VOLUME_SIZE" "number" "30" "EBS volume size in GB"
+    register_variable "ENVIRONMENT" "string" "development" "Deployment environment"
+    register_variable "VALIDATE_ONLY" "boolean" "false" "Run validation only"
+    register_variable "CLEANUP_ON_FAILURE" "boolean" "true" "Cleanup resources on failure"
+    register_variable "DRY_RUN" "boolean" "false" "Perform dry run without creating resources"
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
             -t|--type)
@@ -163,6 +267,24 @@ parse_arguments() {
                 set_variable "DRY_RUN" "true"
                 shift
                 ;;
+            --monitoring)
+                if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
+                    MONITORING_PROFILE="$2"
+                    shift 2
+                else
+                    MONITORING_PROFILE="standard"
+                    shift
+                fi
+                MONITORING_ENABLED="true"
+                ;;
+            --no-monitoring)
+                MONITORING_ENABLED="false"
+                shift
+                ;;
+            --monitoring-dir)
+                MONITORING_OUTPUT_DIR="$2"
+                shift 2
+                ;;
             --cloudfront|--cdn)
                 ENABLE_CLOUDFRONT="true"
                 shift
@@ -200,19 +322,53 @@ run_deployment() {
     # Initialize registry
     initialize_registry "$stack_name"
     
+    # Initialize monitoring if available
+    if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f init_deployment_monitoring >/dev/null 2>&1; then
+        echo -e "\n📊 Initializing deployment monitoring..."
+        init_deployment_monitoring "$stack_name" "${MONITORING_PROFILE:-standard}" || {
+            echo "WARNING: Monitoring initialization failed, continuing without monitoring" >&2
+            MONITORING_AVAILABLE=false
+        }
+        
+        # Pre-deployment monitoring
+        if declare -f monitor_pre_deployment >/dev/null 2>&1; then
+            monitor_pre_deployment "$stack_name"
+        fi
+    fi
+    
     # Stage 1: Infrastructure with retry
     echo -e "\n🔧 Stage 1: Infrastructure Setup"
+    
+    # Start monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "infrastructure" "start"
+    
     if declare -f retry_with_backoff >/dev/null 2>&1; then
         retry_with_backoff "setup_infrastructure" "Infrastructure setup" 2 || {
             echo "ERROR: Infrastructure setup failed after retries" >&2
+            [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                monitor_deployment_phase "infrastructure" "error"
             return 1
         }
     else
-        setup_infrastructure || return 1
+        setup_infrastructure || {
+            [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                monitor_deployment_phase "infrastructure" "error"
+            return 1
+        }
     fi
+    
+    # End monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "infrastructure" "end"
     
     # Stage 2: Instance Launch with intelligent recovery
     echo -e "\n🚀 Stage 2: Instance Launch"
+    
+    # Start monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "compute" "start"
+    
     if ! launch_deployment_instance; then
         echo "Instance launch failed, attempting recovery..." >&2
         
@@ -220,35 +376,98 @@ run_deployment() {
         if declare -f orchestrate_recovery >/dev/null 2>&1; then
             if orchestrate_recovery "EC2_INSUFFICIENT_CAPACITY" "$stack_name"; then
                 echo "Recovery successful, retrying instance launch..."
-                launch_deployment_instance || return 1
+                launch_deployment_instance || {
+                    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                        monitor_deployment_phase "compute" "error"
+                    return 1
+                }
             else
                 echo "ERROR: Recovery failed" >&2
+                [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                    monitor_deployment_phase "compute" "error"
                 return 1
             fi
         else
+            [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                monitor_deployment_phase "compute" "error"
             return 1
         fi
     fi
     
+    # End monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "compute" "end"
+    
     # Stage 3: Application Deployment
     echo -e "\n📦 Stage 3: Application Deployment"
+    
+    # Start monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "application" "start"
+    
     if declare -f retry_with_backoff >/dev/null 2>&1; then
-        retry_with_backoff "deploy_application" "Application deployment" 2 || return 1
+        retry_with_backoff "deploy_application" "Application deployment" 2 || {
+            [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                monitor_deployment_phase "application" "error"
+            return 1
+        }
     else
-        deploy_application || return 1
+        deploy_application || {
+            [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+                monitor_deployment_phase "application" "error"
+            return 1
+        }
     fi
+    
+    # End monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "application" "end"
     
     # Stage 4: Validation
     echo -e "\n✅ Stage 4: Validation"
-    validate_deployment || return 1
+    
+    # Start monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "validation" "start"
+    
+    validate_deployment || {
+        [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+            monitor_deployment_phase "validation" "error"
+        return 1
+    }
+    
+    # End monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "validation" "end"
     
     # Stage 5: Health Check
     echo -e "\n🏥 Stage 5: Post-Deployment Health Check"
+    
+    # Start monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "health_check" "start"
+    
     if declare -f perform_health_check >/dev/null 2>&1; then
         if ! perform_health_check "$stack_name" "$(get_variable AWS_REGION)"; then
             echo "WARNING: Health check detected issues" >&2
             echo "Please run 'make health-check STACK_NAME=$stack_name' for details" >&2
+            
+            # Monitor service health
+            if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_service_health >/dev/null 2>&1; then
+                for service in n8n qdrant ollama crawl4ai; do
+                    monitor_service_health "$service" "healthy" || true
+                done
+            fi
         fi
+    fi
+    
+    # End monitoring phase
+    [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_deployment_phase >/dev/null 2>&1 && \
+        monitor_deployment_phase "health_check" "end"
+    
+    # Post-deployment monitoring
+    if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_post_deployment >/dev/null 2>&1; then
+        monitor_post_deployment "success"
     fi
     
     # Success
@@ -270,13 +489,17 @@ run_deployment() {
 setup_infrastructure() {
     echo "Setting up comprehensive infrastructure..."
     
-    # Source all infrastructure modules
-    source "$PROJECT_ROOT/lib/modules/infrastructure/vpc.sh"
-    source "$PROJECT_ROOT/lib/modules/infrastructure/security.sh"
-    source "$PROJECT_ROOT/lib/modules/infrastructure/iam.sh"
-    source "$PROJECT_ROOT/lib/modules/infrastructure/efs.sh"
-    source "$PROJECT_ROOT/lib/modules/infrastructure/alb.sh"
-    source "$PROJECT_ROOT/lib/modules/infrastructure/cloudfront.sh"
+    # Load all infrastructure modules
+    load_modules \
+        "infrastructure/vpc" \
+        "infrastructure/security" \
+        "infrastructure/iam" \
+        "infrastructure/efs" \
+        "infrastructure/alb" \
+        "infrastructure/cloudfront" || {
+        echo "ERROR: Failed to load infrastructure modules" >&2
+        return 1
+    }
     
     # Get configuration variables
     local stack_name="$(get_variable STACK_NAME)"
@@ -477,9 +700,13 @@ setup_infrastructure() {
 launch_deployment_instance() {
     echo "Launching instance..."
     
-    # Source instance modules
-    source "$PROJECT_ROOT/lib/modules/instances/launch.sh"
-    source "$PROJECT_ROOT/lib/modules/deployment/userdata.sh"
+    # Load instance modules
+    load_modules \
+        "instances/launch" \
+        "deployment/userdata" || {
+        echo "ERROR: Failed to load instance modules" >&2
+        return 1
+    }
     
     # Generate user data
     local user_data
@@ -569,8 +796,11 @@ deploy_application() {
 validate_deployment() {
     echo "Validating deployment..."
     
-    # Source monitoring module
-    source "$PROJECT_ROOT/lib/modules/monitoring/health.sh"
+    # Load monitoring module
+    load_module "monitoring/health" || {
+        echo "ERROR: Failed to load monitoring module" >&2
+        return 1
+    }
     
     # Run health checks
     check_instance_health "$INSTANCE_ID" "all" || {
@@ -680,10 +910,44 @@ cleanup_on_failure() {
     if [ "$(get_variable CLEANUP_ON_FAILURE)" = "true" ]; then
         echo "Deployment failed, running cleanup..." >&2
         
+        # Post-deployment monitoring for failure
+        if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f monitor_post_deployment >/dev/null 2>&1; then
+            monitor_post_deployment "failed" "Deployment failed, cleanup initiated"
+        fi
+        
         # Generate and run cleanup script
         generate_cleanup_script "/tmp/cleanup-${STACK_NAME}.sh"
         bash "/tmp/cleanup-${STACK_NAME}.sh"
+        
+        # Cleanup monitoring
+        if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f cleanup_deployment_monitoring >/dev/null 2>&1; then
+            cleanup_deployment_monitoring
+        fi
     fi
+}
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
+
+validate_required_variables() {
+    local missing_vars=()
+    
+    # Check required variables
+    local required_vars=("STACK_NAME" "DEPLOYMENT_TYPE" "AWS_REGION")
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "$(get_variable "$var")" ]]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        echo "ERROR: Missing required variables: ${missing_vars[*]}" >&2
+        return 1
+    fi
+    
+    return 0
 }
 
 # =============================================================================
@@ -743,11 +1007,32 @@ main() {
         cleanup_on_failure
     fi
     
-    # Set up error handling
-    trap cleanup_on_failure ERR
+    # Set up error handling with monitoring cleanup
+    cleanup_and_exit() {
+        local exit_code=$?
+        echo "Error occurred during deployment. Exit code: $exit_code" >&2
+        
+        # Cleanup monitoring if enabled
+        if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f cleanup_deployment_monitoring >/dev/null 2>&1; then
+            cleanup_deployment_monitoring
+        fi
+        
+        exit $exit_code
+    }
+    
+    # Set trap for errors and script exit
+    trap cleanup_and_exit ERR EXIT
     
     # Run deployment
     run_deployment
+    
+    # Success - clear trap
+    trap - ERR EXIT
+    
+    # Final monitoring cleanup
+    if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f cleanup_deployment_monitoring >/dev/null 2>&1; then
+        cleanup_deployment_monitoring
+    fi
 }
 
 # Run main function

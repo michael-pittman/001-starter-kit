@@ -1,32 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Consolidated AWS Resource Cleanup Script
 # Unified cleanup for all AWS resources with comprehensive error handling
 # =============================================================================
 
-set -euo pipefail
-
 # =============================================================================
 # CONFIGURATION AND SETUP
 # =============================================================================
 
+set -euo pipefail
+
+# Initialize library loader
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIB_DIR="$PROJECT_ROOT/lib"
+source "$SCRIPT_DIR/../lib/utils/library-loader.sh" || {
+    echo "Error: Failed to load library loader" >&2
+    exit 1
+}
 
-# Source required libraries
-source "$LIB_DIR/error-handling.sh"
-source "$LIB_DIR/aws-deployment-common.sh"
-source "$LIB_DIR/aws-config.sh"
+# Load required libraries
+safe_source "error-handling.sh" true "Error handling utilities"
+safe_source "aws-deployment-common.sh" true "AWS deployment common functions"
+safe_source "aws-config.sh" true "AWS configuration"
 
-# Load the new centralized configuration management system
-if [ -f "$LIB_DIR/config-management.sh" ]; then
-    source "$LIB_DIR/config-management.sh"
-    CONFIG_MANAGEMENT_AVAILABLE=true
-else
-    CONFIG_MANAGEMENT_AVAILABLE=false
-    warning "Centralized configuration management not available, using legacy mode"
-fi
+# Load required modules through the library system
+load_module "config-management"
 
 # Set AWS region if not already set
 export AWS_REGION="${AWS_REGION:-us-east-1}"

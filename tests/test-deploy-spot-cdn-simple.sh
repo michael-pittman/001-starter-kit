@@ -3,19 +3,29 @@
 # Simple Test for deploy-spot-cdn Command - Core Failure Paths
 # =============================================================================
 
+# Initialize library loader
+SCRIPT_DIR_TEMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR_TEMP="$(cd "$SCRIPT_DIR_TEMP/.." && pwd)/lib"
+
+# Source the errors module for version checking
+if [[ -f "$LIB_DIR_TEMP/modules/core/errors.sh" ]]; then
+    source "$LIB_DIR_TEMP/modules/core/errors.sh"
+else
+    # Fallback warning if errors module not found
+    echo "WARNING: Could not load errors module" >&2
+fi
+
 # Get script directory and project root
+
+# Standard library loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load required libraries
-source "$PROJECT_ROOT/lib/error-handling.sh"
-source "$PROJECT_ROOT/lib/aws-deployment-common.sh"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-set -euo pipefail
-
-# =============================================================================
-# TEST CONFIGURATION
-# =============================================================================
+# Initialize script with required modules
+initialize_script "test-deploy-spot-cdn-simple.sh" "core/variables" "core/logging"
 
 STACK_NAME="test-geuse002"
 REGION="us-east-1"
@@ -29,45 +39,29 @@ declare -A RECOVERY_SUGGESTIONS
 # CORE FAILURE PATH TESTS
 # =============================================================================
 
-# Test 1: Bash Version Validation (CRITICAL)
-test_bash_version() {
-    local test_name="bash_version"
-    log "Testing: $test_name"
-    
-    if ! bash -c 'source lib/modules/core/bash_version.sh && check_bash_version_enhanced'; then
-        TEST_RESULTS["$test_name"]="FAILED"
-        FAILURE_PATHS["$test_name"]="Bash version check failed"
-        RECOVERY_SUGGESTIONS["$test_name"]="Upgrade bash to 5.3+ or fix bash version module"
-        return 1
-    fi
-    
-    TEST_RESULTS["$test_name"]="PASSED"
-    success "✓ Bash version validation passed"
-}
-
-# Test 2: AWS CLI Demo Script (CRITICAL)
+# Test 1: AWS CLI Demo Script (CRITICAL)
 test_aws_cli_demo_script() {
     local test_name="aws_cli_demo_script"
     log "Testing: $test_name"
     
-    # Test if script exists and is executable
-    if [[ ! -x "$PROJECT_ROOT/scripts/aws-cli-v2-demo.sh" ]]; then
+    # Test if script exists and is executable (now in archive)
+    if [[ ! -x "$PROJECT_ROOT/archive/demos/aws-cli-v2-demo.sh" ]]; then
         TEST_RESULTS["$test_name"]="FAILED"
         FAILURE_PATHS["$test_name"]="AWS CLI demo script not executable"
-        RECOVERY_SUGGESTIONS["$test_name"]="Run 'chmod +x scripts/aws-cli-v2-demo.sh'"
+        RECOVERY_SUGGESTIONS["$test_name"]="Run 'chmod +x archive/demos/aws-cli-v2-demo.sh'"
         return 1
     fi
     
     # Test script syntax
-    if ! bash -n "$PROJECT_ROOT/scripts/aws-cli-v2-demo.sh"; then
+    if ! bash -n "$PROJECT_ROOT/archive/demos/aws-cli-v2-demo.sh"; then
         TEST_RESULTS["$test_name"]="FAILED"
         FAILURE_PATHS["$test_name"]="AWS CLI demo script has syntax errors"
-        RECOVERY_SUGGESTIONS["$test_name"]="Fix syntax errors in aws-cli-v2-demo.sh"
+        RECOVERY_SUGGESTIONS["$test_name"]="Fix syntax errors in archive/demos/aws-cli-v2-demo.sh"
         return 1
     fi
     
     # Test if script can be sourced without errors
-    if ! bash -c "source '$PROJECT_ROOT/scripts/aws-cli-v2-demo.sh' >/dev/null 2>&1"; then
+    if ! bash -c "source '$PROJECT_ROOT/archive/demos/aws-cli-v2-demo.sh' >/dev/null 2>&1"; then
         TEST_RESULTS["$test_name"]="FAILED"
         FAILURE_PATHS["$test_name"]="AWS CLI demo script has sourcing errors"
         RECOVERY_SUGGESTIONS["$test_name"]="Check library dependencies in aws-cli-v2-demo.sh"
@@ -78,7 +72,7 @@ test_aws_cli_demo_script() {
     success "✓ AWS CLI demo script validation passed"
 }
 
-# Test 3: Logging System (CRITICAL)
+# Test 2: Logging System (CRITICAL)
 test_logging_system() {
     local test_name="logging_system"
     log "Testing: $test_name"
@@ -103,7 +97,7 @@ test_logging_system() {
     success "✓ Logging system validation passed"
 }
 
-# Test 4: AWS CLI Installation (CRITICAL)
+# Test 3: AWS CLI Installation (CRITICAL)
 test_aws_cli_installation() {
     local test_name="aws_cli_installation"
     log "Testing: $test_name"
@@ -129,7 +123,7 @@ test_aws_cli_installation() {
     success "✓ AWS CLI v2 installation check passed ($aws_version)"
 }
 
-# Test 5: AWS Credentials (CRITICAL)
+# Test 4: AWS Credentials (CRITICAL)
 test_aws_credentials() {
     local test_name="aws_credentials"
     log "Testing: $test_name"
@@ -145,7 +139,7 @@ test_aws_credentials() {
     success "✓ AWS credentials validation passed"
 }
 
-# Test 6: Makefile Target (CRITICAL)
+# Test 5: Makefile Target (CRITICAL)
 test_makefile_target() {
     local test_name="makefile_target"
     log "Testing: $test_name"
@@ -161,7 +155,7 @@ test_makefile_target() {
     success "✓ Makefile target validation passed"
 }
 
-# Test 7: Required Libraries (CRITICAL)
+# Test 6: Required Libraries (CRITICAL)
 test_required_libraries() {
     local test_name="required_libraries"
     log "Testing: $test_name"
@@ -170,7 +164,6 @@ test_required_libraries() {
         "lib/error-handling.sh"
         "lib/aws-deployment-common.sh"
         "lib/aws-cli-v2.sh"
-        "lib/modules/core/bash_version.sh"
         "lib/deployment-validation.sh"
     )
     
@@ -239,7 +232,6 @@ main() {
     echo
     
     # Run all critical tests
-    test_bash_version
     test_aws_cli_demo_script
     test_logging_system
     test_aws_cli_installation

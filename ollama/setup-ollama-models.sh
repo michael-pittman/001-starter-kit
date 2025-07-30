@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Enhanced Ollama Model Setup Script for T4 GPU Optimization

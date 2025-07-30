@@ -1,29 +1,23 @@
-#!/bin/bash
-# Open monitoring dashboard in browser
-set -e
+#!/usr/bin/env bash
+# Open monitoring dashboard
 
-echo "🔍 Opening monitoring dashboard..."
+set -euo pipefail
 
-# Get current AWS region
-AWS_REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
+# Standard library loading
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# CloudWatch dashboard URL
-CLOUDWATCH_URL="https://${AWS_REGION}.console.aws.amazon.com/cloudwatch/home?region=${AWS_REGION}#dashboards:"
+# Load the library loader
+source "$PROJECT_ROOT/lib/utils/library-loader.sh"
 
-echo "📊 CloudWatch Dashboard: $CLOUDWATCH_URL"
+# Initialize script with required modules
+initialize_script "open-monitoring.sh" "core/variables" "core/logging"
 
-# Try to open in browser (cross-platform)
-if command -v open >/dev/null 2>&1; then
-    # macOS
-    open "$CLOUDWATCH_URL"
-elif command -v xdg-open >/dev/null 2>&1; then
-    # Linux
-    xdg-open "$CLOUDWATCH_URL"
-elif command -v start >/dev/null 2>&1; then
-    # Windows
-    start "$CLOUDWATCH_URL"
-else
-    echo "⚠️  Please open this URL manually: $CLOUDWATCH_URL"
-fi
+# Get AWS region
+AWS_REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
 
-echo "✅ Monitoring dashboard opened"
+# Open CloudWatch dashboard
+log "Opening CloudWatch dashboard for region: $AWS_REGION"
+open "https://$AWS_REGION.console.aws.amazon.com/cloudwatch/home?region=$AWS_REGION#dashboards:"
+
+success "CloudWatch dashboard opened in browser"
