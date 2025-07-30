@@ -232,3 +232,23 @@ Available in `.claude/commands/BMad/`:
 - Agents: `/analyst`, `/architect`, `/dev`, `/pm`, `/po`, `/qa`, `/sm`, `/ux-expert`
 - Tasks: `/create-doc`, `/review-story`, `/execute-checklist`, `/create-next-story`
 - Advanced: `/brownfield-create-epic`, `/facilitate-brainstorming-session`, `/advanced-elicitation`
+
+### Maintenance Suite
+The project includes a comprehensive maintenance suite (`/lib/modules/maintenance/maintenance-suite.sh`):
+- **Fix Operations**: Automated deployment issue resolution
+- **Cleanup Operations**: Safe resource cleanup with dependency checks
+- **Backup/Restore**: Full and incremental backup capabilities
+- **Health Monitoring**: Proactive health checks with auto-fix
+- **Update Operations**: Docker image and component updates
+- **Optimization**: Performance tuning and resource optimization
+
+Access via Makefile targets: `make maintenance-*`
+
+### Performance Optimization
+The project includes performance optimization modules:
+- **AWS API Caching**: Reduces API calls and improves response times
+- **Parallel Execution**: Concurrent operations for faster deployments
+- **Performance Monitoring**: Track operation timings and bottlenecks
+- **Connection Pooling**: Reuse AWS connections for efficiency
+
+Key module: `/lib/modules/performance/`

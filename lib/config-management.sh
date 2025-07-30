@@ -998,16 +998,23 @@ generate_secrets_env_vars() {
 # =============================================================================
 
 # Database Secrets
-POSTGRES_PASSWORD=\${POSTGRES_PASSWORD:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
+# POSTGRES_PASSWORD must be set by deployment script or Parameter Store
+# No fallback provided for security reasons
+POSTGRES_PASSWORD=\${POSTGRES_PASSWORD:-}
 
 # n8n Secrets  
-N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-\$(openssl rand -hex 32 2>/dev/null || echo "fallback_$(date +%s)")}
-N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
+# N8N_ENCRYPTION_KEY must be set by deployment script or Parameter Store
+# No fallback provided for security reasons
+N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-}
+# N8N_USER_MANAGEMENT_JWT_SECRET must be set by deployment script or Parameter Store
+N8N_USER_MANAGEMENT_JWT_SECRET=\${N8N_USER_MANAGEMENT_JWT_SECRET:-}
 
 # n8n Configuration
 N8N_BASIC_AUTH_ACTIVE=\${N8N_BASIC_AUTH_ACTIVE:-true}
 N8N_BASIC_AUTH_USER=\${N8N_BASIC_AUTH_USER:-admin}
-N8N_BASIC_AUTH_PASSWORD=\${N8N_BASIC_AUTH_PASSWORD:-\$(openssl rand -base64 32 2>/dev/null || echo "fallback_$(date +%s)")}
+# N8N_BASIC_AUTH_PASSWORD must be set by deployment script or Parameter Store
+# No fallback provided for security reasons
+N8N_BASIC_AUTH_PASSWORD=\${N8N_BASIC_AUTH_PASSWORD:-}
 
 # API Keys
 OPENAI_API_KEY=\${OPENAI_API_KEY:-}

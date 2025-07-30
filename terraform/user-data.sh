@@ -2448,15 +2448,25 @@ else
     log "Warning: .env file not found"
 fi
 
-# 3. Emergency fallback - generate minimal required variables
+# 3. Generate required secrets securely
 if [ -z "${POSTGRES_PASSWORD:-}" ]; then
-    log "Emergency: Generating POSTGRES_PASSWORD"
-    export POSTGRES_PASSWORD="$(openssl rand -base64 32 2>/dev/null || echo "emergency_$(date +%s)")"
+    log "Generating secure POSTGRES_PASSWORD"
+    # Generate secure password without predictable fallback
+    POSTGRES_PASSWORD="$(openssl rand -base64 32 2>/dev/null)" || {
+        log "ERROR: Failed to generate POSTGRES_PASSWORD - openssl not available"
+        exit 1
+    }
+    export POSTGRES_PASSWORD
 fi
 
 if [ -z "${N8N_ENCRYPTION_KEY:-}" ]; then
-    log "Emergency: Generating N8N_ENCRYPTION_KEY"
-    export N8N_ENCRYPTION_KEY="$(openssl rand -hex 32 2>/dev/null || echo "emergency_$(date +%s)")"
+    log "Generating secure N8N_ENCRYPTION_KEY"
+    # Generate secure encryption key without predictable fallback
+    N8N_ENCRYPTION_KEY="$(openssl rand -hex 32 2>/dev/null)" || {
+        log "ERROR: Failed to generate N8N_ENCRYPTION_KEY - openssl not available"
+        exit 1
+    }
+    export N8N_ENCRYPTION_KEY
 fi
 
 # Set default values for essential variables

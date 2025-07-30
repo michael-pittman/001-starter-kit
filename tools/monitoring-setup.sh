@@ -212,7 +212,7 @@ domain = localhost
 
 [security]
 admin_user = admin
-admin_password = ${GRAFANA_ADMIN_PASSWORD:-admin123}
+admin_password = ${GRAFANA_ADMIN_PASSWORD}
 
 [users]
 allow_sign_up = false
@@ -570,7 +570,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     restart: unless-stopped
     networks:
       - monitoring
@@ -666,7 +666,7 @@ docker-compose -f docker-compose.monitoring.yml up -d
 
 echo "Monitoring services started:"
 echo "- Prometheus: http://localhost:9090"
-echo "- Grafana: http://localhost:3000 (admin/admin123)"
+echo "- Grafana: http://localhost:3000 (admin/<check GRAFANA_ADMIN_PASSWORD env var>)"
 echo "- Alertmanager: http://localhost:9093"
 
 # Wait for services to be ready
@@ -778,6 +778,17 @@ main() {
     done
     
     log "Setting up monitoring and observability stack..."
+    
+    # Generate secure Grafana admin password if not provided
+    if [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]]; then
+        log "Generating secure Grafana admin password..."
+        GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 32 2>/dev/null) || {
+            error "Failed to generate secure Grafana admin password - openssl not available"
+            return 1
+        }
+        export GRAFANA_ADMIN_PASSWORD
+        log "Grafana admin password generated (stored in GRAFANA_ADMIN_PASSWORD environment variable)"
+    fi
     
     # Create monitoring directory structure
     mkdir -p "$MONITORING_DIR"

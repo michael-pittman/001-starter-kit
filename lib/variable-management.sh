@@ -856,6 +856,92 @@ update_variable() {
 }
 
 # =============================================================================
+# SECURE VARIABLE HANDLING
+# =============================================================================
+
+# Variable scopes
+readonly VARIABLE_SCOPE_SESSION="session"
+readonly VARIABLE_SCOPE_STACK="stack"
+readonly VARIABLE_SCOPE_PERSISTENT="persistent"
+
+# Secure variable storage with encryption
+store_sensitive_variable() {
+    local var_name="$1"
+    local var_value="$2"
+    local scope="${3:-$VARIABLE_SCOPE_STACK}"
+    
+    # Never log sensitive values
+    var_log INFO "Storing sensitive variable: $var_name (value hidden)"
+    
+    # Validate variable name
+    if ! [[ "$var_name" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+        var_log ERROR "Invalid variable name format: $var_name"
+        return 1
+    fi
+    
+    # Store in memory with marker
+    export "${var_name}=${var_value}"
+    export "${var_name}_IS_SENSITIVE=true"
+    
+    # Store in Parameter Store if persistent
+    if [[ "$scope" == "$VARIABLE_SCOPE_PERSISTENT" ]]; then
+        local param_path="${PARAM_STORE_PREFIX}/${var_name}"
+        if aws ssm put-parameter \
+            --name "$param_path" \
+            --value "$var_value" \
+            --type "SecureString" \
+            --overwrite >/dev/null 2>&1; then
+            var_log SUCCESS "Stored sensitive variable in Parameter Store: $param_path"
+        else
+            var_log ERROR "Failed to store sensitive variable in Parameter Store"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Set variable with sensitivity check
+set_variable() {
+    local var_name="$1"
+    local var_value="$2"
+    local scope="${3:-$VARIABLE_SCOPE_STACK}"
+    
+    # Check if variable is marked as sensitive
+    local is_sensitive_var="${var_name}_IS_SENSITIVE"
+    if [[ "${!is_sensitive_var:-false}" == "true" ]]; then
+        store_sensitive_variable "$var_name" "$var_value" "$scope"
+    else
+        update_variable "$var_name" "$var_value"
+    fi
+}
+
+# Mark variables as sensitive
+mark_variables_sensitive() {
+    local variables=("$@")
+    
+    for var in "${variables[@]}"; do
+        export "${var}_IS_SENSITIVE=true"
+        var_log INFO "Marked variable as sensitive: $var"
+    done
+}
+
+# Initialize sensitive variable markers
+init_sensitive_variables() {
+    # Mark known sensitive variables
+    local sensitive_vars=(
+        "POSTGRES_PASSWORD"
+        "N8N_ENCRYPTION_KEY"
+        "N8N_USER_MANAGEMENT_JWT_SECRET"
+        "N8N_BASIC_AUTH_PASSWORD"
+        "OPENAI_API_KEY"
+        "WEBHOOK_URL"
+    )
+    
+    mark_variables_sensitive "${sensitive_vars[@]}"
+}
+
+# =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
 
@@ -934,6 +1020,9 @@ if command -v export >/dev/null 2>&1; then
     
     # Secure generation functions
     export -f generate_secure_password generate_encryption_key generate_jwt_secret 2>/dev/null || true
+    
+    # Secure variable handling functions
+    export -f store_sensitive_variable set_variable mark_variables_sensitive init_sensitive_variables 2>/dev/null || true
 fi
 
 var_log INFO "Variable Management Library loaded (v$VARIABLE_MANAGEMENT_VERSION)"

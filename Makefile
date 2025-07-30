@@ -81,10 +81,6 @@ setup: ## Setup AWS configuration and validate environment
 	@./deploy.sh --setup --env $(ENV) --profile $(PROFILE) --region $(REGION)
 	@echo "✅ AWS configuration setup completed"
 
-validate: ## Validate deployment configuration
-	@echo "🔍 Validating deployment configuration..."
-	@./deploy.sh --validate --env $(ENV) --profile $(PROFILE) --region $(REGION)
-	@echo "✅ Configuration validation passed"
 
 # =============================================================================
 # TESTING TARGETS
@@ -156,64 +152,47 @@ format: ## Format code
 	@echo "✅ Code formatting completed"
 
 # =============================================================================
-# DEPLOYMENT TARGETS
+# DEPLOYMENT TARGETS - PRIMARY
 # =============================================================================
 
-deploy: ## Deploy default stack (full)
-	@echo "🚀 Deploying full stack..."
-	@./deploy.sh --full --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
-	@echo "✅ Full stack deployment completed"
+## Basic Deployment Commands
+deploy: deploy-full ## Deploy default stack (alias for deploy-full)
 
-deploy-spot: ## Deploy spot instance stack
+deploy-spot: ## Deploy spot instance stack (70% cost savings)
 	@echo "🚀 Deploying spot instance stack..."
-	@./deploy.sh --type spot --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@./deploy.sh --type spot --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ Spot instance deployment completed"
 
-deploy-alb: ## Deploy ALB stack
+deploy-alb: ## Deploy ALB stack (load balancer + spot + CDN)
 	@echo "🚀 Deploying ALB stack..."
-	@./deploy.sh --type alb --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@./deploy.sh --type alb --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ ALB deployment completed"
 
-deploy-cdn: ## Deploy CDN stack
+deploy-cdn: ## Deploy CDN stack (CloudFront + ALB)
 	@echo "🚀 Deploying CDN stack..."
-	@./deploy.sh --type cdn --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@./deploy.sh --type cdn --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ CDN deployment completed"
 
-deploy-full: ## Deploy complete stack (VPC + EC2 + ALB + CDN)
+deploy-full: ## Deploy complete stack (VPC + EC2 + ALB + CDN + EFS)
 	@echo "🚀 Deploying complete stack..."
-	@./deploy.sh --type full --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@./deploy.sh --type full --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ Complete stack deployment completed"
 
-# =============================================================================
-# MANAGEMENT TARGETS
-# =============================================================================
+## Environment-Specific Deployments
+deploy-dev: ## Deploy to development environment
+	@$(MAKE) deploy ENV=dev
 
-status: ## Show deployment status
-	@echo "📊 Deployment status for stack: $(STACK_NAME)"
-	@./deploy.sh --status --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+deploy-staging: ## Deploy to staging environment
+	@$(MAKE) deploy ENV=staging
 
-logs: ## View application logs
-	@echo "📋 Viewing application logs..."
-	@./deploy.sh --logs --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
-
-monitoring: ## Open monitoring dashboard
-	@echo "📊 Opening monitoring dashboard..."
-	@./deploy.sh --monitoring --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
-
-health: ## Check deployment health
-	@echo "🏥 Checking deployment health..."
-	@./deploy.sh --health --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+deploy-prod: ## Deploy to production environment
+	@$(MAKE) deploy ENV=prod
 
 # =============================================================================
-# CLEANUP TARGETS
+# DESTROY/CLEANUP TARGETS
 # =============================================================================
 
-clean: ## Clean build artifacts and temporary files
-	@echo "🧹 Cleaning build artifacts..."
-	@rm -rf node_modules dist build cdk.out .terraform terraform.tfstate* .pytest_cache __pycache__ .coverage
-	@if [ -f "package.json" ]; then npm cache clean --force; fi
-	@echo "✅ Cleanup completed"
-
+## Destroy Resources
 destroy: ## Destroy all resources for the stack
 	@echo "🗑️  Destroying stack: $(STACK_NAME)"
 	@read -p "Are you sure you want to destroy all resources? (yes/no): " confirm && [ "$$confirm" = "yes" ]
@@ -234,6 +213,51 @@ destroy-cdn: ## Destroy CDN resources
 	@echo "🗑️  Destroying CDN resources..."
 	@./deploy.sh --destroy-cdn --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ CDN destruction completed"
+
+## Environment-Specific Destruction
+destroy-dev: ## Destroy development environment
+	@$(MAKE) destroy ENV=dev
+
+destroy-staging: ## Destroy staging environment
+	@$(MAKE) destroy ENV=staging
+
+destroy-prod: ## Destroy production environment
+	@$(MAKE) destroy ENV=prod
+
+clean: ## Clean build artifacts and temporary files
+	@echo "🧹 Cleaning build artifacts..."
+	@rm -rf node_modules dist build cdk.out .terraform terraform.tfstate* .pytest_cache __pycache__ .coverage
+	@if [ -f "package.json" ]; then npm cache clean --force; fi
+	@echo "✅ Cleanup completed"
+
+# =============================================================================
+# EXISTING RESOURCES DISCOVERY & VALIDATION
+# =============================================================================
+
+existing-resources-discover: ## Discover existing AWS resources
+	@echo "🔍 Discovering existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh discover -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource discovery completed"
+
+existing-resources-validate: ## Validate existing AWS resources
+	@echo "🔍 Validating existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh validate -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource validation completed"
+
+existing-resources-test: ## Test existing resources connectivity
+	@echo "🧪 Testing existing resources connectivity for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh test -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource connectivity test completed"
+
+existing-resources-list: ## List configured existing resources
+	@echo "📋 Listing configured existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh list -e $(ENV)
+	@echo "✅ Resource listing completed"
+
+existing-resources-map: ## Map existing resources to deployment variables
+	@echo "🗺️  Mapping existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh map -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource mapping completed"
 
 # =============================================================================
 # DEVELOPMENT TARGETS
@@ -351,6 +375,32 @@ check-deps: ## Check system dependencies
 	fi
 	@echo "✅ Dependency check completed"
 
+# =============================================================================
+# DEPLOYMENT MANAGEMENT TARGETS
+# =============================================================================
+
+## Deployment Status & Operations
+status: ## Show deployment status
+	@echo "📊 Deployment status for stack: $(STACK_NAME)"
+	@./deploy.sh --status --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+logs: ## View application logs
+	@echo "📋 Viewing application logs..."
+	@./deploy.sh --logs --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+monitoring: ## Open monitoring dashboard
+	@echo "📊 Opening monitoring dashboard..."
+	@./deploy.sh --monitoring --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+health: ## Check deployment health
+	@echo "🏥 Checking deployment health..."
+	@./deploy.sh --health --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+validate: ## Validate deployment configuration
+	@echo "🔍 Validating deployment configuration..."
+	@./deploy.sh --validate --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@echo "✅ Configuration validation passed"
+
 backup: ## Create backup of current deployment
 	@echo "💾 Creating backup..."
 	@./deploy.sh --backup --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
@@ -367,35 +417,10 @@ update: ## Update deployment configuration
 	@echo "✅ Update completed"
 
 # =============================================================================
-# EXISTING RESOURCES TARGETS
+# DEPLOYMENT TARGETS - EXISTING RESOURCES
 # =============================================================================
 
-existing-resources-discover: ## Discover existing AWS resources
-	@echo "🔍 Discovering existing resources for environment: $(ENV)"
-	@./scripts/manage-existing-resources.sh discover -e $(ENV) -s $(STACK_NAME)
-	@echo "✅ Resource discovery completed"
-
-existing-resources-validate: ## Validate existing AWS resources
-	@echo "🔍 Validating existing resources for environment: $(ENV)"
-	@./scripts/manage-existing-resources.sh validate -e $(ENV) -s $(STACK_NAME)
-	@echo "✅ Resource validation completed"
-
-existing-resources-test: ## Test existing resources connectivity
-	@echo "🧪 Testing existing resources connectivity for environment: $(ENV)"
-	@./scripts/manage-existing-resources.sh test -e $(ENV) -s $(STACK_NAME)
-	@echo "✅ Resource connectivity test completed"
-
-existing-resources-list: ## List configured existing resources
-	@echo "📋 Listing configured existing resources for environment: $(ENV)"
-	@./scripts/manage-existing-resources.sh list -e $(ENV)
-	@echo "✅ Resource listing completed"
-
-existing-resources-map: ## Map existing resources to deployment variables
-	@echo "🗺️  Mapping existing resources for environment: $(ENV)"
-	@./scripts/manage-existing-resources.sh map -e $(ENV) -s $(STACK_NAME)
-	@echo "✅ Resource mapping completed"
-
-# Deploy with existing VPC
+## Deploy with Existing Resources
 deploy-with-vpc: ## Deploy using existing VPC
 	@echo "🚀 Deploying with existing VPC..."
 	@./scripts/aws-deployment-modular.sh \
@@ -406,8 +431,7 @@ deploy-with-vpc: ## Deploy using existing VPC
 		--region $(REGION)
 	@echo "✅ Deployment with existing VPC completed"
 
-# Deploy with multiple existing resources
-deploy-existing: ## Deploy using existing resources
+deploy-existing: ## Deploy using existing resources (VPC_ID, EFS_ID, ALB_ARN, CLOUDFRONT_ID)
 	@echo "🚀 Deploying with existing resources..."
 	@./scripts/aws-deployment-modular.sh \
 		$(if $(VPC_ID),--use-existing-vpc $(VPC_ID)) \
@@ -420,7 +444,6 @@ deploy-existing: ## Deploy using existing resources
 		--region $(REGION)
 	@echo "✅ Deployment with existing resources completed"
 
-# Deploy with auto-discovered resources
 deploy-auto-discover: ## Deploy with auto-discovered existing resources
 	@echo "🚀 Deploying with auto-discovered resources..."
 	@$(MAKE) existing-resources-discover
@@ -428,34 +451,11 @@ deploy-auto-discover: ## Deploy with auto-discovered existing resources
 	@$(MAKE) deploy-existing
 	@echo "✅ Deployment with auto-discovered resources completed"
 
-# Validate and deploy with existing resources
 deploy-existing-validate: ## Deploy with existing resources (with validation)
 	@echo "🚀 Deploying with existing resources (with validation)..."
 	@$(MAKE) existing-resources-validate
 	@$(MAKE) deploy-existing
 	@echo "✅ Deployment with existing resources (validated) completed"
-
-# =============================================================================
-# ENVIRONMENT-SPECIFIC TARGETS
-# =============================================================================
-
-deploy-dev: ## Deploy to development environment
-	@$(MAKE) deploy ENV=dev
-
-deploy-staging: ## Deploy to staging environment
-	@$(MAKE) deploy ENV=staging
-
-deploy-prod: ## Deploy to production environment
-	@$(MAKE) deploy ENV=prod
-
-destroy-dev: ## Destroy development environment
-	@$(MAKE) destroy ENV=dev
-
-destroy-staging: ## Destroy staging environment
-	@$(MAKE) destroy ENV=staging
-
-destroy-prod: ## Destroy production environment
-	@$(MAKE) destroy ENV=prod
 
 # =============================================================================
 # CI/CD TARGETS

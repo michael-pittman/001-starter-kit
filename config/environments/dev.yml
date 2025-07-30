@@ -215,8 +215,8 @@ existing_resources:
     
   resources:
     vpc:
-      id: ""  # Set your existing VPC ID here (e.g., vpc-0b68dad7524ed9a83)
-      name: "GeuseMaker-dev-vpc"
+      id: "vpc-0b68dad7524ed9a83"  # Set your existing VPC ID here (e.g., vpc-0b68dad7524ed9a83)
+      name: "geuse000"
       
     subnets:
       public:
