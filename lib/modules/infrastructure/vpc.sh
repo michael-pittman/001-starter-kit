@@ -43,58 +43,163 @@ create_vpc_with_subnets() {
     
     log_info "Creating VPC with subnets for stack: $stack_name" "VPC"
     
-    # Generate VPC name
-    local vpc_name
-    vpc_name=$(generate_resource_name "vpc" "$stack_name")
-    
-    # Create VPC
-    local vpc_id
-    vpc_id=$(create_vpc "$vpc_name" "$vpc_cidr")
-    if [[ $? -ne 0 ]]; then
-        log_error "Failed to create VPC: $vpc_name" "VPC"
-        return 1
+    # Check for existing VPC from environment or stack variables
+    local existing_vpc_id="${EXISTING_VPC_ID:-}"
+    if [[ -z "$existing_vpc_id" ]]; then
+        existing_vpc_id=$(get_variable "VPC_ID" "$VARIABLE_SCOPE_STACK")
     fi
     
-    # Store VPC ID
-    set_variable "VPC_ID" "$vpc_id" "$VARIABLE_SCOPE_STACK"
+    if [[ -n "$existing_vpc_id" ]]; then
+        log_info "Using existing VPC: $existing_vpc_id" "VPC"
+        
+        # Source existing resources module if not already loaded
+        if [[ -z "${_EXISTING_RESOURCES_SH_LOADED:-}" ]]; then
+            source "${SCRIPT_DIR}/existing-resources.sh"
+        fi
+        
+        # Validate existing VPC
+        if ! validate_existing_vpc "$existing_vpc_id" "$vpc_cidr"; then
+            log_error "Existing VPC validation failed: $existing_vpc_id" "VPC"
+            return 1
+        fi
+        
+        # Register existing VPC
+        register_resource "vpc" "$existing_vpc_id" "{\"type\": \"existing\", \"stack\": \"$stack_name\"}"
+        
+        # Check for existing subnets
+        local existing_public_subnets
+        existing_public_subnets=$(get_variable "PUBLIC_SUBNET_IDS" "$VARIABLE_SCOPE_STACK")
+        local existing_private_subnets
+        existing_private_subnets=$(get_variable "PRIVATE_SUBNET_IDS" "$VARIABLE_SCOPE_STACK")
+        local existing_isolated_subnets
+        existing_isolated_subnets=$(get_variable "ISOLATED_SUBNET_IDS" "$VARIABLE_SCOPE_STACK")
+        
+        if [[ -n "$existing_public_subnets" || -n "$existing_private_subnets" || -n "$existing_isolated_subnets" ]]; then
+            log_info "Using existing subnets" "VPC"
+            
+            # Validate existing subnets
+            if [[ -n "$existing_public_subnets" ]]; then
+                if ! validate_existing_subnets "$existing_public_subnets" "$existing_vpc_id" "public"; then
+                    log_error "Existing public subnet validation failed" "VPC"
+                    return 1
+                fi
+                # Register existing public subnets
+                for subnet_id in $existing_public_subnets; do
+                    register_resource "subnet" "$subnet_id" "{\"type\": \"existing\", \"vpc_id\": \"$existing_vpc_id\", \"subnet_type\": \"public\"}"
+                done
+            fi
+            
+            if [[ -n "$existing_private_subnets" ]]; then
+                if ! validate_existing_subnets "$existing_private_subnets" "$existing_vpc_id" "private"; then
+                    log_error "Existing private subnet validation failed" "VPC"
+                    return 1
+                fi
+                # Register existing private subnets
+                for subnet_id in $existing_private_subnets; do
+                    register_resource "subnet" "$subnet_id" "{\"type\": \"existing\", \"vpc_id\": \"$existing_vpc_id\", \"subnet_type\": \"private\"}"
+                done
+            fi
+            
+            if [[ -n "$existing_isolated_subnets" ]]; then
+                if ! validate_existing_subnets "$existing_isolated_subnets" "$existing_vpc_id" "isolated"; then
+                    log_error "Existing isolated subnet validation failed" "VPC"
+                    return 1
+                fi
+                # Register existing isolated subnets
+                for subnet_id in $existing_isolated_subnets; do
+                    register_resource "subnet" "$subnet_id" "{\"type\": \"existing\", \"vpc_id\": \"$existing_vpc_id\", \"subnet_type\": \"isolated\"}"
+                done
+            fi
+            
+            # Check for existing IGW/NAT/Routes
+            local existing_igw_id
+            existing_igw_id=$(get_variable "INTERNET_GATEWAY_ID" "$VARIABLE_SCOPE_STACK")
+            if [[ -n "$existing_igw_id" ]]; then
+                log_info "Using existing internet gateway: $existing_igw_id" "VPC"
+                register_resource "internet-gateway" "$existing_igw_id" "{\"type\": \"existing\", \"vpc_id\": \"$existing_vpc_id\"}"
+            fi
+            
+            local existing_nat_id
+            existing_nat_id=$(get_variable "NAT_GATEWAY_ID" "$VARIABLE_SCOPE_STACK")
+            if [[ -n "$existing_nat_id" ]]; then
+                log_info "Using existing NAT gateway: $existing_nat_id" "VPC"
+                register_resource "nat-gateway" "$existing_nat_id" "{\"type\": \"existing\", \"vpc_id\": \"$existing_vpc_id\"}"
+            fi
+            
+            log_info "Using existing VPC and subnets successfully" "VPC"
+            return 0
+        else
+            # Using existing VPC but need to create subnets
+            log_info "Using existing VPC but creating new subnets" "VPC"
+            local vpc_id="$existing_vpc_id"
+        fi
+    else
+        # No existing VPC - create new one
+        # Generate VPC name
+        local vpc_name
+        vpc_name=$(generate_resource_name "vpc" "$stack_name")
+        
+        # Create VPC
+        local vpc_id
+        vpc_id=$(create_vpc "$vpc_name" "$vpc_cidr")
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to create VPC: $vpc_name" "VPC"
+            return 1
+        fi
+        
+        # Store VPC ID
+        set_variable "VPC_ID" "$vpc_id" "$VARIABLE_SCOPE_STACK"
+    fi
     
-    # Create subnets if specified
+    # Create subnets if specified and not using existing
     if [[ -n "$public_subnets" || -n "$private_subnets" || -n "$isolated_subnets" ]]; then
         if ! create_subnets "$vpc_id" "$stack_name" "$public_subnets" "$private_subnets" "$isolated_subnets"; then
             log_error "Failed to create subnets for VPC: $vpc_id" "VPC"
-            # Rollback VPC creation
-            delete_vpc "$vpc_id"
+            # Only rollback if we created the VPC
+            if [[ -z "$existing_vpc_id" ]]; then
+                delete_vpc "$vpc_id"
+            fi
             return 1
         fi
     fi
     
-    # Create internet gateway if public subnets exist
+    # Create internet gateway if public subnets exist and not using existing
     if [[ -n "$public_subnets" ]]; then
-        local igw_id
-        igw_id=$(create_internet_gateway "$stack_name")
-        if [[ $? -eq 0 ]]; then
-            set_variable "INTERNET_GATEWAY_ID" "$igw_id" "$VARIABLE_SCOPE_STACK"
-            
-            # Attach internet gateway to VPC
-            if ! attach_internet_gateway "$igw_id" "$vpc_id"; then
-                log_error "Failed to attach internet gateway to VPC" "VPC"
+        local existing_igw_id
+        existing_igw_id=$(get_variable "INTERNET_GATEWAY_ID" "$VARIABLE_SCOPE_STACK")
+        
+        if [[ -z "$existing_igw_id" ]]; then
+            local igw_id
+            igw_id=$(create_internet_gateway "$stack_name")
+            if [[ $? -eq 0 ]]; then
+                set_variable "INTERNET_GATEWAY_ID" "$igw_id" "$VARIABLE_SCOPE_STACK"
+                
+                # Attach internet gateway to VPC
+                if ! attach_internet_gateway "$igw_id" "$vpc_id"; then
+                    log_error "Failed to attach internet gateway to VPC" "VPC"
+                    return 1
+                fi
+            else
+                log_error "Failed to create internet gateway" "VPC"
                 return 1
             fi
-        else
-            log_error "Failed to create internet gateway" "VPC"
-            return 1
         fi
     fi
     
-    # Create NAT gateway if private subnets exist
+    # Create NAT gateway if private subnets exist and not using existing
     if [[ -n "$private_subnets" ]]; then
-        local nat_gateway_id
-        nat_gateway_id=$(create_nat_gateway "$stack_name" "$vpc_id")
-        if [[ $? -eq 0 ]]; then
-            set_variable "NAT_GATEWAY_ID" "$nat_gateway_id" "$VARIABLE_SCOPE_STACK"
-        else
-            log_error "Failed to create NAT gateway" "VPC"
-            return 1
+        local existing_nat_id
+        existing_nat_id=$(get_variable "NAT_GATEWAY_ID" "$VARIABLE_SCOPE_STACK")
+        
+        if [[ -z "$existing_nat_id" ]]; then
+            local nat_gateway_id
+            nat_gateway_id=$(create_nat_gateway "$stack_name" "$vpc_id")
+            if [[ $? -eq 0 ]]; then
+                set_variable "NAT_GATEWAY_ID" "$nat_gateway_id" "$VARIABLE_SCOPE_STACK"
+            else
+                log_error "Failed to create NAT gateway" "VPC"
+                return 1
+            fi
         fi
     fi
     
@@ -127,23 +232,53 @@ create_vpc() {
     
     # Generate tags
     local tags
-    tags=$(generate_tags "$STACK_NAME" "$ENVIRONMENT")
+    tags=$(generate_tags "$STACK_NAME")
+    
+    # Convert tags to JSON format for tag-specifications
+    local tag_json="[{Key=Name,Value=$vpc_name}"
+    if [[ -n "$tags" ]]; then
+        # Parse each tag and add to JSON array
+        while IFS=' ' read -r tag; do
+            if [[ "$tag" =~ Key=([^,]+),Value=(.*) ]]; then
+                local key="${BASH_REMATCH[1]}"
+                local value="${BASH_REMATCH[2]}"
+                # Skip Name tag as we already have it
+                if [[ "$key" != "Name" ]]; then
+                    tag_json="${tag_json},{Key=$key,Value=$value}"
+                fi
+            fi
+        done <<< "$tags"
+    fi
+    tag_json="${tag_json}]"
     
     # Create VPC
     local vpc_output
+    local exit_code
     vpc_output=$(aws ec2 create-vpc \
         --cidr-block "$vpc_cidr" \
         --instance-tenancy "$VPC_DEFAULT_INSTANCE_TENANCY" \
-        --enable-dns-hostnames \
-        --enable-dns-support \
-        --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=$vpc_name}]" \
+        --tag-specifications "ResourceType=vpc,Tags=${tag_json}" \
         --output json \
         --query 'Vpc.VpcId' \
         --region "$AWS_REGION" \
         --profile "$AWS_PROFILE" 2>&1)
+    exit_code=$?
     
-    if [[ $? -ne 0 ]]; then
-        log_error "Failed to create VPC: $vpc_output" "VPC"
+    if [[ $exit_code -ne 0 ]]; then
+        log_error "AWS CLI failed with exit code: $exit_code" "VPC"
+        log_error "AWS CLI error output: $vpc_output" "VPC"
+        
+        # Try to parse specific error messages
+        if [[ "$vpc_output" =~ "InvalidParameterValue" ]]; then
+            log_error "Invalid parameter value detected. Check VPC name, CIDR, or tags." "VPC"
+        elif [[ "$vpc_output" =~ "UnauthorizedOperation" ]]; then
+            log_error "Unauthorized operation. Check AWS credentials and permissions." "VPC"
+        elif [[ "$vpc_output" =~ "VpcLimitExceeded" ]]; then
+            log_error "VPC limit exceeded in this region." "VPC"
+        elif [[ "$vpc_output" =~ "InvalidVpcID.NotFound" ]]; then
+            log_error "Invalid VPC ID reference." "VPC"
+        fi
+        
         return 1
     fi
     
@@ -160,6 +295,27 @@ create_vpc() {
     if [[ $? -ne 0 ]]; then
         log_error "VPC failed to become available: $vpc_id" "VPC"
         return 1
+    fi
+    
+    # Enable DNS settings
+    log_info "Enabling DNS hostnames and support for VPC: $vpc_id" "VPC"
+    
+    # Enable DNS hostnames
+    if ! aws ec2 modify-vpc-attribute \
+        --vpc-id "$vpc_id" \
+        --enable-dns-hostnames \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1; then
+        log_error "Failed to enable DNS hostnames for VPC: $vpc_id" "VPC"
+    fi
+    
+    # Enable DNS support
+    if ! aws ec2 modify-vpc-attribute \
+        --vpc-id "$vpc_id" \
+        --enable-dns-support \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>&1; then
+        log_error "Failed to enable DNS support for VPC: $vpc_id" "VPC"
     fi
     
     log_info "VPC created successfully: $vpc_id" "VPC"
@@ -292,7 +448,7 @@ create_subnet() {
         --vpc-id "$vpc_id" \
         --cidr-block "$cidr" \
         --availability-zone "$az" \
-        --map-public-ip-on-launch \
+        --map-public-ip-on-launch "$map_public_ip" \
         --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=$subnet_name}]" \
         --output json \
         --query 'Subnet.SubnetId' \

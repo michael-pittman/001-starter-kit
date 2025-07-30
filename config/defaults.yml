@@ -354,3 +354,184 @@ development:
     cors_strict_mode: false
     trusted_hosts_restriction: false
     container_security_relaxed: true
+
+# =============================================================================
+# EXISTING RESOURCES CONFIGURATION
+# =============================================================================
+existing_resources:
+  # Global settings for existing resource usage
+  enabled: false
+  validation_mode: strict  # strict, lenient, skip
+  auto_discovery: false    # Attempt to discover resources automatically
+  
+  # Resource reuse configuration
+  reuse_policy:
+    vpc: false
+    subnets: false
+    security_groups: false
+    efs: false
+    alb: false
+    cloudfront: false
+    rds: false
+    elasticache: false
+    s3: false
+    iam_roles: false
+    certificates: false
+    
+  # Resource specifications
+  resources:
+    # VPC Configuration
+    vpc:
+      id: null
+      cidr_block: null
+      name: null
+      tags: {}
+      
+    # Subnet Configuration
+    subnets:
+      public:
+        ids: []
+        cidr_blocks: []
+        availability_zones: []
+      private:
+        ids: []
+        cidr_blocks: []
+        availability_zones: []
+      isolated:
+        ids: []
+        cidr_blocks: []
+        availability_zones: []
+        
+    # Security Groups
+    security_groups:
+      alb:
+        id: null
+        name: null
+        description: null
+      ec2:
+        id: null
+        name: null
+        description: null
+      efs:
+        id: null
+        name: null
+        description: null
+      rds:
+        id: null
+        name: null
+        description: null
+        
+    # EFS Configuration
+    efs:
+      file_system_id: null
+      access_point_id: null
+      mount_targets: []
+      performance_mode: null
+      throughput_mode: null
+      
+    # Application Load Balancer
+    alb:
+      load_balancer_arn: null
+      target_group_arn: null
+      listener_arn: null
+      dns_name: null
+      zone_id: null
+      
+    # CloudFront Distribution
+    cloudfront:
+      distribution_id: null
+      domain_name: null
+      origin_domain: null
+      certificate_arn: null
+      
+    # RDS Database
+    rds:
+      cluster_identifier: null
+      instance_identifier: null
+      endpoint: null
+      port: null
+      engine: null
+      engine_version: null
+      
+    # ElastiCache
+    elasticache:
+      cluster_id: null
+      replication_group_id: null
+      endpoint: null
+      port: null
+      
+    # S3 Buckets
+    s3:
+      buckets: {}
+      # Example:
+      # static_assets:
+      #   bucket_name: my-static-bucket
+      #   region: us-east-1
+      #   versioning_enabled: true
+      
+    # IAM Roles
+    iam:
+      roles: {}
+      # Example:
+      # ec2_role:
+      #   role_arn: arn:aws:iam::123456789012:role/EC2Role
+      #   role_name: EC2Role
+      
+    # SSL/TLS Certificates
+    certificates:
+      ssl_certificate_arn: null
+      certificate_id: null
+      domain_name: null
+      
+  # Resource validation rules
+  validation:
+    # Required resource checks
+    required_resources: []
+    
+    # Resource compatibility checks
+    compatibility_checks:
+      vpc_subnet_match: true
+      security_group_vpc_match: true
+      alb_subnet_match: true
+      efs_vpc_match: true
+      
+    # Resource state validation
+    state_validation:
+      vpc_available: true
+      subnets_available: true
+      security_groups_exist: true
+      efs_available: true
+      alb_active: true
+      cloudfront_deployed: true
+      
+  # Resource discovery settings
+  discovery:
+    # Auto-discovery patterns
+    patterns:
+      vpc: "{project_name}-{environment}-vpc"
+      subnets: "{project_name}-{environment}-{type}-subnet-*"
+      security_groups: "{project_name}-{environment}-{type}-sg"
+      efs: "{project_name}-{environment}-efs"
+      alb: "{project_name}-{environment}-alb"
+      cloudfront: "{project_name}-{environment}-cdn"
+      
+    # Discovery filters
+    filters:
+      tags:
+        Project: "{project_name}"
+        Environment: "{environment}"
+        ManagedBy: "aws-deployment-scripts"
+        
+  # Resource mapping for deployment
+  mapping:
+    # How to map discovered/existing resources to deployment variables
+    variable_mapping:
+      vpc_id: "VPC_ID"
+      public_subnet_ids: "PUBLIC_SUBNET_IDS"
+      private_subnet_ids: "PRIVATE_SUBNET_IDS"
+      alb_security_group_id: "ALB_SECURITY_GROUP_ID"
+      ec2_security_group_id: "EC2_SECURITY_GROUP_ID"
+      efs_security_group_id: "EFS_SECURITY_GROUP_ID"
+      efs_file_system_id: "EFS_FILE_SYSTEM_ID"
+      alb_load_balancer_arn: "ALB_LOAD_BALANCER_ARN"
+      cloudfront_distribution_id: "CLOUDFRONT_DISTRIBUTION_ID"

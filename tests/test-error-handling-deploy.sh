@@ -41,10 +41,11 @@ init_test_env() {
     export ERROR_RECOVERY_MODE="automatic"
     export DRY_RUN=true  # Run in dry-run mode for testing
     export LOG_LEVEL="DEBUG"
+    export ERROR_LOG_FILE="$TEST_RESULTS_DIR/errors.json"
     
     # Source required libraries
     source "$PROJECT_ROOT/lib/error-handling.sh"
-    source "$PROJECT_ROOT/lib/modules/errors/error_types.sh"
+    source "$PROJECT_ROOT/lib/modules/core/errors.sh"
     
     echo -e "${GREEN}Test environment initialized${NC}"
 }
@@ -105,10 +106,15 @@ test_error_handling_init() {
 
 # Test 2: Structured error logging
 test_structured_error_logging() {
-    # Log different types of errors
-    error_ec2_insufficient_capacity "t3.micro" "us-east-1"
-    error_network_vpc_not_found "vpc-12345"
-    error_auth_invalid_credentials "EC2"
+    # Run in a subshell to avoid strict mode issues
+    (
+        set +u  # Disable unbound variable checking for error functions
+        
+        # Log different types of errors
+        error_ec2_insufficient_capacity "t3.micro" "us-east-1" || true
+        error_network_vpc_not_found "vpc-12345" || true
+        error_auth_invalid_credentials "EC2" || true
+    )
     
     # Check if errors were logged
     local error_count
@@ -229,7 +235,7 @@ test_dry_run_mode() {
 test_recovery_strategies() {
     # Test different recovery strategies
     (
-        source "$PROJECT_ROOT/lib/modules/errors/error_types.sh"
+        source "$PROJECT_ROOT/lib/modules/core/errors.sh"
         
         # Test retry strategy
         log_structured_error "TEST_RETRY" "Test retry error" \

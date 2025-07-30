@@ -65,7 +65,7 @@ start_rollback_monitoring() {
             log_warn "Rollback trigger activated during deployment" "ORCHESTRATOR"
             
             # Update deployment state
-            set_deployment_state "$DEPLOYMENT_STATE_ROLLING_BACK"
+            set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_ROLLING_BACK"
             
             # Exit monitoring
             break
@@ -107,7 +107,7 @@ deploy_stack() {
     fi
     
     # Set deployment state
-    set_deployment_state "$DEPLOYMENT_STATE_IN_PROGRESS"
+    set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_IN_PROGRESS"
     
     # Start rollback trigger monitoring if enabled
     if [[ "$ROLLBACK_ENABLED" == "true" ]]; then
@@ -132,7 +132,7 @@ deploy_stack() {
             ;;
         *)
             log_error "Unknown deployment type: $deployment_type" "ORCHESTRATOR"
-            set_deployment_state "$DEPLOYMENT_STATE_FAILED"
+            set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_FAILED"
             return 1
             ;;
     esac
@@ -140,7 +140,7 @@ deploy_stack() {
     # Check deployment result
     if [[ $? -eq 0 ]]; then
         log_info "Deployment completed successfully" "ORCHESTRATOR"
-        set_deployment_state "$DEPLOYMENT_STATE_COMPLETED"
+        set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_COMPLETED"
         
         # Stop rollback monitoring
         stop_rollback_monitoring
@@ -148,7 +148,7 @@ deploy_stack() {
         return 0
     else
         log_error "Deployment failed, initiating rollback" "ORCHESTRATOR"
-        set_deployment_state "$DEPLOYMENT_STATE_ROLLING_BACK"
+        set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_ROLLING_BACK"
         
         # Stop rollback monitoring
         stop_rollback_monitoring
@@ -160,16 +160,16 @@ deploy_stack() {
         if [[ "$ROLLBACK_ENABLED" == "true" ]]; then
             if rollback_deployment "$stack_name" "$deployment_type" "$deployment_config" "$rollback_mode" "$rollback_trigger"; then
                 log_info "Rollback completed successfully" "ORCHESTRATOR"
-                set_deployment_state "$DEPLOYMENT_STATE_ROLLED_BACK"
+                set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_ROLLED_BACK"
             else
                 log_error "Rollback failed" "ORCHESTRATOR"
-                set_deployment_state "$DEPLOYMENT_STATE_FAILED"
+                set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_FAILED"
             fi
         else
             log_warn "Rollback module not available, performing basic cleanup" "ORCHESTRATOR"
             # Fallback to basic cleanup
             cleanup_failed_deployment "$stack_name" "$deployment_type"
-            set_deployment_state "$DEPLOYMENT_STATE_FAILED"
+            set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_FAILED"
         fi
         
         return 1
@@ -238,7 +238,7 @@ initialize_deployment() {
     esac
     
     # Set deployment state
-    set_deployment_state "$DEPLOYMENT_STATE_INITIALIZING"
+    set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_INITIALIZING"
     
     # Create deployment directory
     local deployment_dir
@@ -588,7 +588,7 @@ rollback_deployment() {
     log_info "Starting rollback for stack: $stack_name (type: $deployment_type)" "ORCHESTRATOR"
     
     # Set deployment state
-    set_deployment_state "$DEPLOYMENT_STATE_ROLLING_BACK"
+    set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_ROLLING_BACK"
     
     # Perform rollback based on deployment type
     case "$deployment_type" in
@@ -614,10 +614,10 @@ rollback_deployment() {
     
     # Update deployment status
     if [[ $rollback_result -eq 0 ]]; then
-        set_deployment_state "$DEPLOYMENT_STATE_ROLLED_BACK"
+        set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_ROLLED_BACK"
         log_info "Rollback completed successfully" "ORCHESTRATOR"
     else
-        set_deployment_state "$DEPLOYMENT_STATE_FAILED"
+        set_deployment_state "$stack_name" "$DEPLOYMENT_STATE_FAILED"
         log_error "Rollback failed" "ORCHESTRATOR"
     fi
     
@@ -761,9 +761,10 @@ create_deployment_directory() {
 
 # Set deployment state
 set_deployment_state() {
-    local state="$1"
+    local stack_name="$1"
+    local state="$2"
     
-    log_info "Setting deployment state: $state" "ORCHESTRATOR"
+    log_info "Setting deployment state for $stack_name: $state" "ORCHESTRATOR"
     
     set_variable "DEPLOYMENT_STATE" "$state" "$VARIABLE_SCOPE_STACK"
     set_variable "DEPLOYMENT_LAST_UPDATE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VARIABLE_SCOPE_STACK"

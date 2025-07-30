@@ -157,7 +157,7 @@ sanitized=$(echo "$var" | sed 's/[^a-zA-Z0-9_]/_/g')
 
 **Error Handling**:
 ```bash
-source "$LIB_DIR/modules/errors/error_types.sh"
+source "$LIB_DIR/modules/core/errors.sh"
 error_ec2_insufficient_capacity "$instance_type" "$region"
 ```
 

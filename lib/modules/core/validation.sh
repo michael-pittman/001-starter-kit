@@ -165,8 +165,19 @@ validate_aws_quotas() {
         --query 'length(Vpcs)' \
         --output text 2>/dev/null || echo "0")
     
+    # Ensure numeric values (strip floating point and non-numeric chars)
+    current_vpcs="${current_vpcs:-0}"
+    current_vpcs="${current_vpcs%%.*}"  # Remove decimal part if present
+    current_vpcs="${current_vpcs//[^0-9]/}"  # Remove non-numeric characters
+    current_vpcs="${current_vpcs:-0}"  # Default to 0 if empty
+    
+    vpc_quota="${vpc_quota:-5}"
+    vpc_quota="${vpc_quota%%.*}"  # Remove decimal part if present
+    vpc_quota="${vpc_quota//[^0-9]/}"  # Remove non-numeric characters
+    vpc_quota="${vpc_quota:-5}"  # Default to 5 if empty
+    
     # Check VPC quota
-    if [[ $current_vpcs -ge $vpc_quota ]]; then
+    if [[ "$current_vpcs" -ge "$vpc_quota" ]]; then
         log_error "VPC quota exceeded: $current_vpcs/$vpc_quota" "VALIDATION"
         set_error "$ERROR_AWS_QUOTA_EXCEEDED" "VPC quota exceeded"
         return 1
@@ -220,6 +231,17 @@ validate_production_quotas() {
         --region "$region" \
         --query 'length(Volumes)' \
         --output text 2>/dev/null || echo "0")
+    
+    # Ensure numeric values
+    current_volumes="${current_volumes:-0}"
+    current_volumes="${current_volumes%%.*}"  # Remove decimal part if present
+    current_volumes="${current_volumes//[^0-9]/}"  # Remove non-numeric characters
+    current_volumes="${current_volumes:-0}"  # Default to 0 if empty
+    
+    ebs_quota="${ebs_quota:-5000}"
+    ebs_quota="${ebs_quota%%.*}"  # Remove decimal part if present
+    ebs_quota="${ebs_quota//[^0-9]/}"  # Remove non-numeric characters
+    ebs_quota="${ebs_quota:-5000}"  # Default to 5000 if empty
     
     if [[ $current_volumes -ge $((ebs_quota - 10)) ]]; then
         log_warn "EBS volume quota nearly exceeded: $current_volumes/$ebs_quota" "VALIDATION"

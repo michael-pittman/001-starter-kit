@@ -12,10 +12,54 @@ _EFS_SH_LOADED=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../core/registry.sh"
 source "${SCRIPT_DIR}/../core/errors.sh"
+source "${SCRIPT_DIR}/../core/variables.sh"
 
 # =============================================================================
 # EFS FILE SYSTEM MANAGEMENT
 # =============================================================================
+
+# Validate existing EFS file system
+validate_existing_efs() {
+    local efs_id="$1"
+    
+    echo "Validating existing EFS: $efs_id" >&2
+    
+    if [[ -z "$efs_id" ]]; then
+        echo "ERROR: EFS ID is required for validation" >&2
+        return 1
+    fi
+    
+    # Check if EFS exists and is available
+    local efs_info
+    efs_info=$(aws efs describe-file-systems \
+        --file-system-id "$efs_id" \
+        --query 'FileSystems[0]' \
+        --output json 2>/dev/null)
+    
+    if [[ $? -ne 0 ]] || [[ -z "$efs_info" ]] || [[ "$efs_info" == "null" ]]; then
+        echo "ERROR: EFS not found or inaccessible: $efs_id" >&2
+        return 1
+    fi
+    
+    # Validate EFS state
+    local efs_state
+    efs_state=$(echo "$efs_info" | jq -r '.LifeCycleState')
+    if [[ "$efs_state" != "available" ]]; then
+        echo "ERROR: EFS is not in available state: $efs_state" >&2
+        return 1
+    fi
+    
+    # Get EFS details for logging
+    local efs_name
+    efs_name=$(echo "$efs_info" | jq -r '.Tags[] | select(.Key=="Name") | .Value // "Unnamed"')
+    local efs_performance_mode
+    efs_performance_mode=$(echo "$efs_info" | jq -r '.PerformanceMode')
+    local efs_encrypted
+    efs_encrypted=$(echo "$efs_info" | jq -r '.Encrypted')
+    
+    echo "EFS validation passed: $efs_id (Name: $efs_name, Performance: $efs_performance_mode, Encrypted: $efs_encrypted)" >&2
+    return 0
+}
 
 # Create EFS file system with comprehensive configuration
 create_efs_file_system() {
@@ -36,13 +80,36 @@ _create_efs_file_system_impl() {
     
     echo "Creating EFS file system for stack: $stack_name" >&2
     
-    # Check if EFS already exists for this stack
+    # Check for existing EFS from environment or variable store
+    local existing_efs_id="${EXISTING_EFS_ID:-}"
+    if [[ -z "$existing_efs_id" ]]; then
+        existing_efs_id=$(get_variable "EFS_FILE_SYSTEM_ID" "$VARIABLE_SCOPE_STACK")
+    fi
+    
+    if [[ -n "$existing_efs_id" ]]; then
+        echo "Found existing EFS ID in variable store: $existing_efs_id" >&2
+        
+        # Validate existing EFS
+        if ! validate_existing_efs "$existing_efs_id"; then
+            echo "ERROR: Existing EFS validation failed: $existing_efs_id" >&2
+            return 1
+        fi
+        
+        # Register existing EFS in resource registry
+        register_resource "efs_filesystems" "$existing_efs_id" \
+            "{\"stack\": \"$stack_name\", \"performance_mode\": \"$performance_mode\", \"encrypted\": $encryption_enabled, \"source\": \"existing\"}"
+        
+        echo "$existing_efs_id"
+        return 0
+    fi
+    
+    # Check if EFS already exists for this stack (backward compatibility)
     local existing_efs
     existing_efs=$(aws efs describe-file-systems \
         --query "FileSystems[?Tags[?Key=='Stack' && Value=='$stack_name']].FileSystemId | [0]" \
         --output text 2>/dev/null || true)
     
-    if [ -n "$existing_efs" ]; then
+    if [ -n "$existing_efs" ] && [ "$existing_efs" != "None" ] && [ "$existing_efs" != "null" ]; then
         echo "EFS file system already exists: $existing_efs" >&2
         echo "$existing_efs"
         return 0

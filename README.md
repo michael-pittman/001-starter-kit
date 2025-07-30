@@ -149,6 +149,143 @@ The main deployment script supports various deployment types:
 | `cdn` | CloudFront CDN | CloudFront Distribution |
 | `full` | Complete infrastructure | VPC, EC2, ALB, CloudFront |
 
+## Using Existing Resources
+
+The GeuseMaker deployment system supports reusing existing AWS resources instead of creating new ones. This is useful when you have pre-existing infrastructure that you want to leverage for your deployment.
+
+### Configuration
+
+You can specify existing resources in your environment configuration file (`config/environments/dev.yml`):
+
+```yaml
+existing_resources:
+  enabled: true
+  validation_mode: lenient  # strict, lenient, skip
+  auto_discovery: true
+  
+  reuse_policy:
+    vpc: true
+    subnets: true
+    security_groups: true
+    efs: false  # Create new EFS
+    alb: true
+    cloudfront: false  # Create new CloudFront
+    
+  resources:
+    vpc:
+      id: "vpc-12345678"
+    subnets:
+      public:
+        ids: ["subnet-12345678", "subnet-87654321"]
+      private:
+        ids: ["subnet-abcdef12", "subnet-21fedcba"]
+    security_groups:
+      alb:
+        id: "sg-12345678"
+      ec2:
+        id: "sg-87654321"
+    alb:
+      load_balancer_arn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/GeuseMaker-dev-alb/1234567890123456"
+```
+
+### CLI Management
+
+Use the existing resources management script to discover, validate, and manage existing resources:
+
+```bash
+# Discover existing resources
+./scripts/manage-existing-resources.sh discover -e dev -s GeuseMaker-dev
+
+# Validate existing resources
+./scripts/manage-existing-resources.sh validate -e dev -s GeuseMaker-dev
+
+# Test resource connectivity
+./scripts/manage-existing-resources.sh test -e dev -s GeuseMaker-dev
+
+# List configured resources
+./scripts/manage-existing-resources.sh list -e dev
+```
+
+### Makefile Integration
+
+The existing resources feature is fully integrated with the Makefile for easy deployment:
+
+```bash
+# Discover existing resources
+make existing-resources-discover ENV=dev STACK_NAME=my-stack
+
+# Validate existing resources
+make existing-resources-validate ENV=dev STACK_NAME=my-stack
+
+# Test resource connectivity
+make existing-resources-test ENV=dev STACK_NAME=my-stack
+
+# List configured resources
+make existing-resources-list ENV=dev
+
+# Deploy with existing VPC
+make deploy-with-vpc ENV=dev STACK_NAME=my-stack VPC_ID=vpc-12345678
+
+# Deploy with multiple existing resources
+make deploy-existing ENV=dev STACK_NAME=my-stack \
+    VPC_ID=vpc-12345678 \
+    EFS_ID=fs-87654321 \
+    ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/1234567890123456
+
+# Deploy with auto-discovered resources
+make deploy-auto-discover ENV=dev STACK_NAME=my-stack
+
+# Deploy with existing resources (with validation)
+make deploy-existing-validate ENV=dev STACK_NAME=my-stack
+```
+
+#### Available Makefile Targets
+
+| Target | Description | Variables |
+|--------|-------------|-----------|
+| `existing-resources-discover` | Discover existing AWS resources | `ENV`, `STACK_NAME` |
+| `existing-resources-validate` | Validate existing AWS resources | `ENV`, `STACK_NAME` |
+| `existing-resources-test` | Test existing resources connectivity | `ENV`, `STACK_NAME` |
+| `existing-resources-list` | List configured existing resources | `ENV` |
+| `existing-resources-map` | Map existing resources to variables | `ENV`, `STACK_NAME` |
+| `deploy-with-vpc` | Deploy using existing VPC | `ENV`, `STACK_NAME`, `VPC_ID` |
+| `deploy-existing` | Deploy using existing resources | `ENV`, `STACK_NAME`, `VPC_ID`, `EFS_ID`, `ALB_ARN`, `CLOUDFRONT_ID` |
+| `deploy-auto-discover` | Deploy with auto-discovered resources | `ENV`, `STACK_NAME` |
+| `deploy-existing-validate` | Deploy with existing resources (validated) | `ENV`, `STACK_NAME` |
+
+### Auto-Discovery
+
+The system can automatically discover existing resources based on naming patterns:
+
+- VPC: `{project_name}-{environment}-vpc`
+- Subnets: `{project_name}-{environment}-{type}-subnet-*`
+- Security Groups: `{project_name}-{environment}-{type}-sg`
+- ALB: `{project_name}-{environment}-alb`
+- EFS: `{project_name}-{environment}-efs`
+- CloudFront: `{project_name}-{environment}-cdn`
+
+### Validation Modes
+
+- **strict**: Validates all resources and fails if any are invalid
+- **lenient**: Validates resources but continues with warnings for issues
+- **skip**: Skips validation entirely (not recommended for production)
+
+### Benefits
+
+- **Cost Savings**: Reuse existing infrastructure instead of creating new resources
+- **Faster Deployments**: Skip resource creation for existing components
+- **Environment Consistency**: Use the same infrastructure across deployments
+- **Migration Support**: Gradually migrate to the deployment system
+- **Disaster Recovery**: Leverage existing backup and recovery infrastructure
+
+### Use Cases
+
+- **Development Environments**: Reuse existing VPC and networking
+- **Staging Deployments**: Use production-like infrastructure
+- **Migration Projects**: Gradually adopt the deployment system
+- **Multi-Environment**: Share infrastructure between environments
+- **Cost Optimization**: Minimize resource creation and costs
+
 ### Environment Variables
 
 | Variable | Description | Default |

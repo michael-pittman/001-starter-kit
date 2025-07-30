@@ -10,8 +10,8 @@ global:
 # Infrastructure Configuration
 infrastructure:
   instance_types:
-    preferred: ["g4dn.xlarge"]
-    fallback: ["t3.medium"]  # Fallback to non-GPU for development
+    preferred: ["g4dn.xlarge", "g5g.xlarge"]
+    fallback: ["g4dn.2xlarge", "g5g.2xlarge"]
   
   auto_scaling:
     min_capacity: 1
@@ -116,7 +116,7 @@ security:
     internal_communication_only: false
   
   secrets_management:
-    use_aws_secrets_manager: false  # Use local secrets for development
+    use_aws_secrets_manager: true  
     rotate_secrets: false
     encryption_at_rest: false
 
@@ -148,9 +148,9 @@ monitoring:
 # Cost Optimization Configuration
 cost_optimization:
   spot_instances:
-    enabled: false  # Use on-demand for development stability
-    max_price: 1.00
-    interruption_handling: false
+    enabled: true  # Use on-demand for development stability
+    max_price: 2.00
+    interruption_handling: true
   
   auto_scaling:
     scale_down_enabled: false

@@ -1,0 +1,16 @@
+{
+  "session_id": "96072",
+  "started_at": "2025-07-30T17:10:47Z",
+  "errors": [
+    {
+      "code": "FINALIZATION_FAILED",
+      "message": "Failed to finalize deployment",
+      "category": "infrastructure",
+      "severity": "ERROR",
+      "timestamp": "2025-07-30T17:10:59Z",
+      "context": "phase=finalization,stack=test-error-handling-fail-94998",
+      "recovery_strategy": "rollback",
+      "count": 1
+    }
+  ]
+}

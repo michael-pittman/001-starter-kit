@@ -29,6 +29,52 @@ CACHE_BEHAVIOR_DEFAULT_MIN_TTL=0
 CACHE_BEHAVIOR_DEFAULT_MAX_TTL=31536000
 
 # =============================================================================
+# CLOUDFRONT VALIDATION FUNCTIONS
+# =============================================================================
+
+# Validate existing CloudFront distribution
+validate_existing_cloudfront() {
+    local distribution_id="$1"
+    
+    log_info "Validating existing CloudFront distribution: $distribution_id" "CLOUDFRONT"
+    
+    if [[ -z "$distribution_id" ]]; then
+        log_error "Distribution ID is required for validation" "CLOUDFRONT"
+        return 1
+    fi
+    
+    # Check if distribution exists
+    local distribution_info
+    distribution_info=$(aws cloudfront get-distribution \
+        --id "$distribution_id" \
+        --output json 2>/dev/null)
+    
+    if [[ $? -ne 0 ]]; then
+        log_error "CloudFront distribution not found or inaccessible: $distribution_id" "CLOUDFRONT"
+        return 1
+    fi
+    
+    # Validate distribution state
+    local distribution_status
+    distribution_status=$(echo "$distribution_info" | jq -r '.Distribution.Status')
+    if [[ "$distribution_status" != "Deployed" ]]; then
+        log_error "CloudFront distribution is not in deployed state: $distribution_status" "CLOUDFRONT"
+        return 1
+    fi
+    
+    # Validate distribution is enabled
+    local distribution_enabled
+    distribution_enabled=$(echo "$distribution_info" | jq -r '.Distribution.DistributionConfig.Enabled')
+    if [[ "$distribution_enabled" != "true" ]]; then
+        log_error "CloudFront distribution is not enabled" "CLOUDFRONT"
+        return 1
+    fi
+    
+    log_info "CloudFront distribution validation successful: $distribution_id" "CLOUDFRONT"
+    return 0
+}
+
+# =============================================================================
 # CLOUDFRONT CREATION FUNCTIONS
 # =============================================================================
 
@@ -39,6 +85,41 @@ create_cloudfront_distribution() {
     local origin_id="${3:-}"
     local certificate_arn="${4:-}"
     local custom_domain="${5:-}"
+    
+    # Check for existing CloudFront distribution from environment or variable store
+    local existing_distribution_id="${EXISTING_CLOUDFRONT_ID:-}"
+    if [[ -z "$existing_distribution_id" ]]; then
+        existing_distribution_id=$(get_variable "CLOUDFRONT_DISTRIBUTION_ID" "$VARIABLE_SCOPE_STACK")
+    fi
+    
+    if [[ -n "$existing_distribution_id" ]]; then
+        log_info "Using existing CloudFront distribution: $existing_distribution_id" "CLOUDFRONT"
+        
+        # Validate existing distribution
+        if ! validate_existing_cloudfront "$existing_distribution_id"; then
+            log_error "Existing CloudFront validation failed: $existing_distribution_id" "CLOUDFRONT"
+            return 1
+        fi
+        
+        # Register existing distribution
+        register_resource "cloudfront_distributions" "$existing_distribution_id" "existing"
+        
+        # Extract distribution details
+        local distribution_info
+        distribution_info=$(aws cloudfront get-distribution \
+            --id "$existing_distribution_id" \
+            --query 'Distribution' \
+            --output json)
+        
+        local distribution_domain
+        distribution_domain=$(echo "$distribution_info" | jq -r '.DomainName')
+        
+        # Set variables for downstream use
+        set_variable "CLOUDFRONT_DISTRIBUTION_DOMAIN" "$distribution_domain" "$VARIABLE_SCOPE_STACK"
+        
+        echo "$existing_distribution_id"
+        return 0
+    fi
     
     log_info "Creating CloudFront distribution for stack: $stack_name" "CLOUDFRONT"
     
@@ -93,6 +174,9 @@ create_cloudfront_distribution() {
     # Store distribution information
     set_variable "CLOUDFRONT_DISTRIBUTION_ID" "$distribution_id" "$VARIABLE_SCOPE_STACK"
     set_variable "CLOUDFRONT_DISTRIBUTION_DOMAIN" "$distribution_domain" "$VARIABLE_SCOPE_STACK"
+    
+    # Register new distribution
+    register_resource "cloudfront_distributions" "$distribution_id" "created"
     
     # Wait for distribution to be deployed
     log_info "Waiting for CloudFront distribution to be deployed: $distribution_id" "CLOUDFRONT"

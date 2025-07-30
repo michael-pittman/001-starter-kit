@@ -395,12 +395,38 @@ load_environment_config() {
     
     # Load configuration using yq or jq
     if command -v yq >/dev/null 2>&1; then
-        # Parse YAML configuration
+        # Parse YAML configuration and convert to shell variables
+        # This handles nested YAML structures by flattening them with underscores
         while IFS='=' read -r key value; do
-            if [[ -n "$key" && "$key" != "#"* ]]; then
-                set_variable "$key" "$value" "$VARIABLE_SCOPE_ENVIRONMENT"
+            # Skip empty keys and comments
+            if [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]]; then
+                continue
             fi
-        done < <(yq eval 'to_entries | .[] | .key + "=" + (.value | tostring)' "$config_file")
+            
+            # Convert key to uppercase shell variable format
+            # Replace dots with underscores (for nested paths)
+            # Replace hyphens with underscores
+            # Convert to uppercase
+            local var_name
+            var_name=$(echo "$key" | sed -e 's/\./_/g' -e 's/-/_/g' | tr '[:lower:]' '[:upper:]')
+            
+            # Validate variable name format
+            if [[ ! "$var_name" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+                log_debug "Skipping invalid variable name: $var_name (from key: $key)"
+                continue
+            fi
+            
+            # Handle different value types
+            # Arrays and objects are converted to JSON strings
+            if [[ "$value" == "null" || -z "$value" ]]; then
+                continue
+            fi
+            
+            # Set the variable
+            set_variable "$var_name" "$value" "$VARIABLE_SCOPE_ENVIRONMENT"
+            log_debug "Set environment variable: $var_name=$value"
+            
+        done < <(yq eval -o=json "$config_file" | yq eval '.. | select(tag == "!!str" or tag == "!!int" or tag == "!!bool") | (path | join(".")) + "=" + (. | tostring)' -)
     else
         log_warn "yq not found, skipping environment configuration loading"
     fi

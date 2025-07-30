@@ -16,7 +16,7 @@ export BASH_VERSION_COMPAT="3"
 source "$PROJECT_ROOT/tests/lib/shell-test-framework.sh"
 
 # Source error modules
-source "$PROJECT_ROOT/lib/modules/errors/error_types.sh"
+source "$PROJECT_ROOT/lib/modules/core/errors.sh"
 source "$PROJECT_ROOT/lib/modules/errors/clear_messages.sh"
 
 # Test suite metadata

@@ -11,7 +11,7 @@ _HEALTH_SH_LOADED=1
 # Source dependencies
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../core/errors.sh"
-source "${SCRIPT_DIR}/../instances/launch.sh"
+source "${SCRIPT_DIR}/../compute/launch.sh"
 
 # =============================================================================
 # HEALTH CHECK TYPES

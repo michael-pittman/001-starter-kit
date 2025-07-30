@@ -30,7 +30,7 @@ initialize_script "deploy-spot-cdn-enhanced.sh" \
     "core/errors" \
     "core/registry" \
     "infrastructure/vpc" \
-    "infrastructure/ec2" \
+    "compute/core" \
     "infrastructure/alb" \
     "infrastructure/cloudfront"
 

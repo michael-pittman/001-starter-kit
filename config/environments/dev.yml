@@ -1,0 +1,263 @@
+# Dev Environment Configuration
+# GeuseMaker - Development Settings (Shortened name alias for development.yml)
+
+global:
+  environment: dev
+  region: us-east-1
+  stack_name: GeuseMaker-dev
+  project_name: GeuseMaker
+
+# Infrastructure Configuration
+infrastructure:
+  instance_types:
+    preferred: ["g4dn.xlarge", "g5g.xlarge"]
+    fallback: ["g4dn.2xlarge", "g5g.2xlarge"]
+  
+  auto_scaling:
+    min_capacity: 1
+    max_capacity: 2
+    target_utilization: 80
+  
+  networking:
+    vpc_cidr: "10.1.0.0/16"
+    public_subnets: ["10.1.1.0/24"]
+    private_subnets: ["10.1.10.0/24"]
+  
+  storage:
+    efs_performance_mode: generalPurpose
+    efs_encryption: false
+    backup_retention_days: 7
+
+# Application Configuration
+applications:
+  postgres:
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      max_connections: 50
+      shared_buffers: "256MB"
+      effective_cache_size: "512MB"
+    backup:
+      enabled: false
+  
+  n8n:
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "256M"
+    config:
+      cors_enable: true
+      cors_allowed_origins: "*"
+      payload_size_max: 16
+      metrics: true
+      log_level: debug
+    scaling:
+      replicas: 1
+      max_replicas: 1
+  
+  ollama:
+    resources:
+      cpu_limit: "1.0"
+      memory_limit: "4G"
+      cpu_reservation: "0.5"
+      memory_reservation: "2G"
+      gpu_memory_fraction: 0.70
+    models:
+      - name: "llama2:7b"
+        preload: true
+    config:
+      max_loaded_models: 1
+      concurrent_requests: 2
+  
+  qdrant:
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      max_search_threads: 2
+      max_optimization_threads: 1
+      wal_capacity_mb: 64
+    collections:
+      default_vector_size: 384
+      default_distance: "Cosine"
+  
+  crawl4ai:
+    resources:
+      cpu_limit: "0.5"
+      memory_limit: "1G"
+      cpu_reservation: "0.25"
+      memory_reservation: "512M"
+    config:
+      rate_limiting_enabled: false
+      max_concurrent_sessions: 1
+      browser_pool_size: 1
+
+# Security Configuration
+security:
+  container_security:
+    run_as_non_root: false
+    read_only_root_filesystem: false
+    no_new_privileges: false
+  
+  network_security:
+    cors_strict_mode: false
+    trusted_hosts_restriction: false
+    internal_communication_only: false
+  
+  secrets_management:
+    use_aws_secrets_manager: true
+    rotate_secrets: false
+    encryption_at_rest: false
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    retention_days: 7
+    scrape_interval: 60s
+  
+  logging:
+    level: debug
+    centralized: false
+    retention_days: 7
+    format: text
+  
+  alerting:
+    enabled: false
+  
+  health_checks:
+    enabled: true
+    interval: 60s
+    timeout: 15s
+    retries: 3
+    
+  dashboards:
+    grafana_enabled: false
+
+# Cost Optimization Configuration
+cost_optimization:
+  spot_instances:
+    enabled: true
+    max_price: 2.00
+    interruption_handling: true
+  
+  auto_scaling:
+    scale_down_enabled: false
+    scale_down_threshold: 10
+    idle_timeout_minutes: 10
+  
+  resource_optimization:
+    right_sizing_enabled: false
+    unused_resource_detection: false
+    cost_alerts_enabled: false
+
+# Backup and Recovery Configuration
+backup:
+  automated_backups: false
+  backup_schedule: "0 6 * * 0"
+  backup_retention_days: 7
+  cross_region_replication: false
+  point_in_time_recovery: false
+
+# Compliance Configuration
+compliance:
+  audit_logging: false
+  encryption_in_transit: false
+  encryption_at_rest: false
+  access_logging: false
+  data_retention_policy: 7
+
+# Development-specific Configuration
+development:
+  hot_reload: true
+  debug_mode: true
+  test_data_enabled: true
+  mock_services_enabled: true
+  local_development_mode: true
+  
+  # Development tools
+  tools:
+    enable_debug_endpoints: true
+    enable_metrics_endpoint: true
+    enable_profiling: true
+    
+  # Testing configuration
+  testing:
+    unit_tests_enabled: true
+    integration_tests_enabled: true
+    e2e_tests_enabled: false
+    test_data_reset: true
+
+# Existing Resources Configuration for Development
+existing_resources:
+  enabled: true
+  validation_mode: lenient
+  auto_discovery: true
+  
+  reuse_policy:
+    vpc: true
+    subnets: true
+    security_groups: true
+    efs: false  # Create new EFS for dev
+    alb: true
+    cloudfront: false  # Create new CloudFront for dev
+    rds: false
+    elasticache: false
+    s3: true
+    iam_roles: true
+    certificates: false
+    
+  resources:
+    vpc:
+      id: ""  # Set your existing VPC ID here (e.g., vpc-0b68dad7524ed9a83)
+      name: "GeuseMaker-dev-vpc"
+      
+    subnets:
+      public:
+        ids: []  # Set your existing public subnet IDs here (e.g., ["subnet-0b423f2274c7f47a8", "subnet-0ccf68bbfa6d53cd8"])
+        availability_zones: ["us-east-1a", "us-east-1a"]
+      private:
+        ids: []  # Set your existing private subnet IDs here (e.g., ["subnet-0449435bd5838e2a7", "subnet-0f1ffb4c604de1969"])
+        availability_zones: ["us-east-1a", "us-east-1a"]
+        
+    security_groups:
+      alb:
+        id: ""  # Set your existing ALB security group ID here (e.g., sg-04135569b7b82d293)
+        name: "geuse000-alb-sg"
+      ec2:
+        id: ""  # Set your existing EC2 security group ID here (e.g., sg-098704badd02f4831)
+        name: "geuse000-sg"
+      efs:
+        id: ""  # Set your existing EFS security group ID here (e.g., sg-06a4d3a5f8ebb6f82)
+        name: "geuse000-efs-sg"
+        
+    alb:
+      load_balancer_arn: ""  # Set your existing ALB ARN here
+      target_group_arn: ""   # Set your existing target group ARN here
+      dns_name: "GeuseMaker-dev-alb-1234567890.us-east-1.elb.amazonaws.com"
+      
+    s3:
+      buckets:
+        static_assets:
+          bucket_name: "geusemaker-dev-static-assets"
+          region: "us-east-1"
+          versioning_enabled: true
+        backups:
+          bucket_name: "geusemaker-dev-backups"
+          region: "us-east-1"
+          versioning_enabled: true
+          
+    iam:
+      roles:
+        ec2_role:
+          role_arn: "arn:aws:iam::123456789012:role/GeuseMaker-dev-EC2Role"
+          role_name: "GeuseMaker-dev-EC2Role"
+        alb_role:
+          role_arn: "arn:aws:iam::123456789012:role/GeuseMaker-dev-ALBRole"
+          role_name: "GeuseMaker-dev-ALBRole"

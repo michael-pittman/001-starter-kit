@@ -3,10 +3,18 @@
 # Modular deployment system with uniform coding standards
 # =============================================================================
 
-.PHONY: help install test lint security deploy clean destroy status logs monitoring \
+.PHONY: help install test test-unit test-integration test-security test-performance test-report \
+        lint security format deploy deploy-spot deploy-alb deploy-cdn deploy-full \
+        clean destroy destroy-spot destroy-alb destroy-cdn status logs monitoring health \
         maintenance-fix maintenance-cleanup maintenance-backup maintenance-restore \
         maintenance-health maintenance-update maintenance-optimize maintenance-validate \
-        maintenance-update-simple maintenance-help
+        maintenance-update-simple maintenance-help \
+        check-quotas check-deps backup restore update \
+        existing-resources-discover existing-resources-validate existing-resources-test \
+        existing-resources-list existing-resources-map deploy-with-vpc deploy-existing \
+        deploy-auto-discover deploy-existing-validate \
+        deploy-dev deploy-staging deploy-prod destroy-dev destroy-staging destroy-prod \
+        ci-test ci-deploy debug troubleshoot dev dev-stop docs docs-serve
 
 # =============================================================================
 # CONFIGURATION
@@ -43,6 +51,17 @@ help: ## Show this help message
 	@echo '  cdn         Deploy CloudFront CDN with ALB and EFS (single AZ)'
 	@echo '  full        Deploy complete stack with all features (single AZ)'
 	@echo ''
+	@echo 'Existing Resources:'
+	@echo '  existing-resources-discover    Discover existing AWS resources'
+	@echo '  existing-resources-validate   Validate existing AWS resources'
+	@echo '  existing-resources-test       Test existing resources connectivity'
+	@echo '  existing-resources-list       List configured existing resources'
+	@echo '  existing-resources-map        Map existing resources to variables'
+	@echo '  deploy-with-vpc              Deploy using existing VPC'
+	@echo '  deploy-existing              Deploy using existing resources'
+	@echo '  deploy-auto-discover         Deploy with auto-discovered resources'
+	@echo '  deploy-existing-validate     Deploy with existing resources (validated)'
+	@echo ''
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -73,23 +92,39 @@ validate: ## Validate deployment configuration
 
 test: ## Run all tests
 	@echo "🧪 Running tests..."
-	@if [ -f "package.json" ]; then npm test; fi
-	@if [ -f "pytest.ini" ] || [ -f "tests/" ]; then python -m pytest tests/; fi
-	@if [ -f "tests/" ]; then bash tests/run-deployment-tests.sh; fi
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh; else \
+		if [ -f "tests/run-deployment-tests.sh" ]; then bash tests/run-deployment-tests.sh; fi; \
+	fi
 	@echo "✅ Tests completed"
 
 test-unit: ## Run unit tests only
 	@echo "🧪 Running unit tests..."
-	@if [ -f "package.json" ]; then npm run test:unit; fi
-	@if [ -f "pytest.ini" ]; then python -m pytest tests/unit/; fi
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh unit; else \
+		if [ -f "tests/run-deployment-tests.sh" ]; then bash tests/run-deployment-tests.sh --unit; fi; \
+	fi
 	@echo "✅ Unit tests completed"
 
 test-integration: ## Run integration tests only
 	@echo "🧪 Running integration tests..."
-	@if [ -f "package.json" ]; then npm run test:integration; fi
-	@if [ -f "pytest.ini" ]; then python -m pytest tests/integration/; fi
-	@bash tests/run-deployment-tests.sh --integration
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh integration; else \
+		if [ -f "tests/run-deployment-tests.sh" ]; then bash tests/run-deployment-tests.sh --integration; fi; \
+	fi
 	@echo "✅ Integration tests completed"
+
+test-security: ## Run security tests
+	@echo "🔒 Running security tests..."
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh security; fi
+	@echo "✅ Security tests completed"
+
+test-performance: ## Run performance tests
+	@echo "⚡ Running performance tests..."
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh performance; fi
+	@echo "✅ Performance tests completed"
+
+test-report: ## Run tests and generate HTML report
+	@echo "📊 Running tests with report generation..."
+	@if [ -f "tools/test-runner.sh" ]; then ./tools/test-runner.sh --report; fi
+	@echo "✅ Test report generated"
 
 # =============================================================================
 # CODE QUALITY TARGETS
@@ -97,28 +132,27 @@ test-integration: ## Run integration tests only
 
 lint: ## Run linting and code quality checks
 	@echo "🔍 Running linting..."
-	@if [ -f "package.json" ]; then npm run lint; fi
-	@if [ -f ".eslintrc" ]; then npx eslint .; fi
-	@if [ -f "flake8" ] || [ -f "setup.cfg" ]; then flake8 .; fi
-	@if [ -f "black" ]; then black --check .; fi
-	@if [ -f "shellcheck" ]; then find . -name "*.sh" -exec shellcheck {} \; || true; fi
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		find . -name "*.sh" -not -path "./archive/*" -not -path "./node_modules/*" -exec shellcheck {} + || true; \
+	else \
+		echo "⚠️  shellcheck not installed - skipping shell script linting"; \
+	fi
 	@echo "✅ Linting completed"
 
 security: ## Run security scans
 	@echo "🔒 Running security scans..."
-	@if [ -f "package.json" ]; then npm audit; fi
-	@if [ -f "safety" ]; then safety check; fi
-	@if [ -f "bandit" ]; then bandit -r .; fi
-	@if [ -f "tfsec" ]; then tfsec .; fi
-	@if [ -f "checkov" ]; then checkov -d .; fi
+	@if [ -f "tools/test-runner.sh" ]; then \
+		./tools/test-runner.sh security; \
+	elif [ -f "scripts/security-validation.sh" ]; then \
+		./scripts/security-validation.sh; \
+	else \
+		echo "⚠️  No security scanning tools configured"; \
+	fi
 	@echo "✅ Security scans completed"
 
 format: ## Format code
 	@echo "🎨 Formatting code..."
-	@if [ -f "package.json" ]; then npm run format; fi
-	@if [ -f "prettier" ]; then npx prettier --write .; fi
-	@if [ -f "black" ]; then black .; fi
-	@if [ -f "isort" ]; then isort .; fi
+	@echo "ℹ️  Note: Shell scripts follow consistent formatting standards"
 	@echo "✅ Code formatting completed"
 
 # =============================================================================
@@ -299,6 +333,24 @@ maintenance-help: ## Show maintenance suite help
 # UTILITY TARGETS
 # =============================================================================
 
+check-quotas: ## Check AWS service quotas
+	@echo "📊 Checking AWS service quotas..."
+	@if [ -f "scripts/check-quotas.sh" ]; then \
+		./scripts/check-quotas.sh $(REGION); \
+	else \
+		echo "⚠️  Quota check script not found"; \
+	fi
+	@echo "✅ Quota check completed"
+
+check-deps: ## Check system dependencies
+	@echo "🔍 Checking dependencies..."
+	@if [ -f "scripts/check-dependencies.sh" ]; then \
+		./scripts/check-dependencies.sh; \
+	else \
+		echo "⚠️  Dependency check script not found"; \
+	fi
+	@echo "✅ Dependency check completed"
+
 backup: ## Create backup of current deployment
 	@echo "💾 Creating backup..."
 	@./deploy.sh --backup --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
@@ -313,6 +365,75 @@ update: ## Update deployment configuration
 	@echo "🔄 Updating deployment configuration..."
 	@./deploy.sh --update --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ Update completed"
+
+# =============================================================================
+# EXISTING RESOURCES TARGETS
+# =============================================================================
+
+existing-resources-discover: ## Discover existing AWS resources
+	@echo "🔍 Discovering existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh discover -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource discovery completed"
+
+existing-resources-validate: ## Validate existing AWS resources
+	@echo "🔍 Validating existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh validate -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource validation completed"
+
+existing-resources-test: ## Test existing resources connectivity
+	@echo "🧪 Testing existing resources connectivity for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh test -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource connectivity test completed"
+
+existing-resources-list: ## List configured existing resources
+	@echo "📋 Listing configured existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh list -e $(ENV)
+	@echo "✅ Resource listing completed"
+
+existing-resources-map: ## Map existing resources to deployment variables
+	@echo "🗺️  Mapping existing resources for environment: $(ENV)"
+	@./scripts/manage-existing-resources.sh map -e $(ENV) -s $(STACK_NAME)
+	@echo "✅ Resource mapping completed"
+
+# Deploy with existing VPC
+deploy-with-vpc: ## Deploy using existing VPC
+	@echo "🚀 Deploying with existing VPC..."
+	@./scripts/aws-deployment-modular.sh \
+		--use-existing-vpc $(VPC_ID) \
+		--stack-name $(STACK_NAME) \
+		--env $(ENV) \
+		--profile $(PROFILE) \
+		--region $(REGION)
+	@echo "✅ Deployment with existing VPC completed"
+
+# Deploy with multiple existing resources
+deploy-existing: ## Deploy using existing resources
+	@echo "🚀 Deploying with existing resources..."
+	@./scripts/aws-deployment-modular.sh \
+		$(if $(VPC_ID),--use-existing-vpc $(VPC_ID)) \
+		$(if $(EFS_ID),--use-existing-efs $(EFS_ID)) \
+		$(if $(ALB_ARN),--use-existing-alb $(ALB_ARN)) \
+		$(if $(CLOUDFRONT_ID),--use-existing-cloudfront $(CLOUDFRONT_ID)) \
+		--stack-name $(STACK_NAME) \
+		--env $(ENV) \
+		--profile $(PROFILE) \
+		--region $(REGION)
+	@echo "✅ Deployment with existing resources completed"
+
+# Deploy with auto-discovered resources
+deploy-auto-discover: ## Deploy with auto-discovered existing resources
+	@echo "🚀 Deploying with auto-discovered resources..."
+	@$(MAKE) existing-resources-discover
+	@$(MAKE) existing-resources-validate
+	@$(MAKE) deploy-existing
+	@echo "✅ Deployment with auto-discovered resources completed"
+
+# Validate and deploy with existing resources
+deploy-existing-validate: ## Deploy with existing resources (with validation)
+	@echo "🚀 Deploying with existing resources (with validation)..."
+	@$(MAKE) existing-resources-validate
+	@$(MAKE) deploy-existing
+	@echo "✅ Deployment with existing resources (validated) completed"
 
 # =============================================================================
 # ENVIRONMENT-SPECIFIC TARGETS

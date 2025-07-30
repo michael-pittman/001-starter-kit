@@ -156,6 +156,16 @@ Options:
     --alb                     Create Application Load Balancer for high availability
     --cloudfront, --cdn       Create CloudFront CDN distribution (requires --alb)
     
+    Existing Resources Options:
+    --use-existing-vpc VPC_ID                    Use existing VPC instead of creating new
+    --use-existing-subnets SUBNET_IDS            Use existing subnets (comma-separated)
+    --use-existing-security-groups SG_IDS        Use existing security groups (comma-separated)
+    --use-existing-efs EFS_ID                    Use existing EFS file system
+    --use-existing-alb ALB_ARN                   Use existing Application Load Balancer
+    --use-existing-target-group TG_ARN           Use existing ALB target group
+    --use-existing-cloudfront DIST_ID            Use existing CloudFront distribution
+    --validate-existing-resources [true|false]   Validate existing resources (default: true)
+    
     Deployment Options:
     --validate-only           Validate configuration without deploying
     --cleanup                 Clean up existing resources before deploying
@@ -289,6 +299,38 @@ parse_arguments() {
                 ENABLE_CLOUDFRONT="true"
                 shift
                 ;;
+            --use-existing-vpc)
+                export EXISTING_VPC_ID="$2"
+                shift 2
+                ;;
+            --use-existing-subnets)
+                export EXISTING_SUBNET_IDS="$2"
+                shift 2
+                ;;
+            --use-existing-security-groups)
+                export EXISTING_SECURITY_GROUP_IDS="$2"
+                shift 2
+                ;;
+            --use-existing-efs)
+                export EXISTING_EFS_ID="$2"
+                shift 2
+                ;;
+            --use-existing-alb)
+                export EXISTING_ALB_ARN="$2"
+                shift 2
+                ;;
+            --use-existing-target-group)
+                export EXISTING_TARGET_GROUP_ARN="$2"
+                shift 2
+                ;;
+            --use-existing-cloudfront)
+                export EXISTING_CLOUDFRONT_ID="$2"
+                shift 2
+                ;;
+            --validate-existing-resources)
+                export VALIDATE_EXISTING_RESOURCES="${2:-true}"
+                shift 2
+                ;;
             -h|--help)
                 usage 0
                 ;;
@@ -321,6 +363,26 @@ run_deployment() {
     
     # Initialize registry
     initialize_registry "$stack_name"
+    
+    # Validate existing resources if enabled
+    if [[ "${VALIDATE_EXISTING_RESOURCES:-true}" == "true" ]]; then
+        echo -e "\n🔍 Validating existing resources..."
+        
+        # Load resource validation module
+        if [[ -f "$LIB_DIR/modules/infrastructure/resource-validation.sh" ]]; then
+            source "$LIB_DIR/modules/infrastructure/resource-validation.sh"
+            
+            # Validate all existing resources
+            if ! validate_all_existing_resources; then
+                echo "ERROR: Existing resource validation failed" >&2
+                return 1
+            fi
+            
+            echo "✅ All existing resources validated successfully"
+        else
+            echo "WARNING: Resource validation module not found, skipping validation" >&2
+        fi
+    fi
     
     # Initialize monitoring if available
     if [[ "$MONITORING_AVAILABLE" == "true" ]] && declare -f init_deployment_monitoring >/dev/null 2>&1; then
@@ -702,7 +764,7 @@ launch_deployment_instance() {
     
     # Load instance modules
     load_modules \
-        "instances/launch" \
+        "compute/launch" \
         "deployment/userdata" || {
         echo "ERROR: Failed to load instance modules" >&2
         return 1

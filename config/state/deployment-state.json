@@ -14,8 +14,368 @@
       "resources": {},
       "deployments": [],
       "variables": {}
+    },
+    "test-alb-001": {
+      "name": "test-alb-001",
+      "status": "initializing",
+      "created": "2025-07-30T15:56:55Z",
+      "last_modified": "2025-07-30T15:56:55Z",
+      "resources": {},
+      "deployments": [],
+      "variables": {}
+    },
+    "test-alb-002": {
+      "name": "test-alb-002",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:29:21Z",
+      "last_modified": "2025-07-30T16:29:26Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:29:26Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-003": {
+      "name": "test-alb-003",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:30:35Z",
+      "last_modified": "2025-07-30T16:30:40Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:30:40Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-004": {
+      "name": "test-alb-004",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:30:58Z",
+      "last_modified": "2025-07-30T16:31:10Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:31:10Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-005": {
+      "name": "test-alb-005",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:32:39Z",
+      "last_modified": "2025-07-30T16:32:45Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:32:45Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-006": {
+      "name": "test-alb-006",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:33:07Z",
+      "last_modified": "2025-07-30T16:33:12Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:33:12Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-007": {
+      "name": "test-alb-007",
+      "status": "ROLLING_BACK",
+      "created": "2025-07-30T16:43:05Z",
+      "last_modified": "2025-07-30T16:59:01Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:43:08Z",
+          "state": "CLEANING_UP",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T16:58:58Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T16:59:01Z",
+          "state": "ROLLING_BACK",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-008": {
+      "name": "test-alb-008",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:44:09Z",
+      "last_modified": "2025-07-30T16:44:19Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:44:19Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-009": {
+      "name": "test-alb-009",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T16:44:27Z",
+      "last_modified": "2025-07-30T16:44:36Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T16:44:36Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-010": {
+      "name": "test-alb-010",
+      "status": "ROLLING_BACK",
+      "created": "2025-07-30T17:01:48Z",
+      "last_modified": "2025-07-30T17:02:03Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T17:02:00Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T17:02:03Z",
+          "state": "ROLLING_BACK",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-011": {
+      "name": "test-alb-011",
+      "status": "ROLLING_BACK",
+      "created": "2025-07-30T17:02:39Z",
+      "last_modified": "2025-07-30T17:02:51Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T17:02:48Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T17:02:51Z",
+          "state": "ROLLING_BACK",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-error-handling-fail-94998": {
+      "name": "test-error-handling-fail-94998",
+      "status": "ROLLING_BACK",
+      "created": "2025-07-30T17:10:48Z",
+      "last_modified": "2025-07-30T17:10:59Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T17:10:58Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T17:10:59Z",
+          "state": "FAILED",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T17:10:59Z",
+          "state": "ROLLING_BACK",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-012": {
+      "name": "test-alb-012",
+      "status": "ROLLING_BACK",
+      "created": "2025-07-30T17:11:28Z",
+      "last_modified": "2025-07-30T17:11:51Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T17:11:40Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        },
+        {
+          "timestamp": "2025-07-30T17:11:51Z",
+          "state": "ROLLING_BACK",
+          "details": ""
+        }
+      ],
+      "variables": {}
+    },
+    "test-alb-013": {
+      "name": "test-alb-013",
+      "status": "IN_PROGRESS",
+      "created": "2025-07-30T17:30:23Z",
+      "last_modified": "2025-07-30T17:30:35Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T17:30:35Z",
+          "state": "IN_PROGRESS",
+          "details": ""
+        }
+      ],
+      "variables": {}
     }
   },
   "resources": {},
-  "history": []
+  "history": [
+    {
+      "timestamp": "2025-07-30T16:29:26Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-002"
+    },
+    {
+      "timestamp": "2025-07-30T16:30:40Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-003"
+    },
+    {
+      "timestamp": "2025-07-30T16:31:10Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-004"
+    },
+    {
+      "timestamp": "2025-07-30T16:32:45Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-005"
+    },
+    {
+      "timestamp": "2025-07-30T16:33:12Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-006"
+    },
+    {
+      "timestamp": "2025-07-30T16:43:08Z",
+      "state": "CLEANING_UP",
+      "details": "",
+      "stack": "test-alb-007"
+    },
+    {
+      "timestamp": "2025-07-30T16:44:19Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-008"
+    },
+    {
+      "timestamp": "2025-07-30T16:44:36Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-009"
+    },
+    {
+      "timestamp": "2025-07-30T16:58:58Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-007"
+    },
+    {
+      "timestamp": "2025-07-30T16:59:01Z",
+      "state": "ROLLING_BACK",
+      "details": "",
+      "stack": "test-alb-007"
+    },
+    {
+      "timestamp": "2025-07-30T17:02:00Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-010"
+    },
+    {
+      "timestamp": "2025-07-30T17:02:03Z",
+      "state": "ROLLING_BACK",
+      "details": "",
+      "stack": "test-alb-010"
+    },
+    {
+      "timestamp": "2025-07-30T17:02:48Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-011"
+    },
+    {
+      "timestamp": "2025-07-30T17:02:51Z",
+      "state": "ROLLING_BACK",
+      "details": "",
+      "stack": "test-alb-011"
+    },
+    {
+      "timestamp": "2025-07-30T17:10:58Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-error-handling-fail-94998"
+    },
+    {
+      "timestamp": "2025-07-30T17:10:59Z",
+      "state": "FAILED",
+      "details": "",
+      "stack": "test-error-handling-fail-94998"
+    },
+    {
+      "timestamp": "2025-07-30T17:10:59Z",
+      "state": "ROLLING_BACK",
+      "details": "",
+      "stack": "test-error-handling-fail-94998"
+    },
+    {
+      "timestamp": "2025-07-30T17:11:40Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-012"
+    },
+    {
+      "timestamp": "2025-07-30T17:11:51Z",
+      "state": "ROLLING_BACK",
+      "details": "",
+      "stack": "test-alb-012"
+    },
+    {
+      "timestamp": "2025-07-30T17:30:35Z",
+      "state": "IN_PROGRESS",
+      "details": "",
+      "stack": "test-alb-013"
+    }
+  ]
 }

@@ -2,7 +2,7 @@
   "metadata": {
     "version": "1.0.0",
     "created": "2025-07-30T13:13:21Z",
-    "last_modified": "2025-07-30T13:13:22Z"
+    "last_modified": "2025-07-30T19:19:10Z"
   },
   "global": {},
   "stacks": {},
@@ -10,118 +10,834 @@
   "temporary": {},
   "stack": {
     "STACK_NAME": {
-      "value": "geusemaker-spot-alb-cdn",
+      "value": "test-alb-013",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENVIRONMENT": {
-      "value": "dev",
+      "value": "development",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "AWS_REGION": {
       "value": "us-east-1",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "AWS_PROFILE": {
       "value": "dev",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "DEPLOYMENT_TYPE": {
-      "value": "full",
+      "value": "alb",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_ALB": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_CDN": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_EFS": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_MULTI_AZ": {
-      "value": "true",
+      "value": "false",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_SPOT": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ENABLE_MONITORING": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "VPC_CIDR": {
       "value": "10.0.0.0/16",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "PUBLIC_SUBNETS": {
       "value": "",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "PRIVATE_SUBNETS": {
       "value": "",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "INSTANCE_TYPE": {
       "value": "g4dn.xlarge",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "MIN_CAPACITY": {
       "value": "2",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "MAX_CAPACITY": {
-      "value": "10",
+      "value": "8",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "EFS_ENCRYPTION": {
       "value": "true",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:21Z"
+      "set_at": "2025-07-30T17:30:22Z"
     },
     "ALB_INTERNAL": {
       "value": "false",
       "type": "string",
       "scope": "stack",
-      "set_at": "2025-07-30T13:13:22Z"
+      "set_at": "2025-07-30T17:30:22Z"
+    },
+    "CLOUDFRONT_PRICE_CLASS": {
+      "value": "PriceClass_100",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "VPC_ID": {
+      "value": "vpc-test123",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T19:19:10Z"
+    },
+    "PUBLIC_SUBNET_IDS": {
+      "value": "subnet-123,subnet-456",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T19:19:10Z"
+    },
+    "PRIVATE_SUBNET_IDS": {
+      "value": "subnet-789",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T19:19:10Z"
+    },
+    "ALB_SECURITY_GROUP_ID": {
+      "value": "sg-alb123",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T19:19:10Z"
+    },
+    "EC2_SECURITY_GROUP_ID": {
+      "value": "sg-ec2123",
+      "type": "string",
+      "scope": "stack",
+      "set_at": "2025-07-30T19:17:27Z"
+    }
+  },
+  "environment": {
+    "GLOBAL_ENVIRONMENT": {
+      "value": "development",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "GLOBAL_REGION": {
+      "value": "us-east-1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "GLOBAL_STACK_NAME": {
+      "value": "GeuseMaker-dev",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "GLOBAL_PROJECT_NAME": {
+      "value": "GeuseMaker",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_INSTANCE_TYPES_PREFERRED_0": {
+      "value": "g4dn.xlarge",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_INSTANCE_TYPES_PREFERRED_1": {
+      "value": "g5g.xlarge",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_INSTANCE_TYPES_FALLBACK_0": {
+      "value": "g4dn.2xlarge",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_INSTANCE_TYPES_FALLBACK_1": {
+      "value": "g5g.2xlarge",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_AUTO_SCALING_MIN_CAPACITY": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_AUTO_SCALING_MAX_CAPACITY": {
+      "value": "2",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_AUTO_SCALING_TARGET_UTILIZATION": {
+      "value": "80",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_NETWORKING_VPC_CIDR": {
+      "value": "10.1.0.0/16",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_NETWORKING_PUBLIC_SUBNETS_0": {
+      "value": "10.1.1.0/24",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_NETWORKING_PRIVATE_SUBNETS_0": {
+      "value": "10.1.10.0/24",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:23Z"
+    },
+    "INFRASTRUCTURE_STORAGE_EFS_PERFORMANCE_MODE": {
+      "value": "generalPurpose",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "INFRASTRUCTURE_STORAGE_EFS_ENCRYPTION": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "INFRASTRUCTURE_STORAGE_BACKUP_RETENTION_DAYS": {
+      "value": "7",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_RESOURCES_CPU_LIMIT": {
+      "value": "0.5",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_RESOURCES_MEMORY_LIMIT": {
+      "value": "1G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_RESOURCES_CPU_RESERVATION": {
+      "value": "0.25",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_RESOURCES_MEMORY_RESERVATION": {
+      "value": "512M",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_CONFIG_MAX_CONNECTIONS": {
+      "value": "50",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_CONFIG_SHARED_BUFFERS": {
+      "value": "256MB",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_CONFIG_EFFECTIVE_CACHE_SIZE": {
+      "value": "512MB",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_POSTGRES_BACKUP_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_RESOURCES_CPU_LIMIT": {
+      "value": "0.5",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_RESOURCES_MEMORY_LIMIT": {
+      "value": "1G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_RESOURCES_CPU_RESERVATION": {
+      "value": "0.25",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_RESOURCES_MEMORY_RESERVATION": {
+      "value": "256M",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_CONFIG_CORS_ENABLE": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_CONFIG_CORS_ALLOWED_ORIGINS": {
+      "value": "*",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_CONFIG_PAYLOAD_SIZE_MAX": {
+      "value": "16",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:24Z"
+    },
+    "APPLICATIONS_N8N_CONFIG_METRICS": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_N8N_CONFIG_LOG_LEVEL": {
+      "value": "debug",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_N8N_SCALING_REPLICAS": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_N8N_SCALING_MAX_REPLICAS": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_RESOURCES_CPU_LIMIT": {
+      "value": "1.0",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_RESOURCES_MEMORY_LIMIT": {
+      "value": "4G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_RESOURCES_CPU_RESERVATION": {
+      "value": "0.5",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_RESOURCES_MEMORY_RESERVATION": {
+      "value": "2G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_MODELS_0_NAME": {
+      "value": "llama2:7b",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_MODELS_0_PRELOAD": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_CONFIG_MAX_LOADED_MODELS": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_OLLAMA_CONFIG_CONCURRENT_REQUESTS": {
+      "value": "2",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_RESOURCES_CPU_LIMIT": {
+      "value": "0.5",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_RESOURCES_MEMORY_LIMIT": {
+      "value": "1G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_RESOURCES_CPU_RESERVATION": {
+      "value": "0.25",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_RESOURCES_MEMORY_RESERVATION": {
+      "value": "512M",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_CONFIG_MAX_SEARCH_THREADS": {
+      "value": "2",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_CONFIG_MAX_OPTIMIZATION_THREADS": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_CONFIG_WAL_CAPACITY_MB": {
+      "value": "64",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:25Z"
+    },
+    "APPLICATIONS_QDRANT_COLLECTIONS_DEFAULT_VECTOR_SIZE": {
+      "value": "384",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_QDRANT_COLLECTIONS_DEFAULT_DISTANCE": {
+      "value": "Cosine",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_RESOURCES_CPU_LIMIT": {
+      "value": "0.5",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_RESOURCES_MEMORY_LIMIT": {
+      "value": "1G",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_RESOURCES_CPU_RESERVATION": {
+      "value": "0.25",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_RESOURCES_MEMORY_RESERVATION": {
+      "value": "512M",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_CONFIG_RATE_LIMITING_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_CONFIG_MAX_CONCURRENT_SESSIONS": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "APPLICATIONS_CRAWL4AI_CONFIG_BROWSER_POOL_SIZE": {
+      "value": "1",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_CONTAINER_SECURITY_RUN_AS_NON_ROOT": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_CONTAINER_SECURITY_READ_ONLY_ROOT_FILESYSTEM": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_CONTAINER_SECURITY_NO_NEW_PRIVILEGES": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_NETWORK_SECURITY_CORS_STRICT_MODE": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_NETWORK_SECURITY_TRUSTED_HOSTS_RESTRICTION": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_NETWORK_SECURITY_INTERNAL_COMMUNICATION_ONLY": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_SECRETS_MANAGEMENT_USE_AWS_SECRETS_MANAGER": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_SECRETS_MANAGEMENT_ROTATE_SECRETS": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "SECURITY_SECRETS_MANAGEMENT_ENCRYPTION_AT_REST": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:26Z"
+    },
+    "MONITORING_METRICS_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_METRICS_RETENTION_DAYS": {
+      "value": "7",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_METRICS_SCRAPE_INTERVAL": {
+      "value": "60s",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_LOGGING_LEVEL": {
+      "value": "debug",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_LOGGING_CENTRALIZED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_LOGGING_RETENTION_DAYS": {
+      "value": "7",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_LOGGING_FORMAT": {
+      "value": "text",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_ALERTING_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_HEALTH_CHECKS_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_HEALTH_CHECKS_INTERVAL": {
+      "value": "60s",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_HEALTH_CHECKS_TIMEOUT": {
+      "value": "15s",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_HEALTH_CHECKS_RETRIES": {
+      "value": "3",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "MONITORING_DASHBOARDS_GRAFANA_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "COST_OPTIMIZATION_SPOT_INSTANCES_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "COST_OPTIMIZATION_SPOT_INSTANCES_MAX_PRICE": {
+      "value": "2",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:27Z"
+    },
+    "COST_OPTIMIZATION_SPOT_INSTANCES_INTERRUPTION_HANDLING": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_AUTO_SCALING_SCALE_DOWN_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_AUTO_SCALING_SCALE_DOWN_THRESHOLD": {
+      "value": "10",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_AUTO_SCALING_IDLE_TIMEOUT_MINUTES": {
+      "value": "10",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_RESOURCE_OPTIMIZATION_RIGHT_SIZING_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_RESOURCE_OPTIMIZATION_UNUSED_RESOURCE_DETECTION": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COST_OPTIMIZATION_RESOURCE_OPTIMIZATION_COST_ALERTS_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "BACKUP_AUTOMATED_BACKUPS": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "BACKUP_BACKUP_SCHEDULE": {
+      "value": "0 6 * * 0",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "BACKUP_BACKUP_RETENTION_DAYS": {
+      "value": "7",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "BACKUP_CROSS_REGION_REPLICATION": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "BACKUP_POINT_IN_TIME_RECOVERY": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COMPLIANCE_AUDIT_LOGGING": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COMPLIANCE_ENCRYPTION_IN_TRANSIT": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COMPLIANCE_ENCRYPTION_AT_REST": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COMPLIANCE_ACCESS_LOGGING": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "COMPLIANCE_DATA_RETENTION_POLICY": {
+      "value": "7",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "DEVELOPMENT_HOT_RELOAD": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:28Z"
+    },
+    "DEVELOPMENT_DEBUG_MODE": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TEST_DATA_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_MOCK_SERVICES_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_LOCAL_DEVELOPMENT_MODE": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TOOLS_ENABLE_DEBUG_ENDPOINTS": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TOOLS_ENABLE_METRICS_ENDPOINT": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TOOLS_ENABLE_PROFILING": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TESTING_UNIT_TESTS_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TESTING_INTEGRATION_TESTS_ENABLED": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TESTING_E2E_TESTS_ENABLED": {
+      "value": "false",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
+    },
+    "DEVELOPMENT_TESTING_TEST_DATA_RESET": {
+      "value": "true",
+      "type": "string",
+      "scope": "environment",
+      "set_at": "2025-07-30T17:30:29Z"
     }
   }
 }

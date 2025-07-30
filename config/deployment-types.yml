@@ -103,9 +103,9 @@ spot:
   # Infrastructure overrides
   infrastructure:
     auto_scaling:
-      min_capacity: 2
-      max_capacity: 10
-      target_utilization: 70  # Lower to handle spot interruptions
+      min_capacity: 1
+      max_capacity: 2
+      target_utilization: 85  # Lower to handle spot interruptions
     
     instance_types:
       preferred: ["g4dn.xlarge", "g5g.xlarge", "g4dn.2xlarge"]
@@ -122,7 +122,7 @@ spot:
       capacity_rebalancing: true
     
     auto_scaling:
-      scale_down_enabled: true
+      scale_down_enabled: false
       scale_down_threshold: 20
       idle_timeout_minutes: 15  # Aggressive scaling for cost savings
       predictive_scaling: true
@@ -145,7 +145,7 @@ spot:
   
   # Resilience configuration for spot interruptions
   resilience:
-    multi_az_deployment: true
+    multi_az_deployment: false
     automatic_failover: true
     data_persistence: true
     graceful_shutdown_timeout: 120  # 2 minutes
@@ -189,9 +189,9 @@ ondemand:
   # Infrastructure overrides
   infrastructure:
     auto_scaling:
-      min_capacity: 2
-      max_capacity: 8
-      target_utilization: 75
+      min_capacity: 1
+      max_capacity: 2
+      target_utilization: 95
     
     instance_types:
       preferred: ["g4dn.xlarge", "g5g.xlarge"]
@@ -271,8 +271,8 @@ ondemand:
   
   # High availability configuration
   availability:
-    multi_az_deployment: true
-    load_balancing: true
+    multi_az_deployment: false
+    load_balancing: false
     health_checks:
       enabled: true
       interval: 15s

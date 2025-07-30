@@ -46,6 +46,102 @@ create_alb_with_target_group() {
     local subnets="$3"
     local security_groups="${4:-}"
     
+    # Check for existing ALB from environment or variable store
+    local existing_alb_arn="${EXISTING_ALB_ARN:-}"
+    if [[ -z "$existing_alb_arn" ]]; then
+        existing_alb_arn=$(get_variable "ALB_LOAD_BALANCER_ARN" "$VARIABLE_SCOPE_STACK")
+    fi
+    
+    if [[ -n "$existing_alb_arn" ]]; then
+        log_info "Using existing ALB: $existing_alb_arn" "ALB"
+        
+        # Validate existing ALB
+        if ! validate_existing_alb "$existing_alb_arn"; then
+            log_error "Existing ALB validation failed: $existing_alb_arn" "ALB"
+            return 1
+        fi
+        
+        # Register existing ALB in resource registry
+        register_resource "load_balancers" "$existing_alb_arn" "existing"
+        
+        # Extract ALB details
+        local alb_info
+        alb_info=$(aws elbv2 describe-load-balancers \
+            --load-balancer-arns "$existing_alb_arn" \
+            --query 'LoadBalancers[0]' \
+            --output json \
+            --region "$AWS_REGION" \
+            --profile "$AWS_PROFILE")
+        
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to get existing ALB information" "ALB"
+            return 1
+        fi
+        
+        local alb_dns_name
+        alb_dns_name=$(echo "$alb_info" | jq -r '.DNSName')
+        local alb_zone_id
+        alb_zone_id=$(echo "$alb_info" | jq -r '.CanonicalHostedZoneId')
+        
+        # Set variables for downstream use
+        set_variable "ALB_ARN" "$existing_alb_arn" "$VARIABLE_SCOPE_STACK"
+        set_variable "ALB_DNS_NAME" "$alb_dns_name" "$VARIABLE_SCOPE_STACK"
+        set_variable "ALB_ZONE_ID" "$alb_zone_id" "$VARIABLE_SCOPE_STACK"
+        
+        log_info "Existing ALB configured successfully: $existing_alb_arn" "ALB"
+        
+        # Check for existing target group from environment or variable store
+        local existing_target_group_arn="${EXISTING_TARGET_GROUP_ARN:-}"
+        if [[ -z "$existing_target_group_arn" ]]; then
+            existing_target_group_arn=$(get_variable "TARGET_GROUP_ARN" "$VARIABLE_SCOPE_STACK")
+        fi
+        
+        if [[ -n "$existing_target_group_arn" ]]; then
+            log_info "Using existing target group: $existing_target_group_arn" "ALB"
+            register_resource "target_groups" "$existing_target_group_arn" "existing"
+        else
+            # Create new target group for existing ALB
+            local target_group_arn
+            target_group_arn=$(create_target_group "$stack_name" "$vpc_id")
+            if [[ $? -ne 0 ]]; then
+                log_error "Failed to create target group" "ALB"
+                return 1
+            fi
+            
+            # Store target group ARN
+            set_variable "TARGET_GROUP_ARN" "$target_group_arn" "$VARIABLE_SCOPE_STACK"
+            register_resource "target_groups" "$target_group_arn" "created"
+        fi
+        
+        # Check for existing listener
+        local existing_listener_arn
+        existing_listener_arn=$(get_variable "LISTENER_ARN" "$VARIABLE_SCOPE_STACK")
+        
+        if [[ -n "$existing_listener_arn" ]]; then
+            log_info "Using existing listener: $existing_listener_arn" "ALB"
+            register_resource "listeners" "$existing_listener_arn" "existing"
+        else
+            # Get target group ARN for listener creation
+            local target_group_arn_for_listener
+            target_group_arn_for_listener=$(get_variable "TARGET_GROUP_ARN" "$VARIABLE_SCOPE_STACK")
+            
+            # Create new listener for existing ALB
+            local listener_arn
+            listener_arn=$(create_listener "$existing_alb_arn" "$target_group_arn_for_listener")
+            if [[ $? -ne 0 ]]; then
+                log_error "Failed to create listener" "ALB"
+                return 1
+            fi
+            
+            # Store listener ARN
+            set_variable "LISTENER_ARN" "$listener_arn" "$VARIABLE_SCOPE_STACK"
+            register_resource "listeners" "$listener_arn" "created"
+        fi
+        
+        return 0
+    fi
+    
+    # Continue with normal ALB creation if no existing ALB
     log_info "Creating ALB with target group for stack: $stack_name" "ALB"
     
     # Generate ALB name
@@ -62,6 +158,7 @@ create_alb_with_target_group() {
     
     # Store ALB ARN
     set_variable "ALB_ARN" "$alb_arn" "$VARIABLE_SCOPE_STACK"
+    register_resource "load_balancers" "$alb_arn" "created"
     
     # Get ALB DNS name
     local alb_dns_name
@@ -82,6 +179,7 @@ create_alb_with_target_group() {
     
     # Store target group ARN
     set_variable "TARGET_GROUP_ARN" "$target_group_arn" "$VARIABLE_SCOPE_STACK"
+    register_resource "target_groups" "$target_group_arn" "created"
     
     # Create listener
     local listener_arn
@@ -96,6 +194,7 @@ create_alb_with_target_group() {
     
     # Store listener ARN
     set_variable "LISTENER_ARN" "$listener_arn" "$VARIABLE_SCOPE_STACK"
+    register_resource "listeners" "$listener_arn" "created"
     
     log_info "ALB creation completed successfully: $alb_arn" "ALB"
     return 0
@@ -745,4 +844,85 @@ wait_for_targets_healthy() {
         log_info "Waiting for targets to be healthy... ($unhealthy_count unhealthy)" "ALB"
         sleep 10
     done
+}
+
+# =============================================================================
+# EXISTING RESOURCE VALIDATION
+# =============================================================================
+
+# Validate existing ALB
+validate_existing_alb() {
+    local alb_arn="$1"
+    
+    log_info "Validating existing ALB: $alb_arn" "ALB"
+    
+    if [[ -z "$alb_arn" ]]; then
+        log_error "ALB ARN is required for validation" "ALB"
+        return 1
+    fi
+    
+    # Check if ALB exists and get its information
+    local alb_info
+    alb_info=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$alb_arn" \
+        --query 'LoadBalancers[0]' \
+        --output json \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>/dev/null)
+    
+    if [[ $? -ne 0 ]] || [[ "$alb_info" == "null" ]] || [[ -z "$alb_info" ]]; then
+        log_error "ALB not found or inaccessible: $alb_arn" "ALB"
+        return 1
+    fi
+    
+    # Validate ALB state
+    local alb_state
+    alb_state=$(echo "$alb_info" | jq -r '.State.Code')
+    if [[ "$alb_state" != "active" ]]; then
+        log_error "ALB is not in active state: $alb_state" "ALB"
+        return 1
+    fi
+    
+    # Validate ALB scheme (optional, could be made configurable)
+    local alb_scheme
+    alb_scheme=$(echo "$alb_info" | jq -r '.Scheme')
+    log_info "ALB scheme: $alb_scheme" "ALB"
+    
+    # Validate ALB type
+    local alb_type
+    alb_type=$(echo "$alb_info" | jq -r '.Type')
+    if [[ "$alb_type" != "application" ]]; then
+        log_error "ALB is not an application load balancer: $alb_type" "ALB"
+        return 1
+    fi
+    
+    # Validate VPC association (if VPC ID is available)
+    local expected_vpc_id
+    expected_vpc_id=$(get_variable "VPC_ID" "$VARIABLE_SCOPE_STACK")
+    if [[ -n "$expected_vpc_id" ]]; then
+        local alb_vpc_id
+        alb_vpc_id=$(echo "$alb_info" | jq -r '.VpcId')
+        if [[ "$alb_vpc_id" != "$expected_vpc_id" ]]; then
+            log_error "ALB is not in the expected VPC. Expected: $expected_vpc_id, Actual: $alb_vpc_id" "ALB"
+            return 1
+        fi
+    fi
+    
+    # Check if ALB has listeners
+    local listener_count
+    listener_count=$(aws elbv2 describe-listeners \
+        --load-balancer-arn "$alb_arn" \
+        --query 'length(Listeners)' \
+        --output text \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" 2>/dev/null)
+    
+    if [[ $? -eq 0 ]] && [[ "$listener_count" -gt 0 ]]; then
+        log_info "ALB has $listener_count existing listener(s)" "ALB"
+    else
+        log_info "ALB has no existing listeners" "ALB"
+    fi
+    
+    log_info "ALB validation successful: $alb_arn" "ALB"
+    return 0
 }

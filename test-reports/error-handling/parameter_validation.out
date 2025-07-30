@@ -1,0 +1,156 @@
+Loaded: Core logging and prerequisites
+Loaded: Error handling and cleanup
+Loaded: Enhanced data structures
+Loaded: AWS configuration management
+Loaded: AWS CLI v2 compatibility
+Initializing deploy.sh with 15 modules...
+Loaded: Core logging and prerequisites
+Loaded: Error handling and cleanup
+Loaded: Enhanced data structures
+Loaded: AWS configuration management
+Loaded: AWS CLI v2 compatibility
+Loaded: Module core/variables
+Loaded: Module core/errors
+Loaded: Module core/logging
+Loaded: Module core/validation
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: health_check_failure (priority: 10)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: deployment_timeout (priority: 20)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: resource_quota (priority: 30)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: cost_threshold (priority: 40)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: validation_failure (priority: 50)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: health_check_failure (priority: 10)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: deployment_timeout (priority: 20)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: resource_quota (priority: 30)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: cost_threshold (priority: 40)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Registered rollback trigger: validation_failure (priority: 50)
+2025-07-30 13:10:39 [INFO] [ROLLBACK] Rollback module initialized
+Loaded: Module deployment/orchestrator
+Loaded: Module deployment/rollback
+Loaded: Module deployment/state
+Loaded: Module infrastructure/vpc
+2025-07-30 13:10:39 [INFO] [COMPUTE] Initializing compute core module
+2025-07-30 13:10:41 [INFO] [COMPUTE] Compute module initialized. Region: us-east-1
+Loaded: Module compute/core
+Loaded: Module infrastructure/alb
+Loaded: Module infrastructure/cloudfront
+Loaded: Module infrastructure/efs
+Loaded: Module infrastructure/security
+Loaded: Module monitoring/health
+Loaded: Module monitoring/metrics
+Successfully initialized deploy.sh
+deploy.sh v2.1.0 - GeuseMaker Deployment Orchestrator
+
+USAGE:
+    deploy.sh [OPTIONS] <stack-name>
+    deploy.sh --type <deployment-type> <stack-name>
+
+DEPLOYMENT TYPES:
+    --type spot                 Cost-optimized deployment with spot instances (70% savings)
+    --type alb                  High-availability deployment with Application Load Balancer
+    --type cdn                  Global deployment with CloudFront CDN (includes ALB)
+    --type full                 Full-featured enterprise deployment (all components)
+
+EXAMPLES:
+    # Interactive deployment type selection
+    deploy.sh my-stack
+
+    # Spot deployment for cost optimization
+    deploy.sh --type spot my-stack
+
+    # ALB deployment for high availability
+    deploy.sh --type alb my-stack
+
+    # CDN deployment for global reach
+    deploy.sh --type cdn my-stack
+
+    # Full enterprise deployment
+    deploy.sh --type full my-stack
+
+    # Custom deployment with specific features
+    deploy.sh --spot --alb --monitoring my-stack
+
+OPTIONS:
+    --stack-name, -s <name>     Stack name (required)
+    --type, -t <type>           Deployment type (spot|alb|cdn|full)
+    --region, -r <region>       AWS region (default: us-east-1)
+    --profile, -p <profile>     AWS profile (default: default)
+    --env, -e <environment>     Environment (default: development)
+    
+    # Quick Deployment Presets
+    --dev                       Development deployment (single AZ, on-demand)
+    --prod                      Production deployment (multi-AZ, spot)
+    --enterprise               Enterprise deployment (all features)
+    
+    # Infrastructure Components (for custom configurations)
+    --alb                      Enable Application Load Balancer
+    --cdn                      Enable CloudFront CDN
+    --efs                      Enable EFS file system
+    --multi-az                 Enable multi-AZ deployment
+    --spot                     Use spot instances for cost optimization
+    --monitoring               Enable enhanced monitoring
+    --backup                   Enable automated backups
+    
+    # Advanced Options
+    --dry-run                  Show what would be deployed without executing
+    --validate                 Validate configuration only
+    --rollback                 Rollback to previous deployment
+    --destroy                  Destroy existing deployment
+    --status                   Show deployment status
+    --logs                     Show deployment logs
+    
+    # Infrastructure Configuration
+    --vpc-cidr <cidr>         VPC CIDR block (default: 10.0.0.0/16)
+    --public-subnets <list>   Comma-separated list of public subnet CIDRs
+    --private-subnets <list>  Comma-separated list of private subnet CIDRs
+    --instance-type <type>    EC2 instance type (default: t3.micro)
+    --min-capacity <num>      Minimum capacity for auto scaling (default: 1)
+    --max-capacity <num>      Maximum capacity for auto scaling (default: 3)
+    --efs-encryption          Enable EFS encryption (default: true)
+    --alb-internal            Create internal ALB (default: false)
+    --cloudfront-price-class <class> CloudFront price class (default: PriceClass_100)
+    
+    --help, -h                 Show this help message
+    --version, -v              Show version information
+
+DEPLOYMENT TYPE DETAILS:
+    spot:  • Spot instances (70% cost savings)
+           • EFS file system for shared storage
+           • Auto-scaling enabled
+           • Single AZ deployment
+           • Best for: Cost-sensitive workloads, batch processing
+           
+    alb:   • Application Load Balancer
+           • Spot instances for cost optimization
+           • CloudFront CDN for global delivery
+           • EFS file system for shared storage
+           • Single AZ deployment
+           • Health checks and monitoring
+           • Best for: High-availability production workloads
+           
+    cdn:   • CloudFront CDN (includes ALB)
+           • EFS file system for shared storage
+           • Global edge locations
+           • Single AZ deployment
+           • Caching and optimization
+           • Best for: Global applications, static content
+           
+    full:  • All features enabled
+           • Spot instances + ALB + CDN + EFS
+           • Single AZ deployment
+           • Enterprise monitoring and backup
+           • Best for: Mission-critical enterprise applications
+
+ENVIRONMENT VARIABLES:
+    AWS_DEFAULT_REGION         Default AWS region
+    AWS_PROFILE               Default AWS profile
+    DEPLOYMENT_ENVIRONMENT    Default deployment environment
+    LOG_LEVEL                Logging level (DEBUG, INFO, WARN, ERROR)
+
+EXIT CODES:
+    0  - Success
+    1  - General error
+    2  - Configuration error
+    3  - AWS API error
+    4  - Validation error
+    5  - Rollback error
+

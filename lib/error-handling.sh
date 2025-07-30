@@ -20,13 +20,28 @@ fi
 
 # Color definitions - use parameter expansion to avoid conflicts
 # These will be overridden by aws-deployment-common.sh if it's sourced later
-RED="${RED:-\033[0;31m}"
-GREEN="${GREEN:-\033[0;32m}"
-YELLOW="${YELLOW:-\033[0;33m}"
-BLUE="${BLUE:-\033[0;34m}"
-PURPLE="${PURPLE:-\033[0;35m}"
-CYAN="${CYAN:-\033[0;36m}"
-NC="${NC:-\033[0m}"
+# Check if variables are already readonly before setting
+if ! readonly -p RED >/dev/null 2>&1; then
+    RED="${RED:-\033[0;31m}"
+fi
+if ! readonly -p GREEN >/dev/null 2>&1; then
+    GREEN="${GREEN:-\033[0;32m}"
+fi
+if ! readonly -p YELLOW >/dev/null 2>&1; then
+    YELLOW="${YELLOW:-\033[0;33m}"
+fi
+if ! readonly -p BLUE >/dev/null 2>&1; then
+    BLUE="${BLUE:-\033[0;34m}"
+fi
+if ! readonly -p PURPLE >/dev/null 2>&1; then
+    PURPLE="${PURPLE:-\033[0;35m}"
+fi
+if ! readonly -p CYAN >/dev/null 2>&1; then
+    CYAN="${CYAN:-\033[0;36m}"
+fi
+if ! readonly -p NC >/dev/null 2>&1; then
+    NC="${NC:-\033[0m}"
+fi
 
 # =============================================================================
 # ERROR HANDLING CONFIGURATION
@@ -34,10 +49,16 @@ NC="${NC:-\033[0m}"
 
 # Error handling modes (only define if not already set)
 if [[ -z "${ERROR_HANDLING_MODES_DEFINED:-}" ]]; then
-    readonly ERROR_MODE_STRICT="strict"        # Exit on any error
-    readonly ERROR_MODE_RESILIENT="resilient"  # Continue with warnings
-    readonly ERROR_MODE_INTERACTIVE="interactive" # Prompt user on errors
-    readonly ERROR_HANDLING_MODES_DEFINED=true
+    ERROR_MODE_STRICT="strict"        # Exit on any error
+    ERROR_MODE_RESILIENT="resilient"  # Continue with warnings
+    ERROR_MODE_INTERACTIVE="interactive" # Prompt user on errors
+    ERROR_HANDLING_MODES_DEFINED=true
+    
+    # Make them readonly only if not already defined
+    readonly ERROR_MODE_STRICT
+    readonly ERROR_MODE_RESILIENT
+    readonly ERROR_MODE_INTERACTIVE
+    readonly ERROR_HANDLING_MODES_DEFINED
 fi
 
 # Enhanced error types - compatible with bash 3.x+
@@ -125,10 +146,10 @@ ERROR_HISTORY=()
 
 # Error metadata tracking (bash 3.x compatible)
 if [[ -z "${ERROR_METADATA_INITIALIZED:-}" ]]; then
-    ERROR_METADATA=()
-    ERROR_TIMESTAMPS=()
-    ERROR_LOCATIONS=()
-    ERROR_RECOVERY_ATTEMPTS=()
+    declare -gA ERROR_METADATA=()
+    declare -gA ERROR_TIMESTAMPS=()
+    declare -gA ERROR_LOCATIONS=()
+    declare -gA ERROR_RECOVERY_ATTEMPTS=()
     export ERROR_METADATA_INITIALIZED=true
 fi
 
@@ -484,7 +505,8 @@ log_error() {
     
     local timestamp error_id caller_info
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    error_id="${SESSION_ID}_$(printf '%04d' $ERROR_COUNT)"
+    # Use a simpler error ID format to avoid bash array key issues
+    error_id="ERR$(printf '%04d' $ERROR_COUNT)"
     caller_info=$(get_caller_info)
     
     # Store error metadata - ensure arrays are initialized

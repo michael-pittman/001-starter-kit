@@ -80,6 +80,7 @@ ERROR_NETWORK_DNS=602
 ERROR_NETWORK_FIREWALL=603
 ERROR_NETWORK_VPC_NOT_FOUND=604
 ERROR_NETWORK_SECURITY_GROUP_INVALID=605
+ERROR_VPC_LIMIT_EXCEEDED=606
 
 # =============================================================================
 # ERROR SEVERITY AND RECOVERY
@@ -249,6 +250,7 @@ get_error_message() {
         "$ERROR_NETWORK_FIREWALL") echo "Firewall blocked connection" ;;
         "$ERROR_NETWORK_VPC_NOT_FOUND") echo "VPC not found" ;;
         "$ERROR_NETWORK_SECURITY_GROUP_INVALID") echo "Invalid security group" ;;
+        "$ERROR_VPC_LIMIT_EXCEEDED") echo "VPC limit exceeded" ;;
         
         *) echo "Unknown error" ;;
     esac
@@ -451,7 +453,7 @@ get_default_recovery_strategy() {
             echo "$RECOVERY_SKIP"
             ;;
         # Manual intervention required
-        $ERROR_AWS_CREDENTIALS|$ERROR_AWS_PERMISSION|$ERROR_PERMISSION_DENIED|$ERROR_EC2_INSTANCE_LIMIT_EXCEEDED)
+        $ERROR_AWS_CREDENTIALS|$ERROR_AWS_PERMISSION|$ERROR_PERMISSION_DENIED|$ERROR_EC2_INSTANCE_LIMIT_EXCEEDED|$ERROR_VPC_LIMIT_EXCEEDED)
             echo "$RECOVERY_MANUAL"
             ;;
         # Default to abort
@@ -722,6 +724,18 @@ error_network_security_group_invalid() {
             "$ERROR_CAT_NETWORK" \
             "$ERROR_SEVERITY_ERROR" \
             "$RECOVERY_RETRY"
+}
+
+error_vpc_limit_exceeded() {
+    local region="$1"
+    local context="Region: $region"
+    
+    with_error_context "$context" \
+        throw_error "$ERROR_VPC_LIMIT_EXCEEDED" \
+            "VPC limit exceeded in region $region" \
+            "$ERROR_CAT_NETWORK" \
+            "$ERROR_SEVERITY_ERROR" \
+            "$RECOVERY_MANUAL"
 }
 
 # Authentication/Authorization Errors
@@ -1066,19 +1080,19 @@ trigger_rollback() {
     
     # Set rollback state
     if command -v set_deployment_state >/dev/null 2>&1; then
-        set_deployment_state "ROLLING_BACK"
+        set_deployment_state "$stack_name" "ROLLING_BACK"
     fi
     
     # Execute rollback
     if perform_rollback "$stack_name" "$region"; then
         log_info "Rollback completed successfully" "ROLLBACK"
         if command -v set_deployment_state >/dev/null 2>&1; then
-            set_deployment_state "ROLLED_BACK"
+            set_deployment_state "$stack_name" "ROLLED_BACK"
         fi
     else
         log_error "Rollback failed" "ROLLBACK"
         if command -v set_deployment_state >/dev/null 2>&1; then
-            set_deployment_state "ROLLBACK_FAILED"
+            set_deployment_state "$stack_name" "ROLLBACK_FAILED"
         fi
         return 1
     fi

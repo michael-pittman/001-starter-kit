@@ -39,6 +39,13 @@ _create_security_group_impl() {
         throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for security group creation"
     fi
     
+    # Validate VPC ID format (should be vpc-xxxxxxxx)
+    if ! [[ "$vpc_id" =~ ^vpc-[a-f0-9]+$ ]]; then
+        echo "ERROR: Invalid VPC ID format: '$vpc_id'" >&2
+        echo "VPC ID should match pattern: vpc-xxxxxxxx" >&2
+        throw_error $ERROR_INVALID_ARGUMENT "Invalid VPC ID format"
+    fi
+    
     if [ -z "$stack_name" ]; then
         throw_error $ERROR_INVALID_ARGUMENT "Stack name is required for security group creation"
     fi
@@ -57,14 +64,24 @@ _create_security_group_impl() {
     
     # Create security group
     local sg_id
+    # Generate tags separately to ensure clean JSON
+    local tags_json
+    tags_json=$(generate_tags "$stack_name")
+    local tag_spec
+    tag_spec=$(tags_to_tag_spec "$tags_json" "security-group")
+    
     sg_id=$(aws ec2 create-security-group \
         --group-name "${stack_name}-sg" \
         --description "$description" \
         --vpc-id "$vpc_id" \
-        --tag-specifications "$(tags_to_tag_spec "$(generate_tags "$stack_name")" "security-group")" \
+        --tag-specifications "$tag_spec" \
         --query 'GroupId' \
         --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create security group"
+        local exit_code=$?
+        echo "Failed to create security group for stack: $stack_name" >&2
+        echo "VPC ID: $vpc_id" >&2
+        echo "Tag spec: $tag_spec" >&2
+        throw_error $ERROR_AWS_API_ERROR "Failed to create security group (exit code: $exit_code)"
     }
     
     # Configure standard rules
@@ -98,6 +115,13 @@ _create_alb_security_group_impl() {
         throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for ALB security group creation"
     fi
     
+    # Validate VPC ID format (should be vpc-xxxxxxxx)
+    if ! [[ "$vpc_id" =~ ^vpc-[a-f0-9]+$ ]]; then
+        echo "ERROR: Invalid VPC ID format: '$vpc_id'" >&2
+        echo "VPC ID should match pattern: vpc-xxxxxxxx" >&2
+        throw_error $ERROR_INVALID_ARGUMENT "Invalid VPC ID format"
+    fi
+    
     echo "Creating ALB security group" >&2
     
     # Check if ALB security group already exists
@@ -116,14 +140,24 @@ _create_alb_security_group_impl() {
     
     # Create ALB security group
     local sg_id
+    # Generate tags separately to ensure clean JSON
+    local tags_json
+    tags_json=$(generate_tags "$stack_name" '{"Purpose": "ALB"}')
+    local tag_spec
+    tag_spec=$(tags_to_tag_spec "$tags_json" "security-group")
+    
     sg_id=$(aws ec2 create-security-group \
         --group-name "${stack_name}-alb-sg" \
         --description "Load balancer security group for $stack_name" \
         --vpc-id "$vpc_id" \
-        --tag-specifications "$(tags_to_tag_spec "$(generate_tags "$stack_name" "{\"Purpose\": \"ALB\"}")" "security-group")" \
+        --tag-specifications "$tag_spec" \
         --query 'GroupId' \
         --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create ALB security group"
+        local exit_code=$?
+        echo "Failed to create ALB security group for stack: $stack_name" >&2
+        echo "VPC ID: $vpc_id" >&2
+        echo "Tag spec: $tag_spec" >&2
+        throw_error $ERROR_AWS_API_ERROR "Failed to create ALB security group (exit code: $exit_code)"
     }
     
     # Configure ALB rules
@@ -155,6 +189,13 @@ _create_efs_security_group_impl() {
         throw_error $ERROR_INVALID_ARGUMENT "VPC ID is required for EFS security group creation"
     fi
     
+    # Validate VPC ID format (should be vpc-xxxxxxxx)
+    if ! [[ "$vpc_id" =~ ^vpc-[a-f0-9]+$ ]]; then
+        echo "ERROR: Invalid VPC ID format: '$vpc_id'" >&2
+        echo "VPC ID should match pattern: vpc-xxxxxxxx" >&2
+        throw_error $ERROR_INVALID_ARGUMENT "Invalid VPC ID format"
+    fi
+    
     if [ -z "$ec2_sg_id" ] || [ "$ec2_sg_id" = "None" ] || [ "$ec2_sg_id" = "null" ]; then
         throw_error $ERROR_INVALID_ARGUMENT "EC2 security group ID is required for EFS security group creation"
     fi
@@ -177,14 +218,24 @@ _create_efs_security_group_impl() {
     
     # Create EFS security group
     local sg_id
+    # Generate tags separately to ensure clean JSON
+    local tags_json
+    tags_json=$(generate_tags "$stack_name" '{"Purpose": "EFS"}')
+    local tag_spec
+    tag_spec=$(tags_to_tag_spec "$tags_json" "security-group")
+    
     sg_id=$(aws ec2 create-security-group \
         --group-name "${stack_name}-efs-sg" \
         --description "EFS security group for $stack_name" \
         --vpc-id "$vpc_id" \
-        --tag-specifications "$(tags_to_tag_spec "$(generate_tags "$stack_name" "{\"Purpose\": \"EFS\"}")" "security-group")" \
+        --tag-specifications "$tag_spec" \
         --query 'GroupId' \
         --output text) || {
-        throw_error $ERROR_AWS_API "Failed to create EFS security group"
+        local exit_code=$?
+        echo "Failed to create EFS security group for stack: $stack_name" >&2
+        echo "VPC ID: $vpc_id" >&2  
+        echo "Tag spec: $tag_spec" >&2
+        throw_error $ERROR_AWS_API_ERROR "Failed to create EFS security group (exit code: $exit_code)"
     }
     
     # Configure EFS rules - allow NFS from EC2 security group
@@ -440,12 +491,18 @@ create_key_pair() {
     mkdir -p "$key_dir"
     
     # Create key pair
+    # Generate tags separately to ensure clean JSON
+    local tags_json
+    tags_json=$(generate_tags "${STACK_NAME:-default}")
+    local tag_spec
+    tag_spec=$(tags_to_tag_spec "$tags_json" "key-pair")
+    
     aws ec2 create-key-pair \
         --key-name "$key_name" \
-        --tag-specifications "$(tags_to_tag_spec "$(generate_tags "${STACK_NAME:-default}")" "key-pair")" \
+        --tag-specifications "$tag_spec" \
         --query 'KeyMaterial' \
         --output text > "$key_file" || {
-        throw_error $ERROR_AWS_API "Failed to create key pair"
+        throw_error $ERROR_AWS_API_ERROR "Failed to create key pair"
     }
     
     # Set permissions
@@ -474,7 +531,7 @@ import_key_pair() {
     aws ec2 import-key-pair \
         --key-name "$key_name" \
         --public-key-material "$public_key" || {
-        throw_error $ERROR_AWS_API "Failed to import key pair"
+        throw_error $ERROR_AWS_API_ERROR "Failed to import key pair"
     }
     
     # Register key pair
@@ -529,7 +586,7 @@ EOF
         --role-name "$role_name" \
         --assume-role-policy-document "$trust_policy" \
         --tags $(tags_to_iam_format "$(generate_tags "$stack_name")") || {
-        throw_error $ERROR_AWS_API "Failed to create IAM role"
+        throw_error $ERROR_AWS_API_ERROR "Failed to create IAM role"
     }
     
     # Attach policies
@@ -846,7 +903,7 @@ create_standard_security_group() {
             --query 'GroupId' \
             --output text \
             --region "${AWS_REGION:-us-east-1}") || {
-            throw_error $ERROR_AWS_API "Failed to create security group: $sg_name"
+            throw_error $ERROR_AWS_API_ERROR "Failed to create security group: $sg_name"
         }
         
         # Standard ports for GeuseMaker

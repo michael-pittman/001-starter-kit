@@ -13,7 +13,9 @@ _DEPLOYMENT_STATE_SH_LOADED=1
 # =============================================================================
 
 # State file configuration
-STATE_FILE_DIR="${CONFIG_DIR:-./config}/state"
+# Ensure CONFIG_DIR has a default value
+CONFIG_DIR="${CONFIG_DIR:-${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../" && pwd)}/config}"
+STATE_FILE_DIR="${CONFIG_DIR}/state"
 STATE_FILE="${STATE_FILE_DIR}/deployment-state.json"
 STATE_BACKUP_DIR="${STATE_FILE_DIR}/backups"
 

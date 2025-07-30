@@ -39,7 +39,7 @@ load_maintenance_library() {
 
 # Load core dependencies
 load_maintenance_library "modules/core/logging.sh" || exit 1
-load_maintenance_library "modules/errors/error_types.sh" || exit 1
+load_maintenance_library "modules/core/errors.sh" || exit 1
 load_maintenance_library "error-handling.sh" || exit 1
 load_maintenance_library "modules/core/variables.sh" || exit 1
 load_maintenance_library "aws-deployment-common.sh" || exit 1

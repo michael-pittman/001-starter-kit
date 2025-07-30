@@ -1,0 +1,15 @@
+[0;31m[ERROR] Error 250: Insufficient capacity for instance type t3.micro in region us-east-1[0m
+[0;31m        Context: ERROR_HANDLING[0m
+[0;31m[ERROR][0m [250] Insufficient capacity for instance type t3.micro in region us-east-1
+[0;31m  Context:[0m Instance type: t3.micro, Region: us-east-1
+[0;31m  Recovery:[0m fallback
+[0;31m[ERROR] Error 604: VPC not found: vpc-12345[0m
+[0;31m        Context: ERROR_HANDLING[0m
+[0;31m[ERROR][0m [604] VPC not found: vpc-12345
+[0;31m  Context:[0m VPC ID: vpc-12345
+[0;31m  Recovery:[0m fallback
+[0;31m[ERROR] Error 200: Invalid AWS credentials for EC2[0m
+[0;31m        Context: ERROR_HANDLING[0m
+[CRITICAL][0m [200] Invalid AWS credentials for EC2
+  Context:[0m Service: EC2
+  Recovery:[0m manual

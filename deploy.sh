@@ -120,6 +120,7 @@ OPTIONS:
     --type, -t <type>           Deployment type (spot|alb|cdn|full)
     --region, -r <region>       AWS region (default: us-east-1)
     --profile, -p <profile>     AWS profile (default: default)
+    --env, -e <environment>     Environment (default: development)
     
     # Quick Deployment Presets
     --dev                       Development deployment (single AZ, on-demand)
@@ -233,7 +234,7 @@ REQUIRED_MODULES=(
     
     # Infrastructure modules
     "infrastructure/vpc"
-    "infrastructure/compute"
+    "compute/core"
     "infrastructure/alb"
     "infrastructure/cloudfront"
     "infrastructure/efs"
@@ -335,6 +336,7 @@ OPTIONS:
     --type, -t <type>           Deployment type (spot|alb|cdn|full)
     --region, -r <region>       AWS region (default: us-east-1)
     --profile, -p <profile>     AWS profile (default: default)
+    --env, -e <environment>     Environment (default: development)
     
     # Quick Deployment Presets
     --dev                       Development deployment (single AZ, on-demand)
@@ -558,6 +560,7 @@ parse_arguments() {
     AWS_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
     AWS_PROFILE="${AWS_PROFILE:-default}"
     DEPLOYMENT_TYPE=""
+    ENVIRONMENT="${DEPLOYMENT_ENVIRONMENT:-development}"
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -594,6 +597,12 @@ parse_arguments() {
                 ;;
             --profile|-p)
                 AWS_PROFILE="$2"
+                shift 2
+                ;;
+            
+            # Environment
+            --env|-e)
+                ENVIRONMENT="$2"
                 shift 2
                 ;;
             
@@ -930,10 +939,10 @@ initialize_deployment() {
     fi
     
     # Load environment configuration
-    if ! load_environment_config "${DEPLOYMENT_TYPE}"; then
+    if ! load_environment_config "${ENVIRONMENT}"; then
         handle_deployment_error "LOAD_CONFIG_FAILED" \
             "Failed to load environment configuration" \
-            "deployment_type=$DEPLOYMENT_TYPE" \
+            "environment=$ENVIRONMENT" \
             "abort"
     fi
     
@@ -1085,6 +1094,26 @@ validate_feature_compatibility() {
 }
 
 # =============================================================================
+# EXISTING RESOURCES SETUP
+# =============================================================================
+
+# Setup existing resources if configured
+setup_existing_resources_for_deployment() {
+    log_info "Setting up existing resources for deployment"
+    
+    # Load existing resources module
+    source "${LIB_DIR}/modules/infrastructure/existing-resources.sh"
+    
+    # Setup existing resources
+    if ! setup_existing_resources "${STACK_NAME}" "${ENVIRONMENT}"; then
+        log_error "Failed to setup existing resources"
+        return 1
+    fi
+    
+    return 0
+}
+
+# =============================================================================
 # DEPLOYMENT OPERATIONS
 # =============================================================================
 
@@ -1092,7 +1121,7 @@ execute_deployment() {
     log_info "Starting deployment execution"
     
     # Set deployment state
-    set_deployment_state "IN_PROGRESS"
+    set_deployment_state "${STACK_NAME}" "IN_PROGRESS"
     
     # Execute deployment based on mode
     if [[ "${DESTROY_MODE:-false}" == true ]]; then
@@ -1118,16 +1147,56 @@ execute_create_deployment() {
     
     # Pre-deployment checks with error handling
     log_info "Performing pre-deployment checks"
-    if ! check_existing_deployment "${STACK_NAME}" "${AWS_REGION}" || true; then
+    if ! check_existing_deployment "${STACK_NAME}" "${AWS_REGION}"; then
         local existing_stack
         existing_stack=$(get_existing_stack_status "${STACK_NAME}" "${AWS_REGION}")
         if [[ -n "$existing_stack" ]]; then
-            handle_deployment_error "STACK_EXISTS" \
-                "Stack already exists: $STACK_NAME" \
-                "existing_status=$existing_stack" \
-                "abort"
+            # Check if we're in dev/staging environment and auto-cleanup is enabled
+            if [[ "${ENVIRONMENT,,}" == "development" ]] || [[ "${ENVIRONMENT,,}" == "dev" ]] || [[ "${ENVIRONMENT,,}" == "staging" ]]; then
+                log_warn "Stack already exists in ${ENVIRONMENT} environment: $STACK_NAME"
+                log_info "Automatically cleaning up existing stack for redeployment"
+                
+                # Auto cleanup the existing stack
+                auto_cleanup_existing_stack "${STACK_NAME}" "${AWS_REGION}" "${ENVIRONMENT}"
+                
+                # Check if stack still exists in deployment state
+                if stack_state_exists "${STACK_NAME}"; then
+                    log_info "Removing stack from deployment state: ${STACK_NAME}"
+                    delete_stack_state "${STACK_NAME}"
+                fi
+                
+                # Small delay to ensure cleanup completes
+                sleep 5
+                
+                # Verify cleanup was successful
+                existing_stack=$(get_existing_stack_status "${STACK_NAME}" "${AWS_REGION}")
+                if [[ -n "$existing_stack" ]]; then
+                    handle_deployment_error "CLEANUP_FAILED" \
+                        "Failed to auto-cleanup existing stack: $STACK_NAME" \
+                        "existing_status=$existing_stack" \
+                        "abort"
+                fi
+                log_info "Auto-cleanup completed successfully, proceeding with deployment"
+            else
+                # In production, abort deployment
+                handle_deployment_error "STACK_EXISTS" \
+                    "Stack already exists in ${ENVIRONMENT} environment: $STACK_NAME" \
+                    "existing_status=$existing_stack,environment=${ENVIRONMENT}" \
+                    "abort"
+            fi
         fi
     fi
+    
+    # Setup existing resources before infrastructure creation
+    deployment_phase="existing_resources_setup"
+    log_info "Setting up existing resources"
+    if ! setup_existing_resources_for_deployment; then
+        handle_deployment_error "EXISTING_RESOURCES_SETUP_FAILED" \
+            "Failed to setup existing resources" \
+            "phase=$deployment_phase,stack=$STACK_NAME" \
+            "rollback"
+    fi
+    add_rollback_point "existing_resources_setup" "timestamp=$(date +%s)"
     
     # Create infrastructure components with error handling and rollback points
     deployment_phase="vpc_creation"
@@ -1235,7 +1304,7 @@ execute_destroy() {
     log_info "Destroying deployment: $STACK_NAME"
     
     # Set deployment state
-    set_deployment_state "DESTROYING"
+    set_deployment_state "${STACK_NAME}" "DESTROYING"
     
     local destroy_errors=0
     
@@ -1313,7 +1382,7 @@ execute_rollback() {
     log_info "Rolling back deployment: $STACK_NAME"
     
     # Set deployment state
-    set_deployment_state "ROLLING_BACK"
+    set_deployment_state "${STACK_NAME}" "ROLLING_BACK"
     
     # Execute rollback
     perform_rollback "${STACK_NAME}" "${AWS_REGION}"
@@ -2324,12 +2393,12 @@ finalize_deployment() {
     
     if [ $validation_errors -gt 0 ]; then
         log_error "Deployment validation failed with $validation_errors errors"
-        set_deployment_state "FAILED"
+        set_deployment_state "${STACK_NAME}" "FAILED"
         return 1
     fi
     
     # Update deployment state
-    set_deployment_state "COMPLETED"
+    set_deployment_state "${STACK_NAME}" "COMPLETED"
     
     # Generate deployment summary
     if ! generate_deployment_summary; then
@@ -2517,7 +2586,7 @@ execute_deployment_rollback() {
     log_error "Executing deployment rollback"
     
     # Set deployment state
-    set_deployment_state "ROLLING_BACK"
+    set_deployment_state "${STACK_NAME}" "ROLLING_BACK"
     
     # Process rollback points in reverse order
     local rollback_count=${#DEPLOYMENT_ROLLBACK_POINTS[@]}
@@ -2567,7 +2636,7 @@ execute_emergency_cleanup() {
     log_error "Executing emergency cleanup"
     
     # Set deployment state
-    set_deployment_state "CLEANING_UP"
+    set_deployment_state "${STACK_NAME}" "CLEANING_UP"
     
     # Clean up all registered resources
     for resource in "${CREATED_RESOURCES[@]}"; do
@@ -2738,6 +2807,189 @@ get_existing_stack_status() {
     
     echo ""
     return 1
+}
+
+# Auto cleanup existing stack in dev environments
+auto_cleanup_existing_stack() {
+    local stack_name="$1"
+    local region="$2"
+    local environment="${3:-}"
+    
+    # Safety check: Only allow auto-cleanup in non-production environments
+    if [[ "${environment,,}" != "development" ]] && [[ "${environment,,}" != "dev" ]] && [[ "${environment,,}" != "staging" ]]; then
+        log_error "Auto-cleanup is not allowed in production environments"
+        log_error "Environment: $environment"
+        log_error "To clean up production stacks, use manual cleanup commands"
+        return 1
+    fi
+    
+    log_info "Auto-cleaning existing stack: $stack_name in $environment environment"
+    
+    # Clean up deployment state
+    if stack_state_exists "$stack_name"; then
+        log_info "Removing stack from deployment state: $stack_name"
+        delete_stack_state "$stack_name"
+    fi
+    
+    # Clean up AWS resources
+    local vpc_id
+    vpc_id=$(aws ec2 describe-vpcs \
+        --filters "Name=tag:Stack,Values=$stack_name" \
+        --region "$region" \
+        --query 'Vpcs[0].VpcId' \
+        --output text 2>/dev/null || echo "")
+    
+    if [[ -n "$vpc_id" ]] && [[ "$vpc_id" != "None" ]]; then
+        log_info "Found existing VPC for stack: $vpc_id"
+        
+        # Get EC2 instances
+        local instance_ids
+        instance_ids=$(aws ec2 describe-instances \
+            --filters "Name=vpc-id,Values=$vpc_id" "Name=instance-state-name,Values=running,stopped,stopping,pending" \
+            --region "$region" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text 2>/dev/null || echo "")
+        
+        # Terminate instances
+        if [[ -n "$instance_ids" ]]; then
+            log_info "Terminating instances: $instance_ids"
+            aws ec2 terminate-instances --instance-ids $instance_ids --region "$region" 2>/dev/null || true
+            
+            # Wait for instances to terminate
+            log_info "Waiting for instances to terminate..."
+            aws ec2 wait instance-terminated --instance-ids $instance_ids --region "$region" 2>/dev/null || true
+        fi
+        
+        # Delete ALB resources if they exist
+        local alb_arns
+        alb_arns=$(aws elbv2 describe-load-balancers \
+            --region "$region" \
+            --query "LoadBalancers[?VpcId=='$vpc_id'].LoadBalancerArn" \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$alb_arns" ]] && [[ "$alb_arns" != "None" ]]; then
+            for alb_arn in $alb_arns; do
+                log_info "Deleting ALB: $alb_arn"
+                
+                # Delete listeners first
+                local listener_arns
+                listener_arns=$(aws elbv2 describe-listeners \
+                    --load-balancer-arn "$alb_arn" \
+                    --region "$region" \
+                    --query 'Listeners[].ListenerArn' \
+                    --output text 2>/dev/null || echo "")
+                
+                if [[ -n "$listener_arns" ]]; then
+                    for listener_arn in $listener_arns; do
+                        aws elbv2 delete-listener --listener-arn "$listener_arn" --region "$region" 2>/dev/null || true
+                    done
+                fi
+                
+                # Delete ALB
+                aws elbv2 delete-load-balancer --load-balancer-arn "$alb_arn" --region "$region" 2>/dev/null || true
+            done
+            
+            # Wait for ALBs to be deleted
+            sleep 10
+        fi
+        
+        # Delete target groups
+        local target_group_arns
+        target_group_arns=$(aws elbv2 describe-target-groups \
+            --region "$region" \
+            --query "TargetGroups[?VpcId=='$vpc_id'].TargetGroupArn" \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$target_group_arns" ]] && [[ "$target_group_arns" != "None" ]]; then
+            for tg_arn in $target_group_arns; do
+                log_info "Deleting target group: $tg_arn"
+                aws elbv2 delete-target-group --target-group-arn "$tg_arn" --region "$region" 2>/dev/null || true
+            done
+        fi
+        
+        # Delete security groups (except default)
+        local sg_ids
+        sg_ids=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --region "$region" \
+            --query "SecurityGroups[?GroupName!='default'].GroupId" \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$sg_ids" ]]; then
+            for sg_id in $sg_ids; do
+                log_info "Deleting security group: $sg_id"
+                aws ec2 delete-security-group --group-id "$sg_id" --region "$region" 2>/dev/null || true
+            done
+        fi
+        
+        # Delete subnets
+        local subnet_ids
+        subnet_ids=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --region "$region" \
+            --query 'Subnets[].SubnetId' \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$subnet_ids" ]]; then
+            for subnet_id in $subnet_ids; do
+                log_info "Deleting subnet: $subnet_id"
+                aws ec2 delete-subnet --subnet-id "$subnet_id" --region "$region" 2>/dev/null || true
+            done
+        fi
+        
+        # Delete route tables (except main)
+        local rt_ids
+        rt_ids=$(aws ec2 describe-route-tables \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --region "$region" \
+            --query "RouteTables[?Associations[0].Main!=\`true\`].RouteTableId" \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$rt_ids" ]]; then
+            for rt_id in $rt_ids; do
+                log_info "Deleting route table: $rt_id"
+                aws ec2 delete-route-table --route-table-id "$rt_id" --region "$region" 2>/dev/null || true
+            done
+        fi
+        
+        # Detach and delete internet gateway
+        local igw_id
+        igw_id=$(aws ec2 describe-internet-gateways \
+            --filters "Name=attachment.vpc-id,Values=$vpc_id" \
+            --region "$region" \
+            --query 'InternetGateways[0].InternetGatewayId' \
+            --output text 2>/dev/null || echo "")
+        
+        if [[ -n "$igw_id" ]] && [[ "$igw_id" != "None" ]]; then
+            log_info "Detaching and deleting internet gateway: $igw_id"
+            aws ec2 detach-internet-gateway --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" --region "$region" 2>/dev/null || true
+            aws ec2 delete-internet-gateway --internet-gateway-id "$igw_id" --region "$region" 2>/dev/null || true
+        fi
+        
+        # Delete VPC
+        log_info "Deleting VPC: $vpc_id"
+        aws ec2 delete-vpc --vpc-id "$vpc_id" --region "$region" 2>/dev/null || true
+    fi
+    
+    log_info "Auto cleanup completed for stack: $stack_name"
+}
+
+# Check if deployment already exists
+check_existing_deployment() {
+    local stack_name="$1"
+    local region="$2"
+    
+    # Use get_existing_stack_status to check if stack exists
+    local stack_status
+    stack_status=$(get_existing_stack_status "$stack_name" "$region")
+    
+    # Return 0 if stack doesn't exist (safe to proceed)
+    # Return 1 if stack exists (should not proceed)
+    if [[ -z "$stack_status" ]]; then
+        return 0  # Stack doesn't exist, safe to proceed
+    else
+        return 1  # Stack exists, should not proceed
+    fi
 }
 
 # Error handler for script errors
