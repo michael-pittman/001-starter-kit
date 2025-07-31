@@ -41,6 +41,7 @@ safe_source "deployment-validation.sh" false "Deployment validation"
 safe_source "error-recovery.sh" false "Error recovery"
 safe_source "aws-quota-checker.sh" false "AWS quota checker"
 safe_source "deployment-health.sh" false "Deployment health"
+safe_source "deployment-variable-management.sh" false "Deployment variable management"
 
 # Load monitoring integration
 if safe_source "modules/monitoring/integration.sh" false "Monitoring integration"; then
@@ -84,6 +85,14 @@ if ! declare -f handle_error >/dev/null 2>&1; then
         local error_msg="${2:-Unknown error}"
         echo "ERROR: $error_msg (exit code: $exit_code)" >&2
         return "$exit_code"
+    }
+fi
+
+# Initialize variable store and load environment configuration
+# Note: We'll use dynamic initialization after parsing arguments to know deployment type
+if declare -f init_variable_store >/dev/null 2>&1; then
+    init_variable_store || {
+        echo "WARNING: Failed to initialize variable store" >&2
     }
 fi
 
@@ -1019,6 +1028,19 @@ validate_required_variables() {
 main() {
     # Parse arguments
     parse_arguments "$@"
+    
+    # Initialize dynamic variables after parsing arguments
+    if declare -f init_dynamic_variables >/dev/null 2>&1; then
+        local deployment_type="$(get_variable DEPLOYMENT_TYPE 2>/dev/null || echo "spot")"
+        local stack_name="$(get_variable STACK_NAME 2>/dev/null || echo "")"
+        
+        echo "🔧 Initializing dynamic variables for $deployment_type deployment..."
+        if init_dynamic_variables "$stack_name" "$deployment_type" "true"; then
+            echo "✅ Dynamic variables initialized successfully"
+        else
+            echo "⚠️  Dynamic variable initialization failed, using defaults"
+        fi
+    fi
     
     # Validate required variables
     validate_required_variables || {

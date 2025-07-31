@@ -29,6 +29,22 @@ for lib in "${OPTIONAL_LIBS[@]}"; do
     load_optional_library "$lib" || true
 done
 
+# Load deployment variable management
+if load_optional_library "deployment-variable-management.sh"; then
+    # Initialize variable store and load environment configuration
+    if declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store || {
+            echo "WARNING: Failed to initialize variable store" >&2
+        }
+    fi
+
+    if declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config || {
+            echo "WARNING: Failed to load environment configuration" >&2
+        }
+    fi
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

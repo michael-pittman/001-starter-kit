@@ -8,10 +8,65 @@
 global:
   project_name: GeuseMaker
   region: us-east-1
+  default_region: us-east-1
+  profile: default
   default_tags:
     Project: GeuseMaker
     ManagedBy: "aws-deployment-scripts"
     CreatedBy: "config-management"
+
+# =============================================================================
+# CORE DEPLOYMENT VARIABLES
+# =============================================================================
+deployment_variables:
+  # AWS Configuration
+  aws_region: us-east-1
+  aws_default_region: us-east-1
+  aws_profile: default
+  
+  # Deployment Configuration
+  deployment_type: spot  # spot, ondemand, simple, enterprise, alb, cdn, full
+  instance_type: g4dn.xlarge
+  key_name: ""  # Required - must be set
+  volume_size: 30  # GB
+  environment: development  # development, staging, production
+  
+  # Feature Flags
+  debug: false
+  dry_run: false
+  cleanup_on_failure: true
+  validate_only: false
+  verbose: false
+  
+  # Application Service Toggles
+  n8n_enable: true
+  qdrant_enable: true
+  ollama_enable: true
+  crawl4ai_enable: true
+  
+  # Parameter Store Configuration
+  load_parameter_store: false
+  param_store_prefix: /aibuildkit
+  
+  # Deployment Features
+  enable_multi_az: false
+  enable_alb: false
+  enable_cloudfront: false
+  enable_efs: true
+  enable_backup: false
+  enable_monitoring: true
+  enable_nat_gateway: true
+  
+  # Spot Instance Configuration
+  spot_price: ""  # Empty for on-demand price
+  spot_interruption_behavior: terminate  # terminate, stop, hibernate
+  enable_spot_fallback: true
+  
+  # Backup Configuration
+  backup_retention_days: 7
+  
+  # Timeout Configuration
+  deployment_timeout: 1800  # seconds
 
 # =============================================================================
 # INFRASTRUCTURE DEFAULTS

@@ -339,8 +339,12 @@ validate_deployment_type() {
             echo "INFO: Simple deployment selected - basic configuration without advanced features" >&2
             return 0
             ;;
+        enterprise|alb|cdn|full)
+            echo "INFO: Enterprise deployment selected - full production features enabled" >&2
+            return 0
+            ;;
         *) 
-            throw_error $ERROR_VALIDATION_FORMAT "Invalid deployment type: '$deployment_type'. Valid options: spot, ondemand, simple"
+            throw_error $ERROR_VALIDATION_FORMAT "Invalid deployment type: '$deployment_type'. Valid options: spot, ondemand, simple, enterprise, alb, cdn, full"
             return 1
             ;;
     esac
@@ -465,7 +469,7 @@ register_variable "AWS_PROFILE" "default" "" "string" "AWS CLI profile to use"
 
 # Register deployment variables
 register_variable "STACK_NAME" "" "validate_stack_name" "string" "Unique stack identifier for AWS resources"
-register_variable "DEPLOYMENT_TYPE" "spot" "validate_deployment_type" "string" "Deployment strategy: spot, ondemand, or simple"
+register_variable "DEPLOYMENT_TYPE" "spot" "validate_deployment_type" "string" "Deployment strategy: spot, ondemand, simple, enterprise, alb, cdn, or full"
 register_variable "INSTANCE_TYPE" "g4dn.xlarge" "validate_instance_type" "string" "EC2 instance type for compute resources"
 register_variable "KEY_NAME" "" "" "string" "SSH key pair name for instance access"
 register_variable "VOLUME_SIZE" "100" "" "integer" "EBS volume size in GB"
@@ -483,6 +487,64 @@ register_variable "N8N_ENABLE" "true" "validate_boolean" "boolean" "Enable n8n w
 register_variable "QDRANT_ENABLE" "true" "validate_boolean" "boolean" "Enable Qdrant vector database service"
 register_variable "OLLAMA_ENABLE" "true" "validate_boolean" "boolean" "Enable Ollama LLM inference service"
 register_variable "CRAWL4AI_ENABLE" "true" "validate_boolean" "boolean" "Enable Crawl4AI web scraping service"
+
+# Register database and security variables
+register_variable "POSTGRES_PASSWORD" "" "" "string" "PostgreSQL database password"
+register_variable "POSTGRES_DB" "n8n" "" "string" "PostgreSQL database name"
+register_variable "POSTGRES_USER" "n8n" "" "string" "PostgreSQL database user"
+register_variable "N8N_ENCRYPTION_KEY" "" "" "string" "n8n encryption key"
+register_variable "N8N_USER_MANAGEMENT_JWT_SECRET" "" "" "string" "n8n JWT secret for user management"
+register_variable "n8n_ENCRYPTION_KEY" "" "" "string" "n8n encryption key (lowercase)"
+
+# Register n8n configuration variables
+register_variable "N8N_CORS_ENABLE" "true" "validate_boolean" "boolean" "Enable CORS for n8n"
+register_variable "n8n_CORS_ENABLE" "true" "validate_boolean" "boolean" "Enable CORS for n8n (lowercase)"
+register_variable "N8N_CORS_ALLOWED_ORIGINS" "*" "" "string" "Allowed CORS origins for n8n"
+register_variable "n8n_CORS_ALLOWED_ORIGINS" "*" "" "string" "Allowed CORS origins for n8n (lowercase)"
+register_variable "N8N_BASIC_AUTH_ACTIVE" "true" "validate_boolean" "boolean" "Enable basic auth for n8n"
+register_variable "n8n_BASIC_AUTH_ACTIVE" "true" "validate_boolean" "boolean" "Enable basic auth for n8n (lowercase)"
+register_variable "N8N_BASIC_AUTH_USER" "admin" "" "string" "n8n basic auth username"
+register_variable "n8n_BASIC_AUTH_USER" "admin" "" "string" "n8n basic auth username (lowercase)"
+register_variable "N8N_BASIC_AUTH_PASSWORD" "" "" "string" "n8n basic auth password"
+register_variable "n8n_BASIC_AUTH_PASSWORD" "" "" "string" "n8n basic auth password (lowercase)"
+register_variable "N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE" "true" "validate_boolean" "boolean" "Allow community packages tool usage in n8n"
+register_variable "n8n_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE" "true" "validate_boolean" "boolean" "Allow community packages tool usage in n8n (lowercase)"
+register_variable "n8n_USER_MANAGEMENT_JWT_SECRET" "" "" "string" "n8n JWT secret for user management (lowercase)"
+register_variable "OPENAI_API_KEY" "" "" "string" "OpenAI API key"
+register_variable "WEBHOOK_URL" "http://localhost:5678" "" "string" "Webhook URL for n8n"
+
+# Register infrastructure variables
+register_variable "efs_id" "" "" "string" "EFS filesystem ID"
+register_variable "vpc_id" "" "" "string" "VPC ID"
+register_variable "subnet_id" "" "" "string" "Subnet ID"
+register_variable "security_group_id" "" "" "string" "Security group ID"
+register_variable "instance_id" "" "" "string" "EC2 instance ID"
+register_variable "alb_arn" "" "" "string" "Application Load Balancer ARN"
+register_variable "cloudfront_id" "" "" "string" "CloudFront distribution ID"
+
+# Register infrastructure feature flags
+register_variable "ENABLE_ALB" "false" "validate_boolean" "boolean" "Enable Application Load Balancer"
+register_variable "ENABLE_CDN" "false" "validate_boolean" "boolean" "Enable CloudFront CDN"
+register_variable "ENABLE_EFS" "true" "validate_boolean" "boolean" "Enable EFS filesystem"
+register_variable "ENABLE_MONITORING" "true" "validate_boolean" "boolean" "Enable CloudWatch monitoring"
+register_variable "ENABLE_BACKUP" "true" "validate_boolean" "boolean" "Enable automated backups"
+
+# Register deployment configuration variables
+register_variable "ENABLE_MULTI_AZ" "false" "validate_boolean" "boolean" "Enable multi-AZ deployment"
+register_variable "ENABLE_AUTO_SCALING" "false" "validate_boolean" "boolean" "Enable auto scaling"
+register_variable "ENABLE_SSL" "true" "validate_boolean" "boolean" "Enable SSL/TLS encryption"
+register_variable "ENABLE_LOGGING" "true" "validate_boolean" "boolean" "Enable detailed logging"
+register_variable "ENABLE_METRICS" "true" "validate_boolean" "boolean" "Enable CloudWatch metrics"
+
+# Register spot instance configuration variables
+register_variable "ENABLE_SPOT" "true" "validate_boolean" "boolean" "Enable spot instances for cost savings"
+register_variable "SPOT_MAX_PRICE" "0.5" "" "string" "Maximum spot instance price"
+register_variable "SPOT_INTERRUPTION_BEHAVIOR" "terminate" "" "string" "Spot instance interruption behavior"
+register_variable "SPOT_ALLOCATION_STRATEGY" "lowest-price" "" "string" "Spot instance allocation strategy"
+register_variable "VPC_CIDR" "10.0.0.0/16" "" "string" "VPC CIDR block"
+register_variable "PUBLIC_SUBNET_CIDR" "10.0.1.0/24" "" "string" "Public subnet CIDR block"
+register_variable "PRIVATE_SUBNET_CIDR" "10.0.2.0/24" "" "string" "Private subnet CIDR block"
+register_variable "AVAILABILITY_ZONES" "us-east-1a,us-east-1b,us-east-1c" "" "string" "Availability zones for deployment"
 
 # =============================================================================
 # PARAMETER STORE INTEGRATION

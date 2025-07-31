@@ -21,6 +21,15 @@ else
     ROLLBACK_ENABLED=false
 fi
 
+# Source deployment variable management if available
+LIB_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if [[ -f "$LIB_DIR/deployment-variable-management.sh" ]]; then
+    source "$LIB_DIR/deployment-variable-management.sh"
+    DYNAMIC_VARIABLES_ENABLED=true
+else
+    DYNAMIC_VARIABLES_ENABLED=false
+fi
+
 # =============================================================================
 # DEPLOYMENT CONFIGURATION
 # =============================================================================
@@ -215,6 +224,20 @@ initialize_deployment() {
     local deployment_type="$2"
     
     log_info "Initializing deployment for stack: $stack_name" "ORCHESTRATOR"
+    
+    # Initialize dynamic variables if available
+    if [[ "$DYNAMIC_VARIABLES_ENABLED" == "true" ]] && declare -f init_dynamic_variables >/dev/null 2>&1; then
+        log_info "Initializing dynamic variables for deployment type: $deployment_type" "ORCHESTRATOR"
+        if ! init_dynamic_variables "$stack_name" "$deployment_type" "true"; then
+            log_error "Failed to initialize dynamic variables" "ORCHESTRATOR"
+            return 1
+        fi
+        
+        # Save variables to state for future reference
+        if declare -f save_variables_to_state >/dev/null 2>&1; then
+            save_variables_to_state "$stack_name"
+        fi
+    fi
     
     # Set deployment metadata for rollback tracking
     set_variable "DEPLOYMENT_START_TIME" "$(date +%s)" "$VARIABLE_SCOPE_STACK"

@@ -13,9 +13,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Essential Commands
 
+### Quick Start (NEW - Recommended)
+```bash
+# 1. Interactive configuration setup
+./scripts/setup-configuration.sh               # Creates .env.local with wizard
+
+# 2. Deploy with defaults from config/defaults.yml
+make deploy-spot                               # Uses configuration from .env.local
+make deploy-alb STACK_NAME=prod               # Override specific values
+
+# 3. Validate configuration consistency
+./scripts/validate-configuration.sh            # Checks all config sources
+```
+
 ### Deployment
 ```bash
-# Basic deployment commands
+# Basic deployment commands (now reads from config/defaults.yml)
 make deploy-spot STACK_NAME=dev-stack    # Deploy spot instance (70% cost savings)
 make deploy-alb STACK_NAME=prod-stack    # Deploy with Application Load Balancer
 make deploy-full STACK_NAME=prod-stack   # Deploy complete stack (VPC+EC2+ALB+CDN)
@@ -25,6 +38,23 @@ make destroy STACK_NAME=stack-name       # Destroy all resources
 ./scripts/aws-deployment-modular.sh --spot --multi-az stack-name              # Spot with multi-AZ
 ./scripts/aws-deployment-modular.sh --spot --alb --cloudfront prod-stack      # Full production
 ./archive/legacy/aws-deployment-v2-simple.sh dev-stack                        # Simple development (legacy)
+```
+
+### Configuration Management (NEW)
+```bash
+# Configuration hierarchy (priority order):
+# 1. Command line args > 2. Environment vars > 3. .env.local > 4. config/defaults.yml
+
+# Setup configurations
+cp .env.development.template .env.development  # Development environment
+cp .env.staging.template .env.staging          # Staging environment  
+cp .env.production.template .env.production    # Production environment
+
+# Use specific environment
+ENVIRONMENT=staging make deploy-alb            # Uses .env.staging
+
+# View current configuration
+./scripts/setup-configuration.sh               # Option 6: Show configuration
 ```
 
 ### Testing & Validation
@@ -140,6 +170,35 @@ load_library() {
 - **PostgreSQL** (5432): Persistent storage
 
 ## Critical Implementation Patterns
+
+### Configuration Management (NEW)
+The project now uses a centralized configuration system:
+
+**Configuration Sources** (in priority order):
+1. Command-line arguments (highest priority)
+2. Environment variables
+3. `.env.local` or `.env.<environment>` files
+4. AWS Parameter Store (if enabled)
+5. `config/defaults.yml` (single source of truth for defaults)
+6. Hardcoded fallbacks (lowest priority)
+
+**Key Files**:
+- `/config/defaults.yml` - All default values in one place
+- `/lib/config-defaults-loader.sh` - Loads defaults from YAML
+- `/lib/deployment-variable-management.sh` - Enhanced with dynamic loading
+- `/.env.*.template` - Templates for each environment
+
+**Dynamic Variable Loading**:
+```bash
+# Variables are now dynamically loaded based on deployment type
+init_dynamic_variables "$STACK_NAME" "$DEPLOYMENT_TYPE" "true"
+
+# Discovers existing AWS resources
+discover_aws_resources "$STACK_NAME"
+
+# Loads from deployment state
+load_deployment_state_variables "$STACK_NAME"
+```
 
 ### Bash Compatibility
 All deployment scripts work with any bash version. The project includes comprehensive bash compatibility through:

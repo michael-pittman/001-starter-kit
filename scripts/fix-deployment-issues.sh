@@ -29,6 +29,22 @@ for lib in "${OPTIONAL_LIBS[@]}"; do
     load_optional_library "$lib" || true
 done
 
+# Load deployment variable management if available
+if safe_source "deployment-variable-management.sh" false "Deployment variable management"; then
+    # Initialize variable store and load environment configuration
+    if declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store || {
+            echo "WARNING: Failed to initialize variable store" >&2
+        }
+    fi
+
+    if declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config || {
+            echo "WARNING: Failed to load environment configuration" >&2
+        }
+    fi
+fi
+
 # Define logging functions if not already available
 if ! declare -f log >/dev/null 2>&1; then
     # Colors for output

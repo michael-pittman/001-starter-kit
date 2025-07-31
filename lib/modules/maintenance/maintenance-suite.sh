@@ -40,6 +40,24 @@ load_maintenance_library "modules/core/errors.sh" || exit 1
 load_maintenance_library "error-handling.sh" || exit 1
 load_maintenance_library "modules/core/variables.sh" || exit 1
 
+# Load deployment variable management
+if [[ -f "${MAINTENANCE_LIB_DIR}/deployment-variable-management.sh" ]]; then
+    load_maintenance_library "deployment-variable-management.sh" || true
+    
+    # Initialize variable store and load environment configuration
+    if declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store || {
+            echo "WARNING: Failed to initialize variable store" >&2
+        }
+    fi
+
+    if declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config || {
+            echo "WARNING: Failed to load environment configuration" >&2
+        }
+    fi
+fi
+
 # Constants
 declare -r MAINTENANCE_VERSION="1.0.0"
 declare -r MAINTENANCE_LOG_PREFIX="[MAINTENANCE]"

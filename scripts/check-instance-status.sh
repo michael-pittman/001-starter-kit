@@ -44,6 +44,22 @@ else
     warning "Centralized configuration management not available, using legacy mode"
 fi
 
+# Load deployment variable management
+if load_optional_library "deployment-variable-management.sh"; then
+    # Initialize variable store and load environment configuration
+    if declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store || {
+            echo "WARNING: Failed to initialize variable store" >&2
+        }
+    fi
+
+    if declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config || {
+            echo "WARNING: Failed to load environment configuration" >&2
+        }
+    fi
+fi
+
 # Configuration
 STACK_NAME="${1:-33}"
 AWS_REGION="${AWS_REGION:-us-east-1}"

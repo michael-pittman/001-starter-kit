@@ -14,7 +14,9 @@
         existing-resources-list existing-resources-map deploy-with-vpc deploy-existing \
         deploy-auto-discover deploy-existing-validate \
         deploy-dev deploy-staging deploy-prod destroy-dev destroy-staging destroy-prod \
-        ci-test ci-deploy debug troubleshoot dev dev-stop docs docs-serve
+        ci-test ci-deploy debug troubleshoot dev dev-stop docs docs-serve \
+        quickstart setup-config validate-config info ssh start stop restart \
+        metrics cost-report configure-domain
 
 # =============================================================================
 # CONFIGURATION
@@ -36,6 +38,10 @@ DEPLOYMENT_TYPES := spot alb cdn full
 help: ## Show this help message
 	@echo 'GeuseMaker AWS Deployment System'
 	@echo '================================'
+	@echo ''
+	@echo '🚀 QUICK START (5 minutes to deploy):'
+	@echo '  make quickstart          Interactive setup and deploy'
+	@echo '  make deploy-spot         Deploy development stack ($0.50/hr)'
 	@echo ''
 	@echo 'Usage: make [target] [ENV=environment] [STACK_NAME=name]'
 	@echo ''
@@ -64,6 +70,34 @@ help: ## Show this help message
 	@echo ''
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# =============================================================================
+# QUICK START TARGETS
+# =============================================================================
+
+quickstart: ## 🚀 Interactive setup wizard and deployment (5 minutes)
+	@echo "🚀 Starting GeuseMaker Quick Start..."
+	@echo ""
+	@echo "This will guide you through:"
+	@echo "1. Setting up your configuration"
+	@echo "2. Validating prerequisites" 
+	@echo "3. Deploying your AI stack"
+	@echo ""
+	@./scripts/setup-configuration.sh
+	@echo ""
+	@echo "Configuration complete! Now deploying..."
+	@$(MAKE) deploy-spot
+	@echo ""
+	@echo "🎉 Deployment complete! Your AI stack is ready."
+	@$(MAKE) info
+
+setup-config: ## Interactive configuration setup wizard
+	@echo "🔧 Starting configuration setup..."
+	@./scripts/setup-configuration.sh
+
+validate-config: ## Validate current configuration
+	@echo "🔍 Validating configuration..."
+	@./scripts/validate-configuration.sh
 
 # =============================================================================
 # SETUP TARGETS
@@ -384,6 +418,14 @@ status: ## Show deployment status
 	@echo "📊 Deployment status for stack: $(STACK_NAME)"
 	@./deploy.sh --status --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 
+info: ## Show service URLs and access information
+	@echo "ℹ️  Service information for stack: $(STACK_NAME)"
+	@./deploy.sh --info --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+ssh: ## SSH into the deployed instance
+	@echo "🔐 Connecting to instance..."
+	@./deploy.sh --ssh --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
 logs: ## View application logs
 	@echo "📋 Viewing application logs..."
 	@./deploy.sh --logs --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
@@ -415,6 +457,33 @@ update: ## Update deployment configuration
 	@echo "🔄 Updating deployment configuration..."
 	@./deploy.sh --update --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 	@echo "✅ Update completed"
+
+start: ## Start services (keeps infrastructure)
+	@echo "▶️  Starting services..."
+	@./deploy.sh --start --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@echo "✅ Services started"
+
+stop: ## Stop services (keeps infrastructure)
+	@echo "⏸️  Stopping services..."
+	@./deploy.sh --stop --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@echo "✅ Services stopped"
+
+restart: ## Restart services
+	@echo "🔄 Restarting services..."
+	@./deploy.sh --restart --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+	@echo "✅ Services restarted"
+
+metrics: ## View deployment metrics
+	@echo "📊 Viewing metrics..."
+	@./deploy.sh --metrics --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+cost-report: ## Generate cost report
+	@echo "💰 Generating cost report..."
+	@./deploy.sh --cost-report --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
+
+configure-domain: ## Configure custom domain
+	@echo "🌐 Configuring domain: $(DOMAIN)"
+	@./deploy.sh --configure-domain $(DOMAIN) --env $(ENV) --profile $(PROFILE) --region $(REGION) --stack-name $(STACK_NAME)
 
 # =============================================================================
 # DEPLOYMENT TARGETS - EXISTING RESOURCES

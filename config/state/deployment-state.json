@@ -333,6 +333,21 @@
         }
       ],
       "variables": {}
+    },
+    "geuse0": {
+      "name": "geuse0",
+      "status": "CLEANING_UP",
+      "created": "2025-07-30T23:55:57Z",
+      "last_modified": "2025-07-30T23:55:57Z",
+      "resources": {},
+      "deployments": [
+        {
+          "timestamp": "2025-07-30T23:55:57Z",
+          "state": "CLEANING_UP",
+          "details": ""
+        }
+      ],
+      "variables": {}
     }
   },
   "resources": {},
@@ -528,6 +543,12 @@
       "state": "ROLLING_BACK",
       "details": "",
       "stack": "geusemaker-dev"
+    },
+    {
+      "timestamp": "2025-07-30T23:55:57Z",
+      "state": "CLEANING_UP",
+      "details": "",
+      "stack": "geuse0"
     }
   ]
 }

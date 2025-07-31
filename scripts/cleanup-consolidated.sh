@@ -25,6 +25,22 @@ safe_source "aws-config.sh" true "AWS configuration"
 # Load required modules through the library system
 load_module "config-management"
 
+# Load deployment variable management
+safe_source "deployment-variable-management.sh" false "Deployment variable management"
+
+# Initialize variable store and load environment configuration
+if declare -f init_variable_store >/dev/null 2>&1; then
+    init_variable_store || {
+        echo "WARNING: Failed to initialize variable store" >&2
+    }
+fi
+
+if declare -f load_environment_config >/dev/null 2>&1; then
+    load_environment_config || {
+        echo "WARNING: Failed to load environment configuration" >&2
+    }
+fi
+
 # Set AWS region if not already set
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 

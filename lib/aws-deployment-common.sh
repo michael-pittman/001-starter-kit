@@ -2104,3 +2104,30 @@ validate_deployment_configuration() {
     success "Deployment configuration validation passed"
     return 0
 }
+
+# =============================================================================
+# VARIABLE STORE AND ENVIRONMENT CONFIGURATION
+# =============================================================================
+
+# Load deployment variable management functions if available
+if [[ -f "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/deployment-variable-management.sh" ]]; then
+    source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/deployment-variable-management.sh"
+else
+    # Define stub functions if deployment-variable-management.sh is not available
+    if ! declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store() {
+            local prefix="${1:-/aibuildkit}"
+            echo "INFO: Variable store initialization not available (deployment-variable-management.sh not found)" >&2
+            return 0
+        }
+    fi
+    
+    if ! declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config() {
+            local environment="${1:-${ENVIRONMENT:-development}}"
+            echo "INFO: Environment config loading not available (deployment-variable-management.sh not found)" >&2
+            export ENVIRONMENT="$environment"
+            return 0
+        }
+    fi
+fi

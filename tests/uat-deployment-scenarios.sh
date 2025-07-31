@@ -13,6 +13,24 @@ source "$PROJECT_ROOT/lib/enhanced-test-framework.sh"
 source "$PROJECT_ROOT/lib/modules/core/logging.sh"
 source "$PROJECT_ROOT/lib/modules/core/variables.sh"
 
+# Load deployment variable management
+if [[ -f "$PROJECT_ROOT/lib/deployment-variable-management.sh" ]]; then
+    source "$PROJECT_ROOT/lib/deployment-variable-management.sh"
+    
+    # Initialize variable store and load environment configuration
+    if declare -f init_variable_store >/dev/null 2>&1; then
+        init_variable_store || {
+            echo "WARNING: Failed to initialize variable store" >&2
+        }
+    fi
+
+    if declare -f load_environment_config >/dev/null 2>&1; then
+        load_environment_config || {
+            echo "WARNING: Failed to load environment configuration" >&2
+        }
+    fi
+fi
+
 # Test configuration
 UAT_STACK_PREFIX="uat-test"
 UAT_REGION="${AWS_REGION:-us-west-2}"

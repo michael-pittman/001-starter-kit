@@ -21,6 +21,22 @@ set -euo pipefail
 # Load required modules through the library system
 load_module "aws-deployment-common"
 
+# Load deployment variable management
+safe_source "deployment-variable-management.sh" false "Deployment variable management"
+
+# Initialize variable store and load environment configuration
+if declare -f init_variable_store >/dev/null 2>&1; then
+    init_variable_store || {
+        echo "WARNING: Failed to initialize variable store" >&2
+    }
+fi
+
+if declare -f load_environment_config >/dev/null 2>&1; then
+    load_environment_config || {
+        echo "WARNING: Failed to load environment configuration" >&2
+    }
+fi
+
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.gpu-optimized.yml"
 
 # Detect Docker Compose command (modern vs legacy)

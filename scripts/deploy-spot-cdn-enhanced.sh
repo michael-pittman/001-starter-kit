@@ -41,6 +41,22 @@ else
     init_error_handling "strict"
 fi
 
+# Load deployment variable management
+safe_source "deployment-variable-management.sh" false "Deployment variable management"
+
+# Initialize variable store and load environment configuration
+if declare -f init_variable_store >/dev/null 2>&1; then
+    init_variable_store || {
+        echo "WARNING: Failed to initialize variable store" >&2
+    }
+fi
+
+if declare -f load_environment_config >/dev/null 2>&1; then
+    load_environment_config || {
+        echo "WARNING: Failed to load environment configuration" >&2
+    }
+fi
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
