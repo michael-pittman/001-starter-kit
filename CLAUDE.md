@@ -11,7 +11,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Enterprise features**: Multi-AZ, ALB, CloudFront CDN, EFS persistence, comprehensive monitoring
 - **Unity Architecture**: Event-driven service architecture with plugin framework (ONLY deployment option)
 
+### Project Structure
+```
+001-starter-kit/
+├── unity                           # Main CLI entry point (executable)
+├── deploy.sh                       # Alternative entry point (same as ./unity)
+├── lib/unity/                      # Unity system implementation
+│   ├── core/                       # Core system (registry, events, plugins)
+│   ├── services/                   # Unity services (aws, docker, monitoring, etc.)
+│   ├── events/                     # Event system implementation
+│   └── plugins/                    # Plugin framework
+├── config/                         # Configuration files
+│   └── unity.yml                   # Primary Unity configuration
+├── scripts/                        # Utility scripts
+│   ├── unity-cli.sh               # Unity CLI implementation
+│   ├── deprecate-legacy.sh        # Legacy code archival tool
+│   └── migrate-to-unity/          # Migration utilities
+├── tests/unity/                    # Unity test suites
+└── docs/unity/                     # Unity documentation
+```
+
 ## Essential Commands
+
+### Build and Development
+```bash
+# No build step required - Unity is a bash-based system
+# To make scripts executable:
+chmod +x unity deploy.sh scripts/*.sh
+
+# Linting (if shellcheck is installed)
+shellcheck scripts/*.sh lib/unity/**/*.sh
+
+# Code formatting check
+grep -r $'\t' lib/unity/  # Check for tabs (spaces preferred)
+```
 
 ### Primary Deployment Interface
 ```bash
@@ -53,15 +86,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Commands
 ```bash
+# Run all tests
+./unity test                           # Runs complete test suite
+
 # Primary test suites
 ./tests/unity/test-unity-implementation.sh      # Implementation validation
 ./tests/unity/production-validation.sh          # Production readiness check
 ./tests/unity/test-unity-complete-system.sh     # Full system test
 
-# Specific component tests
+# Run a single test
 ./tests/unity/unit/test-unity-aws-service.sh    # AWS service tests
-./tests/unity/integration/test-unity-service-integration.sh  # Integration tests
-./tests/unity/performance/test-unity-performance-benchmarks.sh  # Performance tests
+
+# Run test categories
+./tests/unity/unit/                    # Run all unit tests
+./tests/unity/integration/             # Run all integration tests
+./tests/unity/performance/             # Run all performance tests
+
+# Test specific functionality
+bash -x ./tests/unity/unit/test-unity-aws-service.sh test_vpc_creation  # Single test function
+UNITY_LOG_LEVEL=DEBUG ./tests/unity/unit/test-unity-aws-service.sh      # With debug logging
 ```
 
 ### Migration and Legacy Support
@@ -275,30 +318,54 @@ Unity is **production-ready** and serves as the sole deployment system. The lega
 
 ## Critical Implementation Details
 
-### AWS Service Implementation
+### Key Files to Understand
 
-The enhanced AWS service (`lib/unity/services/unity-aws-service-complete.sh`) provides:
-- **VPC Operations**: Single/multi-AZ with automatic CIDR allocation
-- **EC2 Management**: Spot optimization with 70% cost savings
-- **Load Balancing**: ALB with health checks and target groups
-- **CDN**: CloudFront distribution with origin configuration
-- **Cost Optimization**: Real-time tracking and recommendations
+1. **Entry Points**:
+   - `unity` → `scripts/unity-cli.sh` - Main command router
+   - `deploy.sh` → Wrapper around unity CLI
 
-### Docker Service Implementation
+2. **Core System** (`lib/unity/core/`):
+   - `unity-core.sh` - Service registry and lifecycle management
+   - `unity-events.sh` - Event bus implementation with deadlock detection
+   - `unity-atomic-state.sh` - Atomic state file operations
 
-The enhanced Docker service (`lib/unity/services/unity-docker-service-complete.sh`) provides:
-- **Compose Generation**: Environment-specific configurations
-- **AI Stack Support**: Ollama with GPU, n8n, Qdrant, PostgreSQL
-- **Health Monitoring**: Container health checks with auto-recovery
-- **Log Management**: Centralized logging with rotation
+3. **Services** (`lib/unity/services/`):
+   - `unity-aws-service-complete.sh` - All AWS operations (2700+ lines)
+   - `unity-docker-service-complete.sh` - Docker and AI stack management
+   - `unity-deployment-service.sh` - Deployment orchestration
 
-### Monitoring Service Implementation
+### Service Dependencies
 
-The monitoring service (`lib/unity/services/unity-monitoring-complete.sh`) provides:
-- **CloudWatch Integration**: Dashboards and custom metrics
-- **Real-time Alerts**: Threshold-based alerting
-- **Performance Metrics**: CPU, memory, disk, network tracking
-- **Cost Monitoring**: Hourly cost tracking with alerts
+Services have explicit dependencies declared during registration:
+```bash
+# AWS service depends on config
+unity_register_service "aws" "$SCRIPT_DIR/unity-aws-service.sh" "core" "config"
+
+# Docker service depends on config and aws
+unity_register_service "docker" "$SCRIPT_DIR/unity-docker-service.sh" "standard" "config,aws"
+
+# Monitor service depends on config, aws, and docker
+unity_register_service "monitor" "$SCRIPT_DIR/unity-monitor-service.sh" "standard" "config,aws,docker"
+```
+
+### State Management
+
+All state is managed atomically to prevent corruption:
+- Deployment states in `.unity/state/deployments/`
+- Service states in `.unity/state/services/`
+- Event logs in `.unity/events/`
+- Configuration cache in `.unity/cache/`
+
+### Error Handling Patterns
+
+Unity uses structured error codes:
+```bash
+UNITY_SUCCESS=0
+UNITY_ERROR_VALIDATION=10      # Input validation failures
+UNITY_ERROR_PREREQUISITE=20    # Missing dependencies
+UNITY_ERROR_EXECUTION=30       # Runtime failures
+UNITY_ERROR_CLEANUP=40         # Cleanup failures
+```
 
 ## Claude Code Agents
 
@@ -323,3 +390,11 @@ Use specialized agents for complex Unity tasks:
 3. **Services must be isolated** - No direct service-to-service calls
 4. **Configuration is centralized** - Use `config/unity.yml` as source of truth
 5. **Legacy code is archived** in `archive/unity-cleanup-20250803_024204/`
+
+### Recent Architecture Improvements
+
+1. **Circuit Breaker Pattern**: Docker service health monitoring includes circuit breaker to prevent resource exhaustion
+2. **Deadlock Detection**: Event system has comprehensive deadlock detection and recovery
+3. **Atomic State Management**: All state files use atomic writes to prevent corruption
+4. **Comprehensive Documentation**: All critical documentation has been created/updated
+5. **Command Standardization**: All documentation now uses Unity commands consistently

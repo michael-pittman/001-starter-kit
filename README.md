@@ -17,11 +17,11 @@ GeuseMaker now uses the Unity event-driven deployment system for all operations.
 ./unity deploy full prod-stack
 ```
 
-### Legacy Makefile Support
+### Legacy Command Support
 
-For backward compatibility, you can still use make commands:
+For backward compatibility, legacy make commands redirect to Unity:
 ```bash
-make deploy-spot  # Redirects to: ./unity deploy spot
+make deploy-spot  # Automatically uses: ./unity deploy spot
 ```
 
 See the [Unity Documentation](docs/unity/) for complete details.
@@ -56,7 +56,7 @@ cd geusemaker
 ./scripts/setup-configuration.sh  # Interactive setup wizard
 
 # 2. Deploy (3-5 minutes)
-make deploy-spot  # That's it! ☕
+./deploy.sh spot my-ai-stack  # That's it! ☕
 ```
 
 📖 **[See Full Quick Start Guide →](QUICKSTART.md)**
@@ -96,7 +96,9 @@ GeuseMaker/
 
 ### Development (Cheapest - $0.50/hr)
 ```bash
-make deploy-spot STACK_NAME=dev-ai
+./deploy.sh spot dev-ai
+# Or using Unity directly:
+./unity deploy spot dev-ai
 ```
 - Single g4dn.xlarge spot instance
 - All AI services enabled
@@ -104,7 +106,9 @@ make deploy-spot STACK_NAME=dev-ai
 
 ### Staging (Production-like - $2-3/hr)
 ```bash
-make deploy-alb STACK_NAME=staging-ai
+./deploy.sh alb staging-ai
+# Or using Unity directly:
+./unity deploy alb staging-ai
 ```
 - Application Load Balancer
 - Spot with on-demand fallback
@@ -112,7 +116,9 @@ make deploy-alb STACK_NAME=staging-ai
 
 ### Production (Full Features - $5-10/hr)
 ```bash
-make deploy-full STACK_NAME=prod-ai
+./deploy.sh full prod-ai
+# Or using Unity directly:
+./unity deploy full prod-ai
 ```
 - Multi-AZ deployment
 - ALB + CloudFront CDN
@@ -123,16 +129,16 @@ make deploy-full STACK_NAME=prod-ai
 
 ```bash
 # Check status
-make status STACK_NAME=my-ai
+./unity status my-ai
 
 # View service URLs
-make info STACK_NAME=my-ai
+./unity info my-ai
 
 # SSH access
-make ssh STACK_NAME=my-ai
+./unity ssh my-ai
 
 # Cleanup
-make destroy STACK_NAME=my-ai
+./unity destroy my-ai
 ```
 
 ### 5. Maintenance Operations
@@ -241,37 +247,37 @@ Use the existing resources management script to discover, validate, and manage e
 ./scripts/manage-existing-resources.sh list -e dev
 ```
 
-### Makefile Integration
+### Unity Integration
 
-The existing resources feature is fully integrated with the Makefile for easy deployment:
+The existing resources feature is fully integrated with Unity for easy deployment:
 
 ```bash
 # Discover existing resources
-make existing-resources-discover ENV=dev STACK_NAME=my-stack
+./unity discover-resources dev my-stack
 
 # Validate existing resources
-make existing-resources-validate ENV=dev STACK_NAME=my-stack
+./unity validate-resources dev my-stack
 
 # Test resource connectivity
-make existing-resources-test ENV=dev STACK_NAME=my-stack
+./unity test-resources dev my-stack
 
 # List configured resources
-make existing-resources-list ENV=dev
+./unity list-resources dev
 
 # Deploy with existing VPC
-make deploy-with-vpc ENV=dev STACK_NAME=my-stack VPC_ID=vpc-12345678
+./unity deploy spot my-stack --use-existing-vpc vpc-12345678
 
 # Deploy with multiple existing resources
-make deploy-existing ENV=dev STACK_NAME=my-stack \
-    VPC_ID=vpc-12345678 \
-    EFS_ID=fs-87654321 \
-    ALB_ARN=arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/1234567890123456
+./unity deploy spot my-stack \
+    --use-existing-vpc vpc-12345678 \
+    --use-existing-efs fs-87654321 \
+    --use-existing-alb arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/my-alb/1234567890123456
 
 # Deploy with auto-discovered resources
-make deploy-auto-discover ENV=dev STACK_NAME=my-stack
+./unity deploy spot my-stack --auto-discover
 
 # Deploy with existing resources (with validation)
-make deploy-existing-validate ENV=dev STACK_NAME=my-stack
+./unity deploy spot my-stack --validate-existing
 ```
 
 #### Available Makefile Targets
@@ -466,10 +472,10 @@ The system automatically creates and configures security groups:
 
 ```bash
 # Check deployment health
-make health ENV=dev STACK_NAME=my-stack
+./unity health my-stack
 
 # Monitor continuously
-./deploy.sh --monitor --env dev --stack-name my-stack
+./unity monitor my-stack
 ```
 
 ### Logging
@@ -531,29 +537,29 @@ All operations are logged with structured format:
 ### Testing
 
 ```bash
-# Run all tests (unit, integration, security, performance)
-make test
+# Run all tests
+./unity test
 
 # Run specific test types
-make test-unit          # Unit tests only
-make test-integration   # Integration tests
+./unity test unit          # Unit tests only
+./unity test integration   # Integration tests
 
 # Run comprehensive test suite with reporting
-./tools/test-runner.sh --report
+./unity test --report
 
 # Run specific test categories
-./tools/test-runner.sh unit integration security
+./unity test unit integration security
 
 # Run linting
-make lint
+./unity lint
 
 # Run security scans
-make security
+./unity security-scan
 ```
 
 ### Core Scripts
 
-- **`scripts/aws-deployment-modular.sh`** - Main deployment orchestrator with modular architecture
+- **`scripts/unity-cli.sh`** - Unity command-line interface for all operations
 - **`deploy.sh`** - Makefile entry point for deployment operations
 - **`tools/test-runner.sh`** - Comprehensive test runner with 8 test categories
 
@@ -593,11 +599,11 @@ jobs:
       
       - name: Deploy to staging
         run: |
-          make deploy-staging
+          ./unity deploy alb staging-stack
       
       - name: Run health checks
         run: |
-          make health ENV=staging
+          ./unity health staging-stack
 ```
 
 ## 🚨 Troubleshooting
@@ -634,24 +640,25 @@ jobs:
 export DEBUG=1
 ./deploy.sh --spot --env dev --stack-name my-stack
 
-# Or use make target
-make debug ENV=dev STACK_NAME=my-stack
+# Or enable debug mode globally
+export DEBUG=1
+./unity deploy spot my-stack
 ```
 
 ### Logs and Diagnostics
 
 ```bash
 # View deployment logs
-make logs ENV=dev STACK_NAME=my-stack
+./unity logs my-stack
 
 # Run diagnostics
-make troubleshoot ENV=dev STACK_NAME=my-stack
+./unity diagnose my-stack
 ```
 
 ## 📚 Documentation
 
 - [Deployment Guide](docs/guides/deployment.md)
-- [Architecture Overview](docs/architecture.md)
+- [Architecture Overview](docs/guides/architecture.md)
 - [Module Development](docs/module-architecture.md)
 - [Troubleshooting](docs/guides/troubleshooting.md)
 - [API Reference](docs/reference/api/)

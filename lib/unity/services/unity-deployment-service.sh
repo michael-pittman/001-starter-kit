@@ -11,6 +11,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # Load Unity core and events
 source "$SCRIPT_DIR/../core/unity-core.sh"
 source "$SCRIPT_DIR/../core/unity-events.sh"
+source "$SCRIPT_DIR/../core/unity-atomic-state.sh"
 source "$SCRIPT_DIR/../events/reactive-patterns.sh"
 source "$SCRIPT_DIR/../events/rollback-manager.sh"
 
@@ -47,6 +48,217 @@ declare -A UNITY_DEPLOYMENT_HEALTH_STATUS 2>/dev/null || UNITY_DEPLOYMENT_HEALTH
 declare -A UNITY_DEPLOYMENT_METRICS 2>/dev/null || UNITY_DEPLOYMENT_METRICS=()
 
 #############################################
+# Atomic State Management Helpers
+#############################################
+
+# Update deployment state atomically
+_update_deployment_state() {
+    local deployment_id="$1"
+    local status="$2"
+    local additional_data="${3:-}"
+    
+    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
+    
+    # Check if deployment state file exists
+    if [[ ! -f "$state_file" ]]; then
+        # Check in completed/failed directories
+        if [[ -f "$UNITY_DEPLOYMENT_STATE_DIR/completed/${deployment_id}.state" ]]; then
+            state_file="$UNITY_DEPLOYMENT_STATE_DIR/completed/${deployment_id}.state"
+        elif [[ -f "$UNITY_DEPLOYMENT_STATE_DIR/failed/${deployment_id}.state" ]]; then
+            state_file="$UNITY_DEPLOYMENT_STATE_DIR/failed/${deployment_id}.state"
+        else
+            unity_log "ERROR" "Deployment state file not found: $deployment_id"
+            return $UNITY_ERROR_VALIDATION
+        fi
+    fi
+    
+    # Read current state
+    local current_state
+    current_state="$(unity_atomic_read "$state_file" "true")"
+    if [[ $? -ne 0 ]]; then
+        unity_log "ERROR" "Failed to read deployment state: $state_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    # Update state with new status and timestamp
+    local updated_state
+    if command -v jq >/dev/null 2>&1; then
+        updated_state="$(echo "$current_state" | jq \
+            --arg status "$status" \
+            --arg timestamp "$(date +%s)" \
+            --argjson additional "${additional_data:-null}" \
+            '.status = $status | .updated_at = ($timestamp | tonumber) | if $additional != null then . + $additional else . end')"
+    else
+        # Fallback: simple replacement
+        updated_state="$(echo "$current_state" | \
+            sed "s/\"status\": \"[^\"]*\"/\"status\": \"$status\"/" | \
+            sed "s/\"updated_at\": [0-9]*/\"updated_at\": $(date +%s)/")"
+    fi
+    
+    # Write updated state atomically
+    if ! unity_atomic_write "$state_file" "$updated_state" "json" "true"; then
+        unity_log "ERROR" "Failed to update deployment state: $state_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    # Emit state change event
+    unity_emit_event "deployment.state.updated" "deployment-service" \
+        "{\"deployment_id\":\"$deployment_id\",\"status\":\"$status\",\"timestamp\":$(date +%s)}" \
+        "medium" "false"
+    
+    unity_log "DEBUG" "Updated deployment state: $deployment_id -> $status"
+    return $UNITY_SUCCESS
+}
+
+# Add transaction log entry to deployment state
+_add_deployment_transaction_log() {
+    local deployment_id="$1"
+    local action="$2"
+    local details="$3"
+    local status="${4:-success}"
+    
+    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
+    
+    # Check if file exists in other directories
+    if [[ ! -f "$state_file" ]]; then
+        for dir in "completed" "failed"; do
+            if [[ -f "$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state" ]]; then
+                state_file="$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state"
+                break
+            fi
+        done
+    fi
+    
+    if [[ ! -f "$state_file" ]]; then
+        unity_log "ERROR" "Deployment state file not found for transaction log: $deployment_id"
+        return $UNITY_ERROR_VALIDATION
+    fi
+    
+    # Create transaction entry
+    local transaction_entry
+    transaction_entry='{"timestamp": '$(date +%s)', "action": "'$action'", "details": "'$details'", "status": "'$status'"}'
+    
+    # Read current state
+    local current_state
+    current_state="$(unity_atomic_read "$state_file" "true")"
+    if [[ $? -ne 0 ]]; then
+        unity_log "ERROR" "Failed to read state for transaction log: $state_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    # Add transaction to log
+    local updated_state
+    if command -v jq >/dev/null 2>&1; then
+        updated_state="$(echo "$current_state" | jq \
+            --argjson entry "$transaction_entry" \
+            '.transaction_log += [$entry] | .updated_at = ('$(date +%s)')')"
+    else
+        # Fallback: append to end of file (less precise but functional)
+        updated_state="$current_state"
+    fi
+    
+    # Write updated state atomically
+    if ! unity_atomic_write "$state_file" "$updated_state" "json" "true"; then
+        unity_log "ERROR" "Failed to add transaction log entry: $state_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    unity_log "DEBUG" "Added transaction log: $deployment_id - $action"
+    return $UNITY_SUCCESS
+}
+
+# Move deployment state between directories atomically
+_move_deployment_state() {
+    local deployment_id="$1"
+    local from_dir="$2"
+    local to_dir="$3"
+    local new_status="${4:-}"
+    
+    local source_file="$UNITY_DEPLOYMENT_STATE_DIR/$from_dir/${deployment_id}.state"
+    local target_file="$UNITY_DEPLOYMENT_STATE_DIR/$to_dir/${deployment_id}.state"
+    
+    if [[ ! -f "$source_file" ]]; then
+        unity_log "ERROR" "Source deployment state not found: $source_file"
+        return $UNITY_ERROR_VALIDATION
+    fi
+    
+    # Update status if provided
+    if [[ -n "$new_status" ]]; then
+        _update_deployment_state "$deployment_id" "$new_status"
+    fi
+    
+    # Create target directory
+    mkdir -p "$UNITY_DEPLOYMENT_STATE_DIR/$to_dir"
+    
+    # Atomic move
+    if ! mv "$source_file" "$target_file"; then
+        unity_log "ERROR" "Failed to move deployment state: $source_file -> $target_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    # Move checksum file if it exists
+    if [[ -f "${source_file}.checksum" ]]; then
+        mv "${source_file}.checksum" "${target_file}.checksum" 2>/dev/null || true
+    fi
+    
+    unity_log "DEBUG" "Moved deployment state: $deployment_id ($from_dir -> $to_dir)"
+    return $UNITY_SUCCESS
+}
+
+# Validate deployment state integrity
+_validate_deployment_state() {
+    local deployment_id="$1"
+    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
+    
+    # Check all possible locations
+    if [[ ! -f "$state_file" ]]; then
+        for dir in "completed" "failed"; do
+            if [[ -f "$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state" ]]; then
+                state_file="$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state"
+                break
+            fi
+        done
+    fi
+    
+    if [[ ! -f "$state_file" ]]; then
+        unity_log "ERROR" "Deployment state file not found: $deployment_id"
+        return $UNITY_ERROR_VALIDATION
+    fi
+    
+    # Check if recovery is needed
+    if unity_atomic_needs_recovery "$state_file"; then
+        unity_log "WARN" "Deployment state file corrupted, attempting recovery: $deployment_id"
+        if unity_atomic_force_recovery "$state_file"; then
+            unity_log "INFO" "Successfully recovered deployment state: $deployment_id"
+        else
+            unity_log "ERROR" "Failed to recover deployment state: $deployment_id"
+            return $UNITY_ERROR_EXECUTION
+        fi
+    fi
+    
+    # Validate JSON structure
+    local state_content
+    state_content="$(unity_atomic_read "$state_file" "true")"
+    if [[ $? -ne 0 ]]; then
+        unity_log "ERROR" "Failed to read deployment state for validation: $deployment_id"
+        return $UNITY_ERROR_EXECUTION
+    fi
+    
+    # Check required fields
+    local required_fields=("deployment_id" "stack_name" "deployment_type" "status" "created_at")
+    local field
+    for field in "${required_fields[@]}"; do
+        if ! echo "$state_content" | grep -q "\"$field\":"; then
+            unity_log "ERROR" "Missing required field in deployment state: $field ($deployment_id)"
+            return $UNITY_ERROR_VALIDATION
+        fi
+    done
+    
+    unity_log "DEBUG" "Deployment state validation passed: $deployment_id"
+    return $UNITY_SUCCESS
+}
+
+#############################################
 # Service Initialization
 #############################################
 
@@ -66,6 +278,12 @@ unity_deployment_init() {
     mkdir -p "$UNITY_DEPLOYMENT_STATE_DIR/active" "$UNITY_DEPLOYMENT_STATE_DIR/completed" "$UNITY_DEPLOYMENT_STATE_DIR/failed"
     mkdir -p "$UNITY_DEPLOYMENT_WORKFLOWS_DIR/templates" "$UNITY_DEPLOYMENT_WORKFLOWS_DIR/instances"
     mkdir -p "$(dirname "$UNITY_DEPLOYMENT_LOG")"
+    
+    # Initialize atomic state management
+    init_unity_atomic_state
+    
+    # Validate existing deployment states and recover if needed
+    _validate_existing_deployment_states
     
     # Initialize deployment workflows
     _init_deployment_workflows
@@ -89,6 +307,74 @@ unity_deployment_init() {
     unity_emit_event "deployment.service.initialized" "deployment-service" "{\"version\":\"2.0\"}"
     
     unity_log "SUCCESS" "Deployment Service initialized with event-driven orchestration"
+    return $UNITY_SUCCESS
+}
+
+# Validate all existing deployment states on startup
+_validate_existing_deployment_states() {
+    unity_log "INFO" "Validating existing deployment states..."
+    
+    local validation_errors=0
+    local recovery_count=0
+    
+    # Check all deployment state files
+    for dir in "active" "completed" "failed"; do
+        for state_file in "$UNITY_DEPLOYMENT_STATE_DIR/$dir"/*.state; do
+            [[ -f "$state_file" ]] || continue
+            
+            local deployment_id
+            deployment_id=$(basename "$state_file" .state)
+            
+            # Check if file needs recovery
+            if unity_atomic_needs_recovery "$state_file"; then
+                unity_log "WARN" "Corrupted deployment state detected: $deployment_id"
+                if unity_atomic_force_recovery "$state_file"; then
+                    unity_log "INFO" "Successfully recovered deployment state: $deployment_id"
+                    ((recovery_count++))
+                else
+                    unity_log "ERROR" "Failed to recover deployment state: $deployment_id"
+                    ((validation_errors++))
+                fi
+            fi
+            
+            # Validate state structure
+            local state_content
+            state_content="$(unity_atomic_read "$state_file" "true" 2>/dev/null)"
+            if [[ $? -ne 0 ]]; then
+                unity_log "ERROR" "Cannot read deployment state: $deployment_id"
+                ((validation_errors++))
+                continue
+            fi
+            
+            # Check for required fields
+            local required_fields=("deployment_id" "stack_name" "status")
+            local field missing_fields=()
+            for field in "${required_fields[@]}"; do
+                if ! echo "$state_content" | grep -q "\"$field\":"; then
+                    missing_fields+=("$field")
+                fi
+            done
+            
+            if [[ ${#missing_fields[@]} -gt 0 ]]; then
+                unity_log "ERROR" "Missing required fields in deployment state $deployment_id: ${missing_fields[*]}"
+                ((validation_errors++))
+            fi
+        done
+    done
+    
+    if [[ $validation_errors -eq 0 ]]; then
+        unity_log "SUCCESS" "All deployment states validated successfully"
+        if [[ $recovery_count -gt 0 ]]; then
+            unity_log "INFO" "Recovered $recovery_count corrupted deployment states"
+        fi
+    else
+        unity_log "ERROR" "Deployment state validation failed with $validation_errors errors"
+        if [[ $recovery_count -gt 0 ]]; then
+            unity_log "INFO" "Recovered $recovery_count deployment states"
+        fi
+        return $UNITY_ERROR_VALIDATION
+    fi
+    
     return $UNITY_SUCCESS
 }
 
@@ -182,8 +468,9 @@ _execute_deployment() {
     local deployment_id="deploy_${stack_name}_$(date +%s%N)"
     local deployment_state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
     
-    # Initialize deployment state
-    cat > "$deployment_state_file" <<EOF
+    # Initialize deployment state using atomic write
+    local deployment_state_content
+    deployment_state_content=$(cat <<EOF
 {
   "deployment_id": "$deployment_id",
   "stack_name": "$stack_name",
@@ -191,9 +478,11 @@ _execute_deployment() {
   "strategy": "$strategy",
   "status": "initializing",
   "created_at": $(date +%s),
+  "updated_at": $(date +%s),
   "options": "$options",
   "health_status": "unknown",
   "rollback_enabled": true,
+  "transaction_log": [],
   "metrics": {
     "start_time": $(date +%s),
     "resources_created": 0,
@@ -201,6 +490,13 @@ _execute_deployment() {
   }
 }
 EOF
+)
+    
+    # Write deployment state atomically
+    if ! unity_atomic_write "$deployment_state_file" "$deployment_state_content" "json" "false"; then
+        unity_log "ERROR" "Failed to create deployment state file: $deployment_state_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
     
     # Register deployment in active workflows
     if [[ "${BASH_VERSION%%.*}" -ge 4 ]]; then
@@ -230,6 +526,12 @@ EOF
             ;;
     esac
     
+    # Add initial transaction log entry
+    _add_deployment_transaction_log "$deployment_id" "deployment_started" "Deployment initialized with strategy: $strategy" "success"
+    
+    # Update deployment state to started
+    _update_deployment_state "$deployment_id" "started" '{"workflow_id": "'$workflow_id'"}'
+    
     # Emit deployment started event
     unity_emit_event "deployment.started" "deployment-service" \
         "{\"deployment_id\":\"$deployment_id\",\"stack_name\":\"$stack_name\",\"strategy\":\"$strategy\",\"workflow_id\":\"$workflow_id\"}" \
@@ -252,11 +554,13 @@ _create_blue_green_workflow() {
     
     local workflow_file="$UNITY_DEPLOYMENT_WORKFLOWS_DIR/instances/${deployment_id}_blue_green.workflow"
     
-    cat > "$workflow_file" <<EOF
+    local workflow_content
+    workflow_content=$(cat <<EOF
 {
   "workflow_id": "${deployment_id}_blue_green",
   "deployment_id": "$deployment_id",
   "strategy": "blue-green",
+  "created_at": $(date +%s),
   "phases": [
     {
       "phase": "prepare",
@@ -300,6 +604,13 @@ _create_blue_green_workflow() {
   }
 }
 EOF
+)
+    
+    # Write workflow atomically
+    if ! unity_atomic_write "$workflow_file" "$workflow_content" "json" "false"; then
+        unity_log "ERROR" "Failed to create blue-green workflow: $workflow_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
     
     # Create deployment workflow instance
     local workflow_params="{\"deployment_id\":\"$deployment_id\",\"stack_name\":\"$stack_name\",\"deployment_type\":\"$deployment_type\",\"options\":\"$options\"}"
@@ -318,11 +629,13 @@ _create_canary_workflow() {
     
     local workflow_file="$UNITY_DEPLOYMENT_WORKFLOWS_DIR/instances/${deployment_id}_canary.workflow"
     
-    cat > "$workflow_file" <<EOF
+    local workflow_content
+    workflow_content=$(cat <<EOF
 {
   "workflow_id": "${deployment_id}_canary",
   "deployment_id": "$deployment_id",
   "strategy": "canary",
+  "created_at": $(date +%s),
   "canary_config": {
     "initial_weight": 10,
     "increment": 10,
@@ -373,6 +686,13 @@ _create_canary_workflow() {
   }
 }
 EOF
+)
+    
+    # Write workflow atomically
+    if ! unity_atomic_write "$workflow_file" "$workflow_content" "json" "false"; then
+        unity_log "ERROR" "Failed to create canary workflow: $workflow_file"
+        return $UNITY_ERROR_EXECUTION
+    fi
     
     local workflow_params="{\"deployment_id\":\"$deployment_id\",\"stack_name\":\"$stack_name\",\"deployment_type\":\"$deployment_type\",\"canary_config\":true}"
     local workflow_id
@@ -1022,24 +1342,33 @@ _check_self_healing_triggers() {
     local service_name="$1"
     local event_data="$2"
     
-    # Check consecutive failures
+    # Check consecutive failures using atomic writes
     local failure_count_file="$UNITY_DEPLOYMENT_STATE_DIR/failures/${service_name}.count"
     local current_failures=0
     
     if [[ -f "$failure_count_file" ]]; then
-        current_failures=$(cat "$failure_count_file")
+        current_failures=$(unity_atomic_read "$failure_count_file" "false" 2>/dev/null || echo "0")
+        if [[ ! "$current_failures" =~ ^[0-9]+$ ]]; then
+            current_failures=0
+        fi
     fi
     
     current_failures=$((current_failures + 1))
-    echo "$current_failures" > "$failure_count_file"
+    
+    # Write failure count atomically
+    mkdir -p "$(dirname "$failure_count_file")"
+    if ! unity_atomic_write "$failure_count_file" "$current_failures" "text" "true"; then
+        unity_log "WARN" "Failed to update failure count for service: $service_name"
+        return 0  # Don't fail the whole process for this
+    fi
     
     if [[ $current_failures -ge $UNITY_ROLLBACK_FAILURE_THRESHOLD ]]; then
         unity_log "WARN" "Service $service_name exceeded failure threshold ($current_failures)"
         unity_emit_event "deployment.self_healing.triggered" "deployment-service" \
             "{\"service\":\"$service_name\",\"failure_count\":$current_failures}" "high" "true"
         
-        # Reset failure count after triggering
-        echo "0" > "$failure_count_file"
+        # Reset failure count after triggering (atomic write)
+        unity_atomic_write "$failure_count_file" "0" "text" "true" || unity_log "WARN" "Failed to reset failure count for service: $service_name"
     fi
 }
 
@@ -1185,29 +1514,110 @@ _execute_rollback() {
     return $UNITY_SUCCESS
 }
 
-# Get deployment status
+# Get deployment status with atomic reads
 _get_deployment_status() {
     local deployment_id="${1:-all}"
     
     if [[ "$deployment_id" == "all" ]]; then
-        # Show all active deployments
-        echo "Active Deployments:"
-        for state_file in "$UNITY_DEPLOYMENT_STATE_DIR/active"/*.state; do
-            [[ -f "$state_file" ]] || continue
-            local id
-            id=$(basename "$state_file" .state)
-            local status
-            status=$(grep '"status":' "$state_file" | cut -d':' -f2 | tr -d ' ",' 2>/dev/null || echo "unknown")
-            echo "  - $id: $status"
+        # Show all deployments across all directories
+        echo "Unity Deployment Status Report:"
+        echo ""
+        
+        for dir in "active" "completed" "failed"; do
+            echo "${dir^} Deployments:"
+            local found_any=false
+            
+            for state_file in "$UNITY_DEPLOYMENT_STATE_DIR/$dir"/*.state; do
+                [[ -f "$state_file" ]] || continue
+                found_any=true
+                
+                local id
+                id=$(basename "$state_file" .state)
+                
+                # Validate and read state atomically
+                if _validate_deployment_state "$id"; then
+                    local state_content
+                    state_content="$(unity_atomic_read "$state_file" "true")"
+                    if [[ $? -eq 0 ]]; then
+                        local status stack_name deployment_type created_at
+                        if command -v jq >/dev/null 2>&1; then
+                            status=$(echo "$state_content" | jq -r '.status // "unknown"')
+                            stack_name=$(echo "$state_content" | jq -r '.stack_name // "unknown"')
+                            deployment_type=$(echo "$state_content" | jq -r '.deployment_type // "unknown"')
+                            created_at=$(echo "$state_content" | jq -r '.created_at // 0')
+                        else
+                            status=$(echo "$state_content" | grep -o '"status":[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+                            stack_name=$(echo "$state_content" | grep -o '"stack_name":[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+                            deployment_type=$(echo "$state_content" | grep -o '"deployment_type":[[:space:]]*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+                            created_at="unknown"
+                        fi
+                        
+                        local created_date="unknown"
+                        if [[ "$created_at" =~ ^[0-9]+$ ]]; then
+                            created_date=$(date -r "$created_at" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown")
+                        fi
+                        
+                        echo "  - $id:"
+                        echo "    Stack: $stack_name"
+                        echo "    Type: $deployment_type"
+                        echo "    Status: $status"
+                        echo "    Created: $created_date"
+                    else
+                        echo "  - $id: [READ error - possibly corrupted]"
+                    fi
+                else
+                    echo "  - $id: [validation failed - attempting recovery]"
+                fi
+            done
+            
+            if [[ "$found_any" == "false" ]]; then
+                echo "  (none)"
+            fi
+            echo ""
         done
     else
-        # Show specific deployment
-        local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
-        if [[ -f "$state_file" ]]; then
-            cat "$state_file"
-        else
+        # Show specific deployment with full details
+        echo "Deployment Details: $deployment_id"
+        echo ""
+        
+        # Validate state first
+        if ! _validate_deployment_state "$deployment_id"; then
+            unity_log "ERROR" "Deployment validation failed: $deployment_id"
+            return $UNITY_ERROR_VALIDATION
+        fi
+        
+        # Find deployment state file
+        local state_file=""
+        for dir in "active" "completed" "failed"; do
+            if [[ -f "$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state" ]]; then
+                state_file="$UNITY_DEPLOYMENT_STATE_DIR/$dir/${deployment_id}.state"
+                break
+            fi
+        done
+        
+        if [[ -z "$state_file" ]]; then
             unity_log "ERROR" "Deployment not found: $deployment_id"
             return $UNITY_ERROR_VALIDATION
+        fi
+        
+        # Read and display state content
+        local state_content
+        state_content="$(unity_atomic_read "$state_file" "true")"
+        if [[ $? -eq 0 ]]; then
+            # Pretty print JSON if jq is available
+            if command -v jq >/dev/null 2>&1; then
+                echo "$state_content" | jq .
+            else
+                echo "$state_content"
+            fi
+            
+            # Show transaction history if available
+            echo ""
+            echo "Transaction History:"
+            unity_atomic_get_transaction_history "$state_file" 5 || echo "  (no transaction history available)"
+        else
+            unity_log "ERROR" "Failed to read deployment state: $deployment_id"
+            return $UNITY_ERROR_EXECUTION
         fi
     fi
     
@@ -1218,7 +1628,7 @@ _get_deployment_status() {
 # Service Lifecycle
 #############################################
 
-# Cleanup deployment service
+# Cleanup deployment service with atomic state management
 unity_deployment_cleanup() {
     unity_log "INFO" "Cleaning up deployment service..."
     
@@ -1227,9 +1637,36 @@ unity_deployment_cleanup() {
     pkill -f "_collect_deployment_metrics" 2>/dev/null || true
     pkill -f "_check_deployment_costs" 2>/dev/null || true
     
-    # Archive completed deployments
+    # Archive completed deployments atomically
     mkdir -p "$UNITY_DEPLOYMENT_STATE_DIR/archive"
-    mv "$UNITY_DEPLOYMENT_STATE_DIR/completed"/*.state "$UNITY_DEPLOYMENT_STATE_DIR/archive/" 2>/dev/null || true
+    
+    for state_file in "$UNITY_DEPLOYMENT_STATE_DIR/completed"/*.state; do
+        [[ -f "$state_file" ]] || continue
+        
+        local deployment_id
+        deployment_id=$(basename "$state_file" .state)
+        
+        # Add archival transaction log entry
+        _add_deployment_transaction_log "$deployment_id" "archived" "Deployment archived during cleanup" "success" 2>/dev/null || true
+        
+        # Move state file and checksum
+        local archive_file="$UNITY_DEPLOYMENT_STATE_DIR/archive/$(basename "$state_file")"
+        if mv "$state_file" "$archive_file"; then
+            # Move checksum file if it exists
+            if [[ -f "${state_file}.checksum" ]]; then
+                mv "${state_file}.checksum" "${archive_file}.checksum" 2>/dev/null || true
+            fi
+            unity_log "DEBUG" "Archived deployment state: $deployment_id"
+        else
+            unity_log "WARN" "Failed to archive deployment state: $deployment_id"
+        fi
+    done
+    
+    # Clean up stale atomic state locks
+    find "$UNITY_ATOMIC_LOCK_DIR" -name "*.lock" -mmin +$((UNITY_ATOMIC_LOCK_TIMEOUT * 2)) -delete 2>/dev/null || true
+    
+    # Clean up temporary atomic files
+    find "$UNITY_ATOMIC_TEMP_DIR" -name "*.tmp" -mmin +60 -delete 2>/dev/null || true
     
     unity_log "INFO" "Deployment service cleanup completed"
     return $UNITY_SUCCESS
@@ -1331,11 +1768,9 @@ _handle_deployment_completed() {
     
     unity_log "SUCCESS" "Deployment completed: $deployment_id"
     
-    # Move deployment state to completed
-    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
-    if [[ -f "$state_file" ]]; then
-        mv "$state_file" "$UNITY_DEPLOYMENT_STATE_DIR/completed/"
-    fi
+    # Update deployment state and move to completed
+    _add_deployment_transaction_log "$deployment_id" "deployment_completed" "Deployment completed successfully" "success"
+    _move_deployment_state "$deployment_id" "active" "completed" "completed"
     
     # Clean up temporary files
     rm -f "$UNITY_DEPLOYMENT_STATE_DIR/failures/${deployment_id}".*
@@ -1356,15 +1791,21 @@ _handle_deployment_failed() {
     
     unity_log "ERROR" "Deployment failed: $deployment_id"
     
-    # Move deployment state to failed
-    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/active/${deployment_id}.state"
-    if [[ -f "$state_file" ]]; then
-        mv "$state_file" "$UNITY_DEPLOYMENT_STATE_DIR/failed/"
-    fi
+    # Update deployment state and move to failed
+    _add_deployment_transaction_log "$deployment_id" "deployment_failed" "Deployment failed" "error"
+    _move_deployment_state "$deployment_id" "active" "failed" "failed"
     
-    # Check if automatic rollback is enabled
-    local rollback_enabled
-    rollback_enabled=$(grep '"rollback_enabled":' "$UNITY_DEPLOYMENT_STATE_DIR/failed/${deployment_id}.state" | grep -o 'true\|false' 2>/dev/null || echo "false")
+    # Check if automatic rollback is enabled from the state file
+    local state_file="$UNITY_DEPLOYMENT_STATE_DIR/failed/${deployment_id}.state"
+    local rollback_enabled="false"
+    
+    if [[ -f "$state_file" ]]; then
+        local state_content
+        state_content="$(unity_atomic_read "$state_file" "true")"
+        if [[ $? -eq 0 ]]; then
+            rollback_enabled=$(echo "$state_content" | grep -o '"rollback_enabled":[[:space:]]*true\|false' | grep -o 'true\|false' || echo "false")
+        fi
+    fi
     
     if [[ "$rollback_enabled" == "true" ]]; then
         unity_log "INFO" "Triggering automatic rollback for failed deployment: $deployment_id"

@@ -47,3 +47,13 @@ system.startup|system|System startup
 system.shutdown|system|System shutdown
 system.error|system|System error occurred
 system.warning|system|System warning
+
+# Lock Management Events
+lock.LOCK_ACQUIRED|lock|Lock successfully acquired
+lock.LOCK_RELEASED|lock|Lock successfully released
+lock.LOCK_CONTENTION|lock|Lock contention detected
+lock.LOCK_TIMEOUT|lock|Lock acquisition timeout
+lock.DEADLOCK_DETECTED|lock|Deadlock detected in lock acquisition
+lock.DEADLOCK_RESOLVED|lock|Deadlock resolved by victim selection
+lock.STALE_LOCK_CLEANED|lock|Stale lock cleaned up
+lock.LOCK_ORDERING_VIOLATION|lock|Lock ordering violation detected

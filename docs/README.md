@@ -11,37 +11,23 @@ Welcome to the GeuseMaker documentation. This directory contains all essential d
 ### Core Guides
 - [Architecture Overview](guides/architecture.md) - System architecture and design
 - [Deployment Guide](guides/deployment.md) - Complete deployment instructions
-- [Testing Guide](guides/testing.md) - Testing procedures and best practices
+<!-- - [Testing Guide](guides/testing.md) - Testing procedures and best practices -->
 - [Troubleshooting](guides/troubleshooting.md) - Common issues and solutions
 
 ### Architecture Documentation
 - [Module Architecture](module-architecture.md) - Modular system design
-- [Components](architecture/components.md) - System components overview
-- [Module Consolidation](architecture/module-consolidation.md) - Module organization
-- [Module Dependency Optimization](architecture/module-dependency-optimization.md) - Dependency management
-- [Compute Consolidation Plan](architecture/compute-consolidation-plan.md) - Compute resource organization
-- [Source Tree](architecture/source-tree.md) - Codebase structure
+- [Unity Architecture](unity/unity-architecture.md) - Unity system design
+<!-- Additional architecture documents available in archive/ -->
 
 ### Operations & Maintenance
 - [Maintenance Suite Guide](maintenance-suite-guide.md) - Unified maintenance operations
-- [Monitoring Guide](monitoring-guide.md) - System monitoring and health checks
-- [Backup Procedures](backup-procedures.md) - Backup and recovery procedures
-- [Security Guide](security-guide.md) - Security best practices
-- [Maintenance Safety Guide](maintenance-safety-guide.md) - Safe maintenance procedures
+- [Unity Monitor Service](unity/unity-monitor-service.md) - Monitoring with Unity
+<!-- Additional maintenance guides in development -->
 
 ### Configuration & Setup
-- [Configuration Management](configuration-management.md) - Managing configurations
-- [ALB & CloudFront Setup](alb-cloudfront-setup.md) - Load balancer and CDN setup
-- [Docker Image Management](docker-image-management.md) - Container management
-- [Network Validation Guide](network-validation-guide.md) - Network configuration
-- [EFS Cleanup Guide](efs-cleanup-guide.md) - EFS management
-
-### Error Handling & Recovery
-- [Error Handling Guide](ERROR_HANDLING_GUIDE.md) - Comprehensive error handling
-- [Recovery Procedures](RECOVERY_PROCEDURES_GUIDE.md) - System recovery steps
-- [Clear Error Messages Guide](clear-error-messages-guide.md) - Error message standards
-- [Rollback Mechanism Guide](rollback-mechanism-guide.md) - Deployment rollback
-- [Error Recovery](troubleshooting/error-recovery.md) - Specific error recovery procedures
+- [Unity Configuration](unity/core/unity-configuration.md) - Unity system configuration
+- [Unity Migration Guide](unity/core/unity-migration-guide.md) - Migration to Unity
+<!-- Additional configuration guides in development -->
 
 ### Reference Documentation
 
@@ -61,17 +47,16 @@ Welcome to the GeuseMaker documentation. This directory contains all essential d
 - [Makefile Commands](reference/cli/makefile.md) - Make targets reference
 
 ### Standards & Best Practices
-- [Coding Standards](coding-standards.md) - Development standards
-- [Library Loading Standard](library-loading-standard.md) - Module loading patterns
-- [Architecture Overview](architecture.md) - System design principles
+- [Unity Developer Guide](unity/core/unity-developer-guide.md) - Development with Unity
+- [Unity Operations](unity/core/unity-operations.md) - Operational procedures
+<!-- Additional standards documentation in development -->
 
-### Platform-Specific
-- [OS Compatibility](OS-COMPATIBILITY.md) - Operating system support
-- [AWS CLI v2 Enhancements](aws-cli-v2-enhancements.md) - AWS CLI features
-- [Performance Enhancements](PERFORMANCE_ENHANCEMENTS.md) - Performance optimizations
+### Unity System
+- [Unity Overview](unity/core/unity-overview.md) - Introduction to Unity
+- [Unity Tutorials](unity/core/unity-tutorials.md) - Step-by-step tutorials
+- [Plugin Development](unity/plugin-development-guide.md) - Creating Unity plugins
 
-### Setup & Troubleshooting
-- [Setup Troubleshooting](setup/troubleshooting.md) - Setup issue resolution
+<!-- Legacy documentation archived in deprecated/ -->
 
 ## 🗂️ Archived Documentation
 
@@ -92,12 +77,12 @@ Historical documentation has been organized into the archive:
 
 ### For Development
 1. Review [Architecture](guides/architecture.md)
-2. Check [Coding Standards](coding-standards.md)
+2. Check [Unity Developer Guide](unity/core/unity-developer-guide.md)
 3. Use [CLI Reference](reference/cli/)
 4. See [API Reference](reference/api/)
 
 ### For Operations
 1. Follow [Maintenance Suite Guide](maintenance-suite-guide.md)
-2. Setup [Monitoring](monitoring-guide.md)
-3. Review [Security Guide](security-guide.md)
-4. Plan [Backup Procedures](backup-procedures.md)
+2. Setup [Unity Monitoring](unity/unity-monitor-service.md)
+3. Review [Unity Operations](unity/core/unity-operations.md)
+4. Check [API Monitoring](reference/api/monitoring.md)

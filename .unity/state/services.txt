@@ -1,3 +1,2 @@
 # Unity Service Registry
 # Format: SERVICE_NAME:STATUS:PATH:PID
-test-service:registered:test:standard:
