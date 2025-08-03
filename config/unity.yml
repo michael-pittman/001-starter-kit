@@ -1,0 +1,793 @@
+# =============================================================================
+# Unity System Configuration - Unified Configuration Schema
+# Central configuration for the GeuseMaker unified deployment system
+# This file consolidates all configuration sources into a single source of truth
+# =============================================================================
+
+# Metadata
+unity:
+  version: "2.0.0"
+  schema_version: "2024.1"
+  description: "GeuseMaker unified configuration system"
+  last_updated: "2025-01-01"
+  
+  # ==========================================================================
+  # CORE SYSTEM CONFIGURATION
+  # ==========================================================================
+  
+  # System-level settings
+  system:
+    log_level: "INFO"  # DEBUG, INFO, WARN, ERROR, NONE
+    validation_mode: "strict"  # strict, lenient, skip
+    cache_ttl: 300  # seconds
+    timezone: "UTC"
+    
+    # Core directories
+    directories:
+      state: ".unity/state"
+      events: ".unity/events"
+      plugins: "lib/unity/plugins"
+      services: "lib/unity/services"
+      cache: ".unity/cache"
+      logs: "logs"
+      temp: "/tmp/unity"
+    
+    # File watching and reloading
+    file_watching:
+      enabled: true
+      poll_interval: 5  # seconds
+      auto_reload: true
+      reload_debounce: 2  # seconds
+    
+  # ==========================================================================
+  # CONFIGURATION MANAGEMENT
+  # ==========================================================================
+  
+  # Configuration sources in priority order (highest to lowest)
+  configuration:
+    sources:
+      - source: "COMMAND_LINE_ARGS"
+        priority: 1
+        enabled: true
+        description: "Command line arguments and flags"
+        
+      - source: "ENVIRONMENT_VARIABLES" 
+        priority: 2
+        enabled: true
+        description: "Shell environment variables"
+        
+      - source: "ENV_FILES"
+        priority: 3
+        enabled: true
+        description: "Environment files (.env.local, .env.production, etc.)"
+        search_paths:
+          - ".env.local"
+          - ".env.${ENVIRONMENT}"
+          - ".env"
+        
+      - source: "AWS_PARAMETER_STORE"
+        priority: 4
+        enabled: false  # Disabled by default
+        description: "AWS Systems Manager Parameter Store"
+        settings:
+          prefix: "/aibuildkit"
+          recursive: true
+          decrypt: true
+          max_retries: 3
+          
+      - source: "UNITY_CONFIG_FILE"
+        priority: 5
+        enabled: true
+        description: "This Unity configuration file"
+        file_path: "config/unity.yml"
+        
+      - source: "DEFAULTS_CONFIG"
+        priority: 6
+        enabled: true
+        description: "Default values configuration"
+        file_path: "config/defaults.yml"
+        
+      - source: "HARDCODED_DEFAULTS"
+        priority: 7
+        enabled: true
+        description: "Hardcoded fallback defaults"
+    
+    # Validation settings
+    validation:
+      enabled: true
+      mode: "strict"  # strict, lenient, skip
+      stages:
+        - "syntax"      # YAML/JSON syntax validation
+        - "schema"      # Type and format validation
+        - "business"    # Business logic validation
+        - "security"    # Security requirement validation
+        - "dependencies" # Cross-variable dependency validation
+      
+      # Validation rules
+      rules:
+        require_description: true
+        enforce_naming_convention: true
+        validate_aws_resources: true
+        check_security_placeholders: true
+        
+    # Caching configuration
+    caching:
+      enabled: true
+      ttl: 300  # seconds
+      max_entries: 1000
+      persist_to_disk: true
+      cache_file: ".unity/state/config-cache.json"
+      
+  # ==========================================================================
+  # DEPLOYMENT CONFIGURATION
+  # ==========================================================================
+  
+  deployment:
+    # Default deployment settings
+    defaults:
+      type: "spot"  # spot, ondemand, simple, enterprise, alb, cdn, full
+      environment: "development"  # development, staging, production
+      region: "us-east-1"
+      instance_types: 
+        - "g4dn.xlarge"   # Primary GPU instance
+        - "g5.xlarge"     # Alternative GPU instance
+        - "m5.xlarge"     # Fallback CPU instance
+      
+    # Environment-specific configurations
+    environments:
+      development:
+        debug_enabled: true
+        dry_run_default: false
+        validation_level: "lenient"
+        auto_cleanup: true
+        resource_limits:
+          max_instances: 2
+          max_volume_size: 100  # GB
+        
+      staging:
+        debug_enabled: false
+        dry_run_default: false
+        validation_level: "strict"
+        approval_required: true
+        auto_cleanup: false
+        resource_limits:
+          max_instances: 5
+          max_volume_size: 200  # GB
+        
+      production:
+        debug_enabled: false
+        dry_run_default: false
+        validation_level: "strict"
+        approval_required: true
+        backup_before_deploy: true
+        auto_cleanup: false
+        resource_limits:
+          max_instances: 10
+          max_volume_size: 500  # GB
+    
+    # Feature flags
+    features:
+      multi_az: false
+      load_balancer: false
+      cdn: false
+      efs_storage: true
+      backup: false
+      monitoring: true
+      spot_fallback: true
+      
+  # ==========================================================================
+  # INFRASTRUCTURE CONFIGURATION
+  # ==========================================================================
+  
+  infrastructure:
+    # AWS regions and availability
+    aws:
+      supported_regions:
+        - "us-east-1"
+        - "us-east-2" 
+        - "us-west-1"
+        - "us-west-2"
+        - "eu-west-1"
+        - "eu-central-1"
+        - "ap-southeast-1"
+        - "ap-northeast-1"
+      
+      # Instance type categories
+      instance_types:
+        gpu:
+          - "g4dn.xlarge"
+          - "g4dn.2xlarge"
+          - "g5.xlarge"
+          - "g5.2xlarge"
+          - "g5g.xlarge"
+          - "g5g.2xlarge"
+        cpu:
+          - "m5.large"
+          - "m5.xlarge"
+          - "m5.2xlarge"
+          - "c5.large"
+          - "c5.xlarge"
+        memory:
+          - "r5.large"
+          - "r5.xlarge"
+          - "r5.2xlarge"
+        
+    # Networking configuration
+    networking:
+      vpc:
+        cidr_block: "10.0.0.0/16"
+        enable_dns_hostnames: true
+        enable_dns_support: true
+        
+      subnets:
+        public:
+          count: 2
+          cidr_blocks:
+            - "10.0.1.0/24"
+            - "10.0.2.0/24"
+        private:
+          count: 2
+          cidr_blocks:
+            - "10.0.10.0/24"
+            - "10.0.11.0/24"
+            
+      security_groups:
+        web:
+          description: "Web traffic security group"
+          ingress:
+            - protocol: "tcp"
+              port: 80
+              source: "0.0.0.0/0"
+            - protocol: "tcp"
+              port: 443
+              source: "0.0.0.0/0"
+        app:
+          description: "Application security group"
+          ingress:
+            - protocol: "tcp"
+              port: 5678  # n8n
+              source: "web"
+            - protocol: "tcp"
+              port: 11434  # Ollama
+              source: "web"
+              
+    # Storage configuration
+    storage:
+      ebs:
+        volume_type: "gp3"
+        encryption: true
+        delete_on_termination: true
+        
+      efs:
+        performance_mode: "generalPurpose"
+        throughput_mode: "provisioned"
+        encryption: true
+        backup: true
+        
+    # Backup and recovery
+    backup:
+      enabled: false  # Disabled by default
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      retention_days: 30
+      cross_region: false
+      
+  # ==========================================================================
+  # APPLICATION SERVICES
+  # ==========================================================================
+  
+  applications:
+    # PostgreSQL database
+    postgres:
+      enabled: true
+      image: "postgres:16.1-alpine3.19"
+      port: 5432
+      database: "n8n"
+      user: "n8n"
+      # password loaded from Parameter Store
+      resources:
+        cpu_limit: "1.0"
+        memory_limit: "2G"
+        cpu_reservation: "0.5"
+        memory_reservation: "1G"
+      config:
+        max_connections: 100
+        shared_buffers: "512MB"
+        effective_cache_size: "1GB"
+      backup:
+        enabled: true
+        schedule: "0 2 * * *"
+        retention_days: 30
+        
+    # n8n workflow automation
+    n8n:
+      enabled: true
+      image: "n8nio/n8n:1.19.4"
+      port: 5678
+      resources:
+        cpu_limit: "0.5"
+        memory_limit: "1G"
+        cpu_reservation: "0.25"
+        memory_reservation: "512M"
+      config:
+        cors_enable: true
+        cors_allowed_origins: "*"
+        basic_auth_active: true
+        community_packages_enabled: false
+        payload_size_max: 16  # MB
+        log_level: "info"
+      scaling:
+        replicas: 1
+        max_replicas: 3
+        target_cpu_utilization: 70
+        
+    # Ollama LLM inference
+    ollama:
+      enabled: true
+      image: "ollama/ollama:0.1.17"
+      port: 11434
+      resources:
+        cpu_limit: "1.0"
+        memory_limit: "4G"
+        cpu_reservation: "0.5"
+        memory_reservation: "2G"
+        gpu_memory_fraction: 0.80
+      config:
+        max_loaded_models: 2
+        concurrent_requests: 4
+        model_cache_size: "4GB"
+      models:
+        default:
+          - name: "deepseek-r1:8b"
+            preload: false
+          - name: "qwen2.5-vl:7b" 
+            preload: false
+            
+    # Qdrant vector database
+    qdrant:
+      enabled: true
+      image: "qdrant/qdrant:v1.7.3"
+      http_port: 6333
+      grpc_port: 6334
+      resources:
+        cpu_limit: "0.5"
+        memory_limit: "1G"
+        cpu_reservation: "0.25"
+        memory_reservation: "512M"
+      config:
+        max_search_threads: 4
+        max_optimization_threads: 2
+        wal_capacity_mb: 128
+        max_segment_size_kb: 100000
+      collections:
+        default_vector_size: 384
+        default_distance: "Cosine"
+        default_on_disk_payload: true
+        
+    # Crawl4AI web scraping
+    crawl4ai:
+      enabled: true
+      image: "unclecode/crawl4ai:0.2.77"
+      port: 11235
+      resources:
+        cpu_limit: "0.5"
+        memory_limit: "1G"
+        cpu_reservation: "0.25"
+        memory_reservation: "512M"
+      config:
+        rate_limiting_enabled: true
+        default_limit: "1000/minute"
+        max_concurrent_sessions: 2
+        browser_pool_size: 1
+        request_timeout: 30
+        max_retries: 3
+        
+  # ==========================================================================
+  # MONITORING AND OBSERVABILITY
+  # ==========================================================================
+  
+  monitoring:
+    # Health checks
+    healthcheck:
+      enabled: true
+      interval: 30  # seconds
+      timeout: 10   # seconds
+      retries: 3
+      start_period: 60  # seconds
+      
+    # Metrics collection
+    metrics:
+      enabled: true
+      collection_interval: 30  # seconds
+      retention_days: 30
+      export_formats: ["prometheus", "cloudwatch"]
+      
+      # Custom metrics
+      custom:
+        - name: "deployment_success_rate"
+          type: "gauge"
+          description: "Percentage of successful deployments"
+        - name: "spot_interruption_rate"
+          type: "counter"
+          description: "Number of spot instance interruptions"
+          
+    # Logging configuration
+    logging:
+      level: "info"  # debug, info, warn, error
+      format: "json"
+      centralized: true
+      retention_days: 30
+      max_file_size: "100MB"
+      max_files: 10
+      
+      # Log destinations
+      destinations:
+        - type: "file"
+          path: "logs/unity.log"
+          level: "info"
+        - type: "cloudwatch"
+          log_group: "/unity/application"
+          level: "warn"
+          
+    # Alerting
+    alerts:
+      enabled: true
+      evaluation_interval: 30  # seconds
+      
+      # Alert channels
+      channels:
+        - name: "log"
+          type: "log"
+          severity: ["error", "critical"]
+        - name: "webhook"
+          type: "webhook"
+          url: "${WEBHOOK_URL}"
+          severity: ["critical"]
+          timeout: 10  # seconds
+          
+      # Alert rules
+      rules:
+        - name: "high_error_rate"
+          condition: "error_rate > 0.05"
+          duration: "5m"
+          severity: "warning"
+        - name: "service_down"
+          condition: "up == 0"
+          duration: "1m"
+          severity: "critical"
+          
+  # ==========================================================================
+  # SECURITY CONFIGURATION
+  # ==========================================================================
+  
+  security:
+    # Encryption settings
+    encryption:
+      enabled: true
+      algorithm: "AES-256-GCM"
+      key_rotation: true
+      key_rotation_days: 90
+      
+    # Secrets management  
+    secrets:
+      provider: "AWS_PARAMETER_STORE"
+      prefix: "/aibuildkit"
+      auto_rotate: true
+      
+      # Secret definitions
+      required_secrets:
+        - name: "POSTGRES_PASSWORD"
+          path: "/aibuildkit/POSTGRES_PASSWORD"
+          type: "password"
+          min_length: 12
+        - name: "N8N_ENCRYPTION_KEY"
+          path: "/aibuildkit/n8n/ENCRYPTION_KEY"
+          type: "encryption_key"
+          min_length: 32
+        - name: "N8N_USER_MANAGEMENT_JWT_SECRET"
+          path: "/aibuildkit/n8n/JWT_SECRET"
+          type: "jwt_secret"
+          min_length: 64
+        - name: "OPENAI_API_KEY"
+          path: "/aibuildkit/OPENAI_API_KEY"
+          type: "api_key"
+          pattern: "^sk-[a-zA-Z0-9]{48}$"
+          
+    # Container security
+    container_security:
+      run_as_non_root: true
+      read_only_root_filesystem: false
+      no_new_privileges: true
+      drop_capabilities: ["ALL"]
+      add_capabilities: []
+      security_opt: ["no-new-privileges:true"]
+      
+    # Network security
+    network_security:
+      cors_strict_mode: true
+      trusted_hosts_restriction: true
+      internal_communication_only: true
+      ssl_redirect: true
+      hsts_enabled: true
+      
+    # Access control
+    access_control:
+      enable_rbac: true
+      session_timeout: 3600  # 1 hour
+      max_login_attempts: 5
+      lockout_duration: 900  # 15 minutes
+      
+    # Audit logging
+    audit:
+      enabled: true
+      log_all_operations: true
+      sensitive_data_masking: true
+      retention_days: 90
+      
+  # ==========================================================================
+  # COST OPTIMIZATION
+  # ==========================================================================
+  
+  cost_optimization:
+    # Spot instance configuration
+    spot_instances:
+      enabled: true
+      max_price: 1.00  # USD per hour
+      interruption_handling: true
+      diversified_allocation: true
+      fallback_to_ondemand: true
+      
+    # Auto scaling
+    auto_scaling:
+      enabled: false  # Disabled by default
+      scale_down_enabled: true
+      scale_down_threshold: 20  # CPU percentage
+      idle_timeout_minutes: 30
+      cooldown_period: 300  # seconds
+      
+    # Resource optimization
+    resource_optimization:
+      right_sizing_enabled: false
+      unused_resource_detection: false
+      cost_alerts_enabled: false
+      budget_alerts_threshold: 80  # percentage
+      
+    # Reserved instances
+    reserved_instances:
+      enabled: false
+      utilization_threshold: 80  # percentage
+      recommendation_engine: true
+      
+  # ==========================================================================
+  # PLUGIN FRAMEWORK
+  # ==========================================================================
+  
+  plugins:
+    enabled: true
+    auto_load: true
+    plugin_directory: "lib/unity/plugins"
+    
+    # Active plugins
+    active:
+      - "spot-optimizer"
+      - "cost-analyzer"
+      - "security-validator"
+      - "performance-tuner"
+      
+    # Plugin configurations
+    configurations:
+      spot-optimizer:
+        enabled: true
+        priority: 100
+        settings:
+          price_threshold: 0.50
+          cache_duration: 3600  # seconds
+          fallback_enabled: true
+          regions: ["us-east-1", "us-west-2"]
+          
+      cost-analyzer:
+        enabled: true
+        priority: 90
+        settings:
+          budget_threshold: 80  # percentage
+          threshold_alerts: true
+          reporting_interval: "daily"
+          cost_attribution: true
+          
+      security-validator:
+        enabled: true
+        priority: 95
+        settings:
+          pre_deployment_check: true
+          compliance_mode: "strict"
+          scan_containers: true
+          vulnerability_threshold: "medium"
+          
+      performance-tuner:
+        enabled: true
+        priority: 85
+        settings:
+          auto_optimize: true
+          benchmark_on_deploy: false
+          optimization_targets: ["cpu", "memory", "network"]
+          
+  # ==========================================================================
+  # EVENT SYSTEM
+  # ==========================================================================
+  
+  events:
+    enabled: true
+    
+    # Event persistence
+    persistence:
+      enabled: true
+      retention_days: 7
+      storage_type: "file"  # file, database
+      storage_path: ".unity/events"
+      
+    # Event processing
+    processing:
+      async_processing: true
+      max_handlers_per_event: 10
+      timeout: 30  # seconds
+      retry_attempts: 3
+      
+    # Event types
+    types:
+      system:
+        - "CONFIG_CHANGED"
+        - "SERVICE_STARTED"
+        - "SERVICE_STOPPED"
+        - "ERROR_OCCURRED"
+      deployment:
+        - "DEPLOYMENT_STARTED"
+        - "DEPLOYMENT_COMPLETED"
+        - "DEPLOYMENT_FAILED"
+        - "ROLLBACK_INITIATED"
+      monitoring:
+        - "ALERT_TRIGGERED"
+        - "HEALTH_CHECK_FAILED"
+        - "METRIC_THRESHOLD_EXCEEDED"
+        
+  # ==========================================================================
+  # SERVICE REGISTRY
+  # ==========================================================================
+  
+  services:
+    auto_discover: true
+    health_check_interval: 60   # seconds
+    startup_timeout: 300        # seconds
+    shutdown_timeout: 30        # seconds
+    
+    # Core services
+    core_services:
+      config:
+        enabled: true
+        type: "core"
+        dependencies: []
+        health_check: true
+        auto_start: true
+        
+      aws:
+        enabled: true
+        type: "core"
+        dependencies: ["config"]
+        health_check: true
+        auto_start: true
+        settings:
+          region_validation: true
+          rate_limiting: true
+          cache_ttl: 3600
+          
+      docker:
+        enabled: true
+        type: "core"
+        dependencies: ["config"]
+        health_check: true
+        auto_start: true
+        settings:
+          compose_version: "2.4"
+          restart_policy: "unless-stopped"
+          
+      monitor:
+        enabled: true
+        type: "core"
+        dependencies: ["config", "aws"]
+        health_check: true
+        auto_start: true
+        
+  # ==========================================================================
+  # PERFORMANCE OPTIMIZATION
+  # ==========================================================================
+  
+  performance:
+    # Parallel operations
+    parallel_operations: true
+    max_concurrent_jobs: 5
+    job_timeout: 1800  # seconds (30 minutes)
+    
+    # Caching
+    cache:
+      enabled: true
+      ttl: 3600  # seconds
+      max_size_mb: 100
+      eviction_policy: "lru"
+      
+    # Resource limits
+    resource_limits:
+      max_memory_mb: 1024
+      max_cpu_percent: 80
+      max_disk_usage_percent: 85
+      
+    # Optimization targets
+    optimization:
+      startup_time: true
+      memory_usage: true
+      network_efficiency: true
+      disk_io: true
+      
+  # ==========================================================================
+  # INTEGRATION SETTINGS
+  # ==========================================================================
+  
+  integrations:
+    # AWS services
+    aws:
+      enabled: true
+      services:
+        - "EC2"
+        - "VPC"
+        - "ALB"
+        - "CloudFront"
+        - "EFS"
+        - "CloudFormation"
+        - "SSM"
+        - "CloudWatch"
+        - "S3"
+        - "IAM"
+      
+      # Service-specific settings
+      ec2:
+        instance_metadata_v2: true
+        detailed_monitoring: false
+      cloudwatch:
+        custom_namespace: "Unity/GeuseMaker"
+        
+    # Docker integration
+    docker:
+      enabled: true
+      compose_files:
+        - "docker-compose.yml"
+        - "docker-compose.gpu-optimized.yml"
+      registry_auth: false
+      build_args: {}
+      
+    # Git integration
+    git:
+      enabled: true
+      auto_tag_deployments: true
+      tag_format: "unity-{version}-{timestamp}"
+      commit_deployment_state: false
+      
+    # External services
+    external:
+      openai:
+        enabled: false
+        base_url: "https://api.openai.com/v1"
+        timeout: 30
+      webhook:
+        enabled: false
+        timeout: 10
+        retry_attempts: 3
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+# Environment-specific configurations can override these defaults by placing
+# files in the following locations:
+# - config/unity.development.yml
+# - config/unity.staging.yml  
+# - config/unity.production.yml
+#
+# The Unity configuration service will automatically load the appropriate
+# environment-specific overrides based on the ENVIRONMENT variable.
+# =============================================================================

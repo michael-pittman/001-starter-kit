@@ -1,0 +1,27 @@
+project:
+  name: "GeuseMaker Unity"
+  type: "bash-service-architecture"
+  description: "Complete Unity deployment system"
+
+agents:
+  default_model: "claude-sonnet-4-20250514"
+  max_tokens: 4000
+  temperature: 0.1
+
+validation:
+  code_quality:
+    - shellcheck
+    - unity_naming_conventions
+    - unity_interface_compliance
+    
+  integration:
+    - service_registry_integration
+    - event_bus_integration
+    - configuration_integration
+    - monitoring_integration
+
+status: "implementation_complete"
+next_steps:
+  - "Run: ./scripts/unity-cli.sh init"
+  - "Test: ./scripts/unity-cli.sh deploy test-stack"
+  - "Monitor: ./scripts/unity-cli.sh monitor"

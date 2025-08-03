@@ -1,0 +1,13 @@
+{
+  "id": "event_1754200865751199000_22811",
+  "timestamp": 1754200865,
+  "type": "SERVICE_INITIALIZED",
+  "source": "test",
+  "data": {},
+  "metadata": {
+    "priority": "medium",
+    "correlation_id": "",
+    "version": "2.0",
+    "sync_mode": false
+  }
+}

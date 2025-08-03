@@ -1,0 +1,13 @@
+{
+  "id": "event_1754200865893295000_30442",
+  "timestamp": 1754200865,
+  "type": "ERROR",
+  "source": "test-context",
+  "data": 30:Test error message},
+  "metadata": {
+    "priority": "medium",
+    "correlation_id": "",
+    "version": "2.0",
+    "sync_mode": false
+  }
+}

@@ -1,0 +1,5 @@
+# Default routing rules
+deployment.*|sync=true
+aws.cost.*|priority=high
+monitor.alert.*|priority=high
+.*\.failed|priority=high,dead_letter_on_fail=true

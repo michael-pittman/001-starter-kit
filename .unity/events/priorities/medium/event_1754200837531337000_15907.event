@@ -1,0 +1,13 @@
+{
+  "id": "event_1754200837531337000_15907",
+  "timestamp": 1754200837,
+  "type": "UNITY_CORE_INITIALIZED",
+  "source": "core",
+  "data": Unity Core System v1.0},
+  "metadata": {
+    "priority": "medium",
+    "correlation_id": "",
+    "version": "2.0",
+    "sync_mode": false
+  }
+}

@@ -1,0 +1,49 @@
+# Unity Event Types - Enhanced Schema v2.0
+# Format: EVENT_TYPE|CATEGORY|DESCRIPTION
+
+# Deployment Events
+deployment.started|deployment|Deployment process initiated
+deployment.completed|deployment|Deployment successfully completed
+deployment.failed|deployment|Deployment failed with error
+deployment.rollback_started|deployment|Rollback process initiated
+deployment.rollback_completed|deployment|Rollback successfully completed
+deployment.rollback_failed|deployment|Rollback failed
+
+# AWS Service Events
+aws.resource.created|aws|AWS resource created
+aws.resource.deleted|aws|AWS resource deleted
+aws.resource.modified|aws|AWS resource modified
+aws.ec2.launched|aws|EC2 instance launched
+aws.ec2.terminated|aws|EC2 instance terminated
+aws.vpc.created|aws|VPC created
+aws.alb.created|aws|Application Load Balancer created
+aws.cost.threshold_exceeded|aws|Cost threshold exceeded
+
+# Docker Service Events
+docker.container.started|docker|Container started
+docker.container.stopped|docker|Container stopped
+docker.container.failed|docker|Container failed to start
+docker.image.pulled|docker|Docker image pulled
+docker.image.built|docker|Docker image built
+docker.compose.up|docker|Docker Compose services started
+docker.compose.down|docker|Docker Compose services stopped
+
+# Configuration Events
+config.loaded|config|Configuration loaded
+config.updated|config|Configuration updated
+config.validated|config|Configuration validated
+config.error|config|Configuration error occurred
+
+# Monitoring Events
+monitor.health.check|monitor|Health check performed
+monitor.alert.triggered|monitor|Alert triggered
+monitor.metric.collected|monitor|Metric collected
+monitor.threshold.exceeded|monitor|Threshold exceeded
+monitor.service.healthy|monitor|Service is healthy
+monitor.service.unhealthy|monitor|Service is unhealthy
+
+# System Events
+system.startup|system|System startup
+system.shutdown|system|System shutdown
+system.error|system|System error occurred
+system.warning|system|System warning

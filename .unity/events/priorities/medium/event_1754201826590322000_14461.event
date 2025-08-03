@@ -1,0 +1,13 @@
+{
+  "id": "event_1754201826590322000_14461",
+  "timestamp": 1754201826,
+  "type": "test.validation",
+  "source": "integration-test",
+  "data": test-data},
+  "metadata": {
+    "priority": "medium",
+    "correlation_id": "",
+    "version": "2.0",
+    "sync_mode": false
+  }
+}

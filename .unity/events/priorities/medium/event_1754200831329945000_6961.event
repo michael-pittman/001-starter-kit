@@ -1,0 +1,13 @@
+{
+  "id": "event_1754200831329945000_6961",
+  "timestamp": 1754200831,
+  "type": "test.event",
+  "source": "test-script",
+  "data": {"message":"Test event"}},
+  "metadata": {
+    "priority": "medium",
+    "correlation_id": "",
+    "version": "2.0",
+    "sync_mode": false
+  }
+}
