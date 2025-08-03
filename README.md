@@ -1,4 +1,4 @@
-# GeuseMaker - AI Stack on AWS
+# [GeuseMaker](https://geuse.io) - AI Stack on AWS
 
 ## 🚀 Unity Deployment System
 
@@ -699,4 +699,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Built with ❤️ for reliable, scalable AWS infrastructure deployment.**
+**Built with ❤️ for reliable, scalable AWS infrastructure deployment by [Geuse](https://geuse.io).**
