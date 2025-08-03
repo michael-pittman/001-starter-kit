@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**GeuseMaker** is an enterprise-ready AWS deployment system with AI infrastructure capabilities:
+**GeuseMaker** is an enterprise-ready AWS deployment system with AI infrastructure capabilities that has **fully migrated to Unity**, an event-driven service architecture:
 - **70% cost savings** via intelligent spot instance optimization
 - **Multi-architecture support** (Intel x86_64 and ARM64 Graviton2)
 - **AI Stack**: n8n workflows + Ollama (DeepSeek-R1:8B, Qwen2.5-VL:7B) + Qdrant + Crawl4AI
@@ -13,239 +13,191 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Essential Commands
 
-### Unity Deployment Commands (Primary Interface)
+### Primary Deployment Interface
 ```bash
-# Unity CLI - All operations through single interface
-./unity deploy spot dev-stack                  # Deploy spot instance (70% cost savings)
-./unity deploy alb prod-stack                  # Deploy with Application Load Balancer
-./unity deploy full prod-stack                 # Deploy complete stack (VPC+EC2+ALB+CDN)
-./unity destroy dev-stack                      # Destroy all resources
-./unity status dev-stack                       # Check deployment status
-./unity monitor dev-stack                      # Real-time monitoring
+# Main entry point - ./unity
+./unity deploy spot my-stack           # Deploy spot instance (70% cost savings)
+./unity deploy alb prod-stack          # Deploy with Application Load Balancer
+./unity deploy cdn prod-stack          # Deploy with CloudFront CDN
+./unity deploy full prod-stack         # Deploy complete stack (VPC+EC2+ALB+CDN)
+./unity destroy my-stack               # Destroy all resources
 
-# Direct deployment wrapper (alternative)
-./deploy.sh spot dev-stack                     # Deploy spot instance
-./deploy.sh alb prod-stack                     # Deploy with ALB
-./deploy.sh full prod-stack                    # Deploy complete stack
-./deploy.sh destroy dev-stack                  # Destroy resources
+# Alternative entry point - deploy.sh (same functionality)
+./deploy.sh spot dev-stack             # Deploy spot instance
+./deploy.sh destroy dev-stack          # Destroy resources
+
+# Backward compatibility - make wrapper
+./make deploy-spot                     # Redirects to: ./unity deploy spot
+./make deploy-alb                      # Redirects to: ./unity deploy alb
 ```
 
-### Unity Development Commands
+### Service and Configuration Management
 ```bash
-# Service management
-./unity service list                           # List all Unity services
-./unity service status aws                     # Check AWS service status
-./unity service restart docker                 # Restart Docker service
+# Service operations
+./unity service list                   # List all Unity services
+./unity service status aws             # Check specific service status
+./unity service health docker          # Check service health
+./unity service restart monitor        # Restart a service
 
-# Configuration management
-./unity config show                            # Display current configuration
-./unity config set deployment.region us-west-2 # Update configuration
-./unity config validate                        # Validate configuration
+# Configuration operations
+./unity config show                    # Display all configuration
+./unity config get aws.region          # Get specific value
+./unity config set aws.region us-west-2 # Set configuration value
+./unity config validate                # Validate configuration
 
-# Plugin management
-./unity plugin list                            # List available plugins
-./unity plugin enable cost-analyzer            # Enable a plugin
-./unity plugin configure spot-optimizer        # Configure plugin settings
+# Monitoring and logs
+./unity status my-stack                # Check deployment status
+./unity monitor my-stack               # Real-time monitoring
+./unity logs my-stack                  # View deployment logs
 ```
 
 ### Testing Commands
 ```bash
-# Unity-specific tests
-./tests/test-unity-performance.sh              # Unity performance benchmarks
-./tests/test-unity-events-enhanced.sh          # Unity event system tests
-./tests/unity/integration/test-unity-service-integration.sh  # Service integration
-./tests/unity/unit/test-unity-aws-service.sh   # AWS service unit tests
+# Primary test suites
+./tests/unity/test-unity-implementation.sh      # Implementation validation
+./tests/unity/production-validation.sh          # Production readiness check
+./tests/unity/test-unity-complete-system.sh     # Full system test
 
-# Comprehensive testing
-./tests/unity/test-unity-complete-system.sh    # Full system validation
+# Specific component tests
+./tests/unity/unit/test-unity-aws-service.sh    # AWS service tests
+./tests/unity/integration/test-unity-service-integration.sh  # Integration tests
+./tests/unity/performance/test-unity-performance-benchmarks.sh  # Performance tests
+```
+
+### Migration and Legacy Support
+```bash
+# Deprecate legacy code (one-time operation)
+./scripts/deprecate-legacy.sh          # Archives all legacy code to deprecated/
+
+# Migration utilities
+./scripts/migrate-to-unity/migrate-all.sh  # Migrate legacy modules to Unity
+./scripts/port-makefile-to-unity.sh       # Port Makefile targets (already completed)
 ```
 
 ## High-Level Architecture
 
-### Unity System Architecture
+### Unity Event-Driven Architecture
 
-GeuseMaker uses the Unity event-driven service architecture as its sole deployment system. All operations are orchestrated through Unity services that communicate via events.
+GeuseMaker uses Unity as its **sole deployment system**. All operations follow an event-driven pattern where services communicate asynchronously through a central event bus.
 
-**Key Architectural Principles**:
-- **Event-Driven**: All operations trigger and respond to events
-- **Service Isolation**: Each component is a registered Unity service
-- **Plugin Extensibility**: Custom functionality through Unity plugins
-- **Reactive Patterns**: Asynchronous, non-blocking operations
-- **Single Source of Truth**: Unity configuration drives all behavior
+**Core Architecture Principles**:
+1. **Event-Driven Communication**: Services emit and react to events, enabling loose coupling
+2. **Service Isolation**: Each service runs independently with clear interfaces
+3. **Plugin Extensibility**: Add functionality without modifying core services
+4. **Reactive Patterns**: Non-blocking, asynchronous operations throughout
+5. **Single Configuration Source**: `config/unity.yml` drives all behavior
 
-### Unity Architecture Components
+### Service Architecture
 
 ```
 lib/unity/
-├── core/
-│   ├── unity-core.sh         # Service registry, lifecycle management
-│   ├── unity-events.sh       # Event bus implementation
-│   ├── unity-plugins.sh      # Plugin framework
-│   ├── service-dependency-resolver.sh  # Dependency resolution
-│   └── service-recovery.sh   # Service recovery mechanisms
-├── services/
-│   ├── aws-service.sh        # AWS operations (EC2, VPC, ALB, etc.)
-│   ├── docker-service.sh     # Container management
-│   ├── config-service.sh     # Configuration management
-│   ├── monitor-service.sh    # Monitoring and alerting
-│   └── unity-deployment-service.sh  # Deployment orchestration
-├── events/
-│   ├── event-bus.sh          # Event dispatching
-│   ├── event-persistence.sh  # Event storage
-│   ├── reactive-patterns.sh  # Reactive programming patterns
-│   └── rollback-manager.sh   # Rollback on failure
-├── plugins/
-│   ├── spot-optimizer/       # Spot instance optimization
-│   ├── cost-analyzer/        # Cost analysis and reporting
-│   ├── security-validator/   # Security compliance checks
-│   └── performance-tuner/    # Performance optimization
-└── templates/
-    └── service-template.sh   # Template for new services
+├── core/                             # Unity foundation
+│   ├── unity-core.sh                # Service registry, lifecycle management
+│   ├── unity-events.sh              # Event bus implementation
+│   ├── unity-plugins.sh             # Plugin framework
+│   └── unity-preflight.sh           # Pre-deployment validation
+├── services/                         # Unity services
+│   ├── unity-aws-service-complete.sh    # Complete AWS operations
+│   ├── unity-docker-service-complete.sh # Docker container management
+│   ├── unity-monitoring-complete.sh      # CloudWatch integration
+│   └── unity-deployment-service.sh      # Deployment orchestration
+└── events/                          # Event system
+    ├── event-bus.sh                 # Event routing
+    ├── event-persistence.sh         # Event storage
+    └── rollback-manager.sh          # Failure recovery
 ```
 
 ### Service Communication Pattern
 
-All Unity services follow a standard interface and communicate via events:
-
+All Unity services implement a standard interface:
 ```bash
-# Service Interface Contract
+# Required service functions
 init_<service>_service()      # Initialize service
-start_<service>_service()     # Start service
-stop_<service>_service()      # Stop service
-health_<service>_service()    # Health check
-config_<service>_service()    # Configuration management
+start_<service>_service()     # Start service operations
+stop_<service>_service()      # Stop service gracefully
+health_<service>_service()    # Return health status
+config_<service>_service()    # Manage configuration
 
-# Event Communication
+# Event communication
 unity_emit_event "EVENT_NAME" "source" "data"
 unity_on_event "EVENT_NAME" handler_function
 ```
 
-### Configuration Management
+### Deployment Event Flow
 
-Unity uses a unified configuration system with a single source of truth:
-
-**Primary Configuration** (`config/unity.yml`):
-```yaml
-unity:
-  deployment:
-    types: [spot, alb, cdn, full]
-    environments: [dev, staging, prod]
-    defaults:
-      instance_type: g4dn.xlarge
-      region: us-east-1
-  services:
-    # Service-specific configurations
-  plugins:
-    # Plugin configurations
+A typical deployment follows this event sequence:
+```
+DEPLOYMENT_REQUESTED → PREFLIGHT_CHECKS_STARTED → RESOURCES_VALIDATED →
+VPC_CREATION_STARTED → VPC_CREATED → EC2_LAUNCH_STARTED → EC2_LAUNCHED →
+HEALTH_CHECK_STARTED → HEALTH_CHECK_PASSED → DEPLOYMENT_COMPLETED
 ```
 
-**Configuration Sources** (in priority order):
-1. Command-line arguments (highest)
-2. Environment variables
-3. Unity configuration file
-4. AWS Parameter Store (for secrets)
-5. Service defaults (lowest)
+### Configuration Hierarchy
+
+Unity uses a unified configuration system (`config/unity.yml`) with priority ordering:
+1. **Command-line arguments** (highest priority)
+2. **Environment variables**
+3. **Unity configuration file**
+4. **AWS Parameter Store** (for secrets)
+5. **Service defaults** (lowest priority)
 
 ## Development Patterns
 
 ### Creating a New Unity Service
 
-1. Use the service template:
-```bash
-cp lib/unity/templates/service-template.sh lib/unity/services/my-service.sh
-```
+1. **Copy the template**:
+   ```bash
+   cp lib/unity/templates/service-template.sh lib/unity/services/my-service.sh
+   ```
 
-2. Implement the standard interface:
-```bash
-init_myservice_service() {
-    # Initialize service
-    unity_log "INFO" "Initializing my service..."
-    # ... initialization logic
-}
+2. **Implement required functions** with proper event emission:
+   ```bash
+   init_myservice_service() {
+       unity_log "INFO" "Initializing my service..."
+       unity_emit_event "SERVICE_INITIALIZING" "myservice" ""
+       # initialization logic
+       unity_emit_event "SERVICE_INITIALIZED" "myservice" ""
+   }
+   ```
 
-start_myservice_service() {
-    # Start service operations
-}
-
-# ... implement all interface methods
-```
-
-3. Register the service:
-```bash
-unity_register_service "myservice" "$SCRIPT_DIR/my-service.sh" "standard" "config,aws"
-```
+3. **Register with dependencies**:
+   ```bash
+   unity_register_service "myservice" "$SCRIPT_DIR/my-service.sh" "standard" "config,aws"
+   ```
 
 ### Event-Driven Development
 
-1. Emit events for significant actions:
+**Emit events** for all significant actions:
 ```bash
-unity_emit_event "DEPLOYMENT_STARTED" "myservice" "$deployment_id"
+unity_emit_event "RESOURCE_CREATED" "myservice" "resource_id:$id,type:vpc"
 ```
 
-2. React to events from other services:
+**React to events** from other services:
 ```bash
-handle_deployment_complete() {
-    local event=$1
-    local source=$2
-    local data=$3
-    # React to deployment completion
+handle_vpc_created() {
+    local event=$1 source=$2 data=$3
+    # React to VPC creation
 }
-unity_on_event "DEPLOYMENT_COMPLETED" handle_deployment_complete
+unity_on_event "VPC_CREATED" handle_vpc_created
 ```
 
 ### Testing Unity Components
 
-1. Unit test individual services:
+**Unit tests** for service methods:
 ```bash
-./tests/unity/unit/test-unity-myservice.sh
+source lib/unity/services/my-service.sh
+test_myservice_initialization() {
+    init_myservice_service
+    assert_equals "initialized" "$(get_service_status myservice)"
+}
 ```
 
-2. Integration test service interactions:
+**Integration tests** for service interactions:
 ```bash
-./tests/unity/integration/test-unity-service-integration.sh
-```
-
-3. Performance benchmarks:
-```bash
-./tests/unity/performance/test-unity-performance-benchmarks.sh
-```
-
-## Deployment Workflows
-
-### Standard Deployment Flow
-
-1. **Pre-flight Checks**:
-   ```bash
-   ./unity deploy spot my-stack --preflight-only
-   # Validates: AWS credentials, quotas, permissions, resources
-   ```
-
-2. **Deployment Execution**:
-   ```bash
-   ./unity deploy spot my-stack
-   # Triggers: DEPLOYMENT_REQUESTED → SERVICE_INITIALIZED → RESOURCES_CREATED → DEPLOYMENT_COMPLETED
-   ```
-
-3. **Monitoring**:
-   ```bash
-   ./unity monitor my-stack
-   # Real-time: Service health, metrics, logs, events
-   ```
-
-### Event Flow Example
-
-```
-User: ./unity deploy spot my-stack
-  ↓
-CLI → DEPLOYMENT_REQUESTED → Deployment Service
-  ↓
-Deployment Service → VALIDATE_RESOURCES → AWS Service
-  ↓
-AWS Service → VPC_CREATED, EC2_LAUNCHED → Monitor Service
-  ↓
-Monitor Service → HEALTH_CHECK_PASSED → Deployment Service
-  ↓
-Deployment Service → DEPLOYMENT_COMPLETED → User notification
+test_deployment_flow() {
+    unity_emit_event "DEPLOYMENT_REQUESTED" "test" "spot:test-stack"
+    wait_for_event "DEPLOYMENT_COMPLETED" 300  # 5 minute timeout
+}
 ```
 
 ## Common Troubleshooting
@@ -254,188 +206,120 @@ Deployment Service → DEPLOYMENT_COMPLETED → User notification
 
 | Issue | Solution |
 |-------|----------|
-| Service not initializing | Check dependencies in unity_register_service() call |
-| Events not firing | Verify event handler registration with unity_on_event() |
-| Service discovery fails | Ensure service is registered before initialization |
-| Dependency cycle | Review service dependencies in config/unity.yml |
-| Performance degradation | Check event handler efficiency, avoid blocking operations |
+| Service won't initialize | Check service dependencies in registration call |
+| Events not being received | Verify handler registration with `unity_on_event()` |
+| Deployment hangs | Check event flow in `.unity/events/` directory |
+| Service health failing | Review health check implementation in service |
+| Configuration not loading | Check priority order and file syntax |
 
-### Development Tips
+### Debugging Techniques
 
-1. **Service Isolation**: Each service should be independently testable
-2. **Event Documentation**: Document all events a service emits/consumes
-3. **Error Recovery**: Implement proper error handling in event handlers
-4. **Async Operations**: Use background processes for long-running tasks
-5. **State Management**: Use Unity's state directory (.unity/state/)
+1. **Enable debug logging**:
+   ```bash
+   UNITY_LOG_LEVEL=DEBUG ./unity deploy spot test-stack
+   ```
 
-## Testing Strategy
+2. **Monitor event flow**:
+   ```bash
+   tail -f .unity/events/event.log
+   ```
 
-### Unity Testing Hierarchy
-
-1. **Unit Tests** (`tests/unity/unit/`):
-   - Test individual service methods
-   - Mock dependencies and events
-   - Fast, isolated execution
-
-2. **Integration Tests** (`tests/unity/integration/`):
-   - Test service interactions
-   - Verify event flow
-   - Real service dependencies
-
-3. **System Tests** (`tests/unity/`):
-   - End-to-end scenarios
-   - Full Unity system validation
-   - Performance benchmarks
-
-### Test Execution Patterns
-
-```bash
-# Run specific test categories
-./tests/unity/test-unity-basic.sh              # Basic functionality
-./tests/unity/test-unity-critical-fixes.sh     # Critical bug fixes
-./tests/unity/test-unity-system-validation.sh  # Full validation
-
-# Run with debugging
-UNITY_LOG_LEVEL=DEBUG ./tests/unity/test-unity-basic.sh
-```
+3. **Check service status**:
+   ```bash
+   ./unity service status
+   ```
 
 ## Performance Considerations
 
-### Unity Optimization
+### Unity Optimizations
 
-1. **Event Bus Performance**:
-   - Events are processed asynchronously
-   - Handlers execute in subshells to prevent blocking
-   - Event persistence can be disabled for performance
+1. **Event Processing**: Asynchronous, non-blocking event handlers
+2. **Service Caching**: AWS API responses cached for 1 hour
+3. **Parallel Operations**: Services start concurrently when no dependencies exist
+4. **Resource Pooling**: Reuse AWS clients and connections
 
-2. **Service Caching**:
-   - AWS API responses cached in .unity/cache/
-   - Configuration cached per session
-   - Service status cached to reduce lookups
+### Performance Targets
 
-3. **Parallel Operations**:
-   - Services can start in parallel if no dependencies
-   - Event handlers execute concurrently
-   - Background monitoring processes
+- Unity initialization: < 500ms
+- Service startup: < 2 seconds each
+- Event latency: < 100ms average
+- Full deployment: < 3 minutes
 
-## Security Considerations
+## Security Model
 
-### Unity Security Model
+1. **Service Isolation**: Each service runs in separate process
+2. **Event Validation**: All events validated before processing
+3. **Secrets Management**: AWS Parameter Store integration
+4. **Audit Logging**: Complete event trail in `.unity/events/`
 
-1. **Service Isolation**: Services run in separate processes
-2. **Event Validation**: Events are validated before processing
-3. **Configuration Security**: Sensitive data in AWS Parameter Store
-4. **Audit Trail**: All events logged to .unity/events/
+## Implementation Status
 
-## Implementation Priority
+### Completed Features ✅
 
-### Immediate Actions (Active Development)
+**Phase 1 & 2**: Foundation and Service Enhancement (100% complete)
+- Unity CLI with full deployment capabilities
+- Complete AWS service (VPC, EC2, ALB, CloudFront, EFS)
+- Docker service with AI stack support
+- Monitoring service with CloudWatch integration
+- Pre-flight validation system
+- Migration tools for legacy code
 
-1. **Unity CLI Implementation** (`./unity`):
-   - Primary interface for all operations
-   - Replaces legacy Makefile targets
-   - Event-driven command execution
+**Phase 3**: Legacy Removal (Ready to execute)
+- Deprecation script created (`./scripts/deprecate-legacy.sh`)
+- Makefile compatibility wrapper (`./make`)
+- All references updated to use Unity
 
-2. **Deployment Wrapper** (`./deploy.sh`):
-   - Unity-based deployment orchestration
-   - Backward-compatible command structure
-   - Pre-flight validation
+### Current State
 
-3. **Service Enhancements**:
-   - AWS Service: Full VPC, EC2, ALB, CloudFront support
-   - Docker Service: Complete container lifecycle
-   - Config Service: Unified configuration management
-   - Monitor Service: Real-time metrics and alerting
+Unity is **production-ready** and serves as the sole deployment system. The legacy Makefile and modular scripts are archived but not removed. Run `./scripts/deprecate-legacy.sh` to complete the migration.
 
-### Migration Timeline
+## Critical Implementation Details
 
-**Week 1-2**: Foundation
-- Unity CLI implementation
-- Deployment wrapper creation
-- Pre-flight checks
-- Migration tools
+### AWS Service Implementation
 
-**Week 3-8**: Service Migration
-- Port all AWS operations to Unity
-- Enhance service capabilities
-- Remove legacy dependencies
-- Comprehensive testing
+The enhanced AWS service (`lib/unity/services/unity-aws-service-complete.sh`) provides:
+- **VPC Operations**: Single/multi-AZ with automatic CIDR allocation
+- **EC2 Management**: Spot optimization with 70% cost savings
+- **Load Balancing**: ALB with health checks and target groups
+- **CDN**: CloudFront distribution with origin configuration
+- **Cost Optimization**: Real-time tracking and recommendations
 
-**Week 9-12**: Advanced Features
-- Unity UI dashboard
-- Performance optimization
-- Production validation
-- Documentation completion
+### Docker Service Implementation
 
-## Unity Plugin Development
+The enhanced Docker service (`lib/unity/services/unity-docker-service-complete.sh`) provides:
+- **Compose Generation**: Environment-specific configurations
+- **AI Stack Support**: Ollama with GPU, n8n, Qdrant, PostgreSQL
+- **Health Monitoring**: Container health checks with auto-recovery
+- **Log Management**: Centralized logging with rotation
 
-### Creating Custom Plugins
+### Monitoring Service Implementation
 
-1. **Plugin Structure**:
-   ```bash
-   lib/unity/plugins/my-plugin/
-   ├── plugin.sh           # Main plugin file
-   ├── config.yml          # Plugin configuration
-   └── README.md          # Plugin documentation
-   ```
-
-2. **Plugin Interface**:
-   ```bash
-   # Required functions
-   init_plugin()           # Initialize plugin
-   handle_event()          # Process events
-   get_config()           # Return configuration
-   cleanup()              # Cleanup resources
-   ```
-
-3. **Registration**:
-   ```yaml
-   # In config/unity.yml
-   plugins:
-     my-plugin:
-       enabled: true
-       priority: 100
-       settings:
-         # Plugin-specific settings
-   ```
+The monitoring service (`lib/unity/services/unity-monitoring-complete.sh`) provides:
+- **CloudWatch Integration**: Dashboards and custom metrics
+- **Real-time Alerts**: Threshold-based alerting
+- **Performance Metrics**: CPU, memory, disk, network tracking
+- **Cost Monitoring**: Hourly cost tracking with alerts
 
 ## Claude Code Agents
 
-Use specialized agents for complex tasks related to Unity and deployment:
+Use specialized agents for complex Unity tasks:
 
-### Unity-Specific Agents
-- **unity-deployment-architect**: Design and implement unified deployment systems, consolidate fragmented functionality, architect plugin-based frameworks
-- **unity-test-framework-architect**: Create comprehensive testing infrastructure including unit tests, integration tests, and performance benchmarks
+### Unity Architecture Agents
+- **unity-deployment-orchestrator**: Deployment flows and rollback strategies
+- **unity-event-system-architect**: Event bus design and patterns
+- **unity-service-architect**: Service implementation patterns
+- **unity-test-framework-architect**: Testing infrastructure design
 
 ### AWS and Infrastructure Agents
-- **ec2-provisioning-specialist**: Handle EC2 operations, spot instance optimization, and capacity issues
-- **aws-deployment-debugger**: Debug deployment failures and AWS-specific issues
-- **spot-instance-optimizer**: Optimize spot instance selection and cost savings
-- **aws-cost-optimizer**: Analyze and optimize AWS costs
+- **aws-deployment-debugger**: Debug deployment failures
+- **ec2-provisioning-specialist**: EC2 and spot instance issues
+- **spot-instance-optimizer**: Cost optimization strategies
+- **aws-cost-optimizer**: Cost analysis and savings
 
-### Service Architecture Agents
-- **config-unification-specialist**: Consolidate and unify configuration systems
-- **docker-service-consolidator**: Unify Docker operations and container management
-- **event-system-architect**: Design event-driven architectures and reactive patterns
-- **monitoring-integration-specialist**: Unify monitoring and observability systems
-- **deployment-orchestration-specialist**: Design event-driven deployment orchestration
+## Important Notes
 
-### Quality and Performance Agents
-- **security-validator**: Perform pre-production security validation
-- **test-runner-specialist**: Orchestrate comprehensive test suites
-- **bash-script-validator**: Validate bash scripts for compatibility and best practices
-- **performance-optimization-specialist**: Tune system performance and optimize operations
-- **plugin-framework-architect**: Design extensible plugin systems
-
-### Usage Example
-When facing complex architectural decisions or implementation challenges:
-```
-"I need to design a comprehensive test framework for the Unity system"
-→ Use unity-test-framework-architect agent
-
-"Help me optimize our spot instance costs"
-→ Use spot-instance-optimizer agent
-
-"Design the event flow for deployment orchestration"
-→ Use deployment-orchestration-specialist agent
-```
+1. **Unity is the ONLY deployment system** - All legacy scripts are deprecated
+2. **Event-driven patterns are mandatory** - All operations must emit events
+3. **Services must be isolated** - No direct service-to-service calls
+4. **Configuration is centralized** - Use `config/unity.yml` as source of truth
+5. **Legacy code is archived** in `archive/unity-cleanup-20250803_024204/`

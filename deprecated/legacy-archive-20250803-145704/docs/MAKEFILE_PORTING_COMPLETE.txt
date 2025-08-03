@@ -1,0 +1,22 @@
+Makefile to Unity Porting Complete!
+===================================
+
+Date: Sun Aug  3 14:39:09 EDT 2025
+
+What was done:
+1. Created Unity make compatibility script: ./make
+2. Created migration guide: docs/unity/make-to-unity-migration.md
+3. Updated README with Unity information
+4. Created Unity aliases: scripts/unity-aliases.sh
+
+How to use:
+- Old way: make deploy-spot (still works, redirects to Unity)
+- New way: ./unity deploy spot my-stack (recommended)
+
+All Makefile functionality is now available through Unity CLI.
+
+For help:
+- ./make help (shows translation table)
+- ./unity help (full Unity documentation)
+
+Unity is now the primary deployment interface for GeuseMaker!

@@ -1,0 +1,10 @@
+#!/bin/bash
+# Unity CLI - Primary interface for all GeuseMaker operations
+# This is the main entry point that delegates to the full Unity CLI implementation
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Delegate to the full Unity CLI implementation
+exec "$SCRIPT_DIR/scripts/unity-cli.sh" "$@"

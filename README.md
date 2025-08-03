@@ -1,3 +1,33 @@
+# GeuseMaker - AI Stack on AWS
+
+## 🚀 Unity Deployment System
+
+GeuseMaker now uses the Unity event-driven deployment system for all operations.
+
+### Quick Start
+
+```bash
+# Deploy with 70% cost savings
+./unity deploy spot my-ai-stack
+
+# Deploy with load balancer
+./unity deploy alb prod-stack
+
+# Full deployment
+./unity deploy full prod-stack
+```
+
+### Legacy Makefile Support
+
+For backward compatibility, you can still use make commands:
+```bash
+make deploy-spot  # Redirects to: ./unity deploy spot
+```
+
+See the [Unity Documentation](docs/unity/) for complete details.
+
+---
+
 # 🚀 GeuseMaker - AI Stack on AWS in Minutes
 
 **Deploy a complete AI infrastructure (n8n + Ollama + Qdrant + Crawl4AI) on AWS with one command.**
